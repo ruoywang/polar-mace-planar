@@ -1,0 +1,94 @@
+# ---------------------------------------------------------
+# General Experiment Settings
+# ---------------------------------------------------------
+name: "center1d_c10_400dev"
+model: "PolarMACE"
+device: "cuda"
+default_dtype: "float64"
+seed: 123
+
+# ---------------------------------------------------------
+# Data Paths & Splitting
+# ---------------------------------------------------------
+train_file: "./train.xyz"
+test_file: "./test.xyz"
+valid_file: "./val.xyz"
+
+# ---------------------------------------------------------
+# Data Keys
+# ---------------------------------------------------------
+energy_key: "energy"
+forces_key: "forces"
+charges_key: "REF_charges"
+atomic_dipole_key: "atomic_dipole"
+potential_key: "potential_diff"
+total_charge_key: "total_charge"
+fermi_level_key: "Fermi"
+total_spin_key: "total_spin"
+sample_id_key: "sample_id"
+
+# ---------------------------------------------------------
+# Model Architecture
+# ---------------------------------------------------------
+hidden_irreps: "64x0e + 64x1o + 64x2e"
+r_max: 5.0
+E0s: "average"
+config_type_weights: '{"NiN":1.0}'
+atomic_multipoles_max_l: 1
+atomic_multipoles_smearing_width: 0.5
+atomic_density_sigmas: "[0.5]"
+atomic_valence_electrons: "[1.0, 4.0, 5.0, 6.0, 10.0]"  # atomic_numbers order: H, O, Au
+field_feature_max_l: 1
+num_recursion_steps: 1
+
+# ---------------------------------------------------------
+# Optimization & Training
+# ---------------------------------------------------------
+loss: "energy_forces_electrostatics"
+batch_size: 1
+valid_batch_size: 1
+max_num_epochs: 400
+restart_latest: True
+amsgrad: True
+ema: True
+ema_decay: 0.99
+swa: False
+lr: 0.01
+
+# ---------------------------------------------------------
+# Loss Weights
+# ---------------------------------------------------------
+energy_weight: 1.0
+forces_weight: 100.0
+atomic_dipole_weight: 0.0
+charges_weight: 0.0
+potential_weight: 0.00001
+fermi_level_weight: 1.0
+density_3d_weight: 0.0
+#density_3d_file: "../../data/density3d_net_grid_manifest.json"
+density_3d_sigma: "[0.25, 0.5, 1.0]"
+#density_3d_samples: 1024
+#density_3d_seed: 20260512
+potential_1d_profile_weight: 0.0
+#potential_1d_profile_file: "../../data/potential1d_potcar_cache.npz"
+potential_1d_profile_align: "upper"
+solvent_center_weight: 0.0
+#solvent_center_dipole_file: "../../data/potential1d_potcar_cache.npz"
+
+element_charge_baseline: False
+element_charge_residual_scale: None
+
+# ---------------------------------------------------------
+# Implicit Solvent Charge Layer
+# ---------------------------------------------------------
+solvent_sigma_g: 0.85
+solvent_density_threshold: 0.15
+solvent_window_inward: 4.0
+solvent_window_outward: 4.0
+solvent_potential_axis: 2
+solvent_potential_sign: -1.0
+
+potential_axis: 2
+potential_sign: -1
+
+distributed: true

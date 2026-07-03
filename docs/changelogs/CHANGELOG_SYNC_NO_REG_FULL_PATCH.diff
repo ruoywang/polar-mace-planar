@@ -1,0 +1,109 @@
+diff --git a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py
+--- a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py
++++ b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py
+@@ -412,10 +412,19 @@ def _fit_train_solvent_center_mean_shift(
+     elif use_partition_shift:
+         fitted = _fit_partition_solvent_center_mean_shift(args, head_configs, z_table)
+     else:
++        learn_center = float(getattr(args, "solvent_center_weight", 0.0)) > 1.0e-12
++        if learn_center:
++            raise ValueError(
++                "solvent_center_weight > 0 requires density_3d_weight or "
++                "charges_weight to fit solvent_center_mean_shift."
++            )
++        configured_shift = float(getattr(args, "solvent_center_mean_shift", 0.0))
+         logging.info(
+-            "No density_3d_weight or charges_weight enabled; using solvent_center_mean_shift=0.000000 Å."
++            "No density_3d_weight or charges_weight enabled; using configured "
++            "solvent_center_mean_shift=%.6f Å.",
++            configured_shift,
+         )
+-        return 0.0
++        return configured_shift
+     if fitted is None:
+         logging.warning(
+             "Could not fit solvent_center_mean_shift from training split; using configured value %.6f Å.",
+diff --git a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py
+--- a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py
++++ b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py
+@@ -462,7 +462,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
+         "--solvent_center_mean_shift",
+         help="fixed mean shift (Angstrom) added to z_e before any learned solvent-center residual",
+         type=float,
+-        default=0.0,
++        default=0.7,
+     )
+     parser.add_argument(
+         "--scaling",
+diff --git a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py
+--- a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py
++++ b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py
+@@ -644,6 +644,7 @@ class PolarMACE(torch.nn.Module):
+         fermi_level_baseline: float = 0.0,
+         atomic_valence_electrons: Optional[List[float]] = None,
+         potential_1d_profile_file: Optional[str] = None,
++        learn_solvent_center_residual: bool = True,
+         **kwargs,
+     ):
+         if not GRAPH_LONGRANGE_AVAILABLE:
+@@ -750,6 +751,7 @@ class PolarMACE(torch.nn.Module):
+         self.fermi_residual_hidden_dim = 16
+         self.solvent_residual_max_abs_shift = 1.5
+         self.solvent_residual_init_shift = 0.0
++        self.learn_solvent_center_residual = bool(learn_solvent_center_residual)
+         explicit_valence = None
+         if atomic_valence_electrons is not None:
+             explicit_valence = torch.tensor(
+@@ -800,9 +802,6 @@ class PolarMACE(torch.nn.Module):
+             )
+             for _ in range(num_interactions)
+         )
+-        for source_map in self.lr_source_maps:
+-            for param in source_map.linear.parameters():
+-                torch.nn.init.zeros_(param)
+ 
+         # Field-dependent components
+         radial_source_irreps = (
+@@ -932,12 +931,6 @@ class PolarMACE(torch.nn.Module):
+                 )
+             )
+-        for update_map in self.field_dependent_charges_maps:
+-            readout = getattr(update_map, "readout", None)
+-            final_linear = getattr(readout, "linear_2", None)
+-            if final_linear is not None:
+-                for param in final_linear.parameters():
+-                    torch.nn.init.zeros_(param)
+ 
+         # Post-SCF readout
+         self.add_local_electron_energy = add_local_electron_energy
+@@ -1701,10 +1694,13 @@ class PolarMACE(torch.nn.Module):
+             [graph_feats_global, graph_feats_if, solvent_scalar_inputs], dim=-1
+         )
+         solvent_raw_shift = self.solvent_center_residual(solvent_head_inputs).view(-1)
+-        solvent_center_residual = (
+-            self.solvent_residual_max_abs_shift
+-            * torch.tanh(solvent_raw_shift)
+-        )
++        if self.learn_solvent_center_residual:
++            solvent_center_residual = (
++                self.solvent_residual_max_abs_shift
++                * torch.tanh(solvent_raw_shift)
++            )
++        else:
++            solvent_center_residual = solvent_raw_shift * 0.0
+         solv_center = (
+             z_e50
+             + z_e50.new_full(z_e50.shape, float(self.solvent_center_mean_shift))
+diff --git a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py
+--- a/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py
++++ b/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py
+@@ -338,6 +338,9 @@ def configure_model(args, train_loader, atomic_energies_dict, model_config):
+             fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
+             atomic_valence_electrons=atomic_valence_electrons,
+             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
++            learn_solvent_center_residual=(
++                float(getattr(args, "solvent_center_weight", 0.0)) > 1.0e-12
++            ),
+         )
+     if args.model == "FoundationMACE":
+         return modules.ScaleShiftMACE(**model_config_foundation)

@@ -1,0 +1,11 @@
+--- /tmp/arg_parser_before_primary_metric_cleanup.py	2026-06-11 18:03:31.159861151 -0500
++++ ../9-final/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py	2026-06-11 18:03:38.000000000 -0500
+@@ -1220,7 +1220,7 @@
+         "--primary_valid_metric",
+         help="Primary validation metric used for checkpoint selection and patience",
+         type=str,
+-        choices=["loss", "rmse_potential", "rmse_solvent_center"],
++        choices=["loss"],
+         default="loss",
+     )
+     parser.add_argument(

@@ -1,0 +1,357 @@
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py	2026-06-11 17:40:32.354586125 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/cli/run_train.py	2026-06-11 17:40:48.772696874 -0500
+@@ -429,6 +429,40 @@
+     return fitted
+ 
+ 
++def _fit_train_fermi_level_baseline(args, head_configs) -> float:
++    if args.model != "PolarMACE":
++        return 0.0
++    if float(getattr(args, "fermi_level_weight", 0.0)) <= 1.0e-12:
++        logging.info("No fermi_level_weight enabled; using fermi_level_baseline=0.000000 eV.")
++        return 0.0
++    values: List[float] = []
++    for head_config in head_configs:
++        collections = getattr(head_config, "collections", None)
++        if collections is None:
++            continue
++        for config in collections.train:
++            fermi_level = config.properties.get("fermi_level", None)
++            potential = config.properties.get("potential", None)
++            if fermi_level is None or potential is None:
++                continue
++            fermi_value = float(np.asarray(fermi_level, dtype=np.float64).reshape(-1)[0])
++            potential_value = float(np.asarray(potential, dtype=np.float64).reshape(-1)[0])
++            values.append(fermi_value + potential_value)
++    if not values:
++        raise ValueError(
++            "fermi_level_weight > 0 requires train configs with fermi_level and potential targets"
++        )
++    baseline = float(sum(values) / len(values))
++    variance = sum((x - baseline) * (x - baseline) for x in values) / len(values)
++    logging.info(
++        "Fitted train Fermi-level baseline: %.6f eV from %d configs (std=%.6f eV)",
++        baseline,
++        len(values),
++        variance**0.5,
++    )
++    return baseline
++
++
+ def main() -> None:
+     """
+     This script runs the training/fine tuning for mace
+@@ -1205,6 +1239,7 @@
+     args.solvent_center_mean_shift = _fit_train_solvent_center_mean_shift(
+         args, head_configs, z_table
+     )
++    args.fermi_level_baseline = _fit_train_fermi_level_baseline(args, head_configs)
+ 
+     # Model
+     model, output_args = configure_model(args, train_loader, atomic_energies, model_foundation, heads, z_table, head_configs)
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/data/utils.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/data/utils.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/data/utils.py	2026-06-11 17:40:10.910441474 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/data/utils.py	2026-06-11 17:41:22.219922495 -0500
+@@ -57,6 +57,7 @@
+         "dipole_key",
+         "explicit_dipole_key",
+         "potential_key",
++        "fermi_level_key",
+         "head_key",
+         "elec_temp_key",
+         "total_charge_key",
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py	2026-06-11 17:40:10.417438149 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/extensions.py	2026-06-11 17:40:56.660750084 -0500
+@@ -641,6 +641,7 @@
+         solvent_potential_axis: int = 2,
+         solvent_potential_sign: float = 1.0,
+         solvent_center_mean_shift: float = 0.0,
++        fermi_level_baseline: float = 0.0,
+         atomic_valence_electrons: Optional[List[float]] = None,
+         potential_1d_profile_file: Optional[str] = None,
+         **kwargs,
+@@ -736,12 +737,17 @@
+         self.solvent_potential_axis = int(solvent_potential_axis)
+         self.solvent_potential_sign = float(solvent_potential_sign)
+         self.solvent_center_mean_shift = float(solvent_center_mean_shift)
++        self.register_buffer(
++            "fermi_level_baseline",
++            torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
++        )
+         self.center_density_baselines = (
+             _load_center_density_baselines_npz(potential_1d_profile_file)
+             if potential_1d_profile_file is not None
+             else {}
+         )
+         self.solvent_residual_hidden_dim = 16
++        self.fermi_residual_hidden_dim = 16
+         self.solvent_residual_max_abs_shift = 1.5
+         self.solvent_residual_init_shift = 0.0
+         explicit_valence = None
+@@ -997,6 +1003,17 @@
+             final_linear.bias,
+             float(torch.atanh(torch.tensor(init_frac, dtype=final_linear.bias.dtype))),
+         )
++        self.fermi_level_residual = torch.nn.Sequential(
++            torch.nn.Linear(
++                hidden_irreps.dim * num_interactions,
++                self.fermi_residual_hidden_dim,
++            ),
++            torch.nn.SiLU(),
++            torch.nn.Linear(self.fermi_residual_hidden_dim, 1),
++        )
++        fermi_final_linear = self.fermi_level_residual[-1]
++        torch.nn.init.zeros_(fermi_final_linear.weight)
++        torch.nn.init.zeros_(fermi_final_linear.bias)
+     def set_element_charge_baseline(self, baseline: torch.Tensor) -> None:
+         if baseline.shape != self.element_charge_baseline.shape:
+             raise ValueError(
+@@ -1749,6 +1766,12 @@
+         )
+         explicit_potential = explicit_potential_base
+         total_potential = explicit_potential + solvent_potential
++        fermi_level_residual = self.fermi_level_residual(graph_feats_global).view(-1)
++        fermi_level_pred = (
++            self.fermi_level_baseline.to(dtype=total_potential.dtype)
++            - total_potential
++            + fermi_level_residual.to(dtype=total_potential.dtype)
++        )
+         electro_energy = self.coulomb_energy(
+             k_vectors=k_vectors,
+             k_norm2=kv_norms_squared,
+@@ -1848,6 +1871,9 @@
+             "atomic_dipole": atomic_dipole,
+             "total_charge": total_charge,
+             "potential": total_potential,
++            "fermi_level_pred": fermi_level_pred,
++            "fermi_level_residual": fermi_level_residual,
++            "fermi_level_baseline": self.fermi_level_baseline.expand_as(total_potential),
+             "explicit_potential": explicit_potential,
+             "explicit_potential_base": explicit_potential_base,
+             "solvent_potential": solvent_potential,
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/loss.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/loss.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/loss.py	2026-06-11 17:40:10.490438641 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/modules/loss.py	2026-06-11 17:41:08.730831504 -0500
+@@ -367,6 +367,19 @@
+     return reduce_loss(raw_loss, ddp), pred_potential
+ 
+ 
++def mean_squared_error_fermi_level(
++    ref: Batch,
++    pred: TensorDict,
++    ddp: Optional[bool] = None,
++) -> Optional[torch.Tensor]:
++    pred_fermi = pred.get("fermi_level_pred")
++    ref_fermi = getattr(ref, "fermi_level", None)
++    if pred_fermi is None or ref_fermi is None:
++        return None
++    raw_loss = torch.square(ref_fermi.view(-1) - pred_fermi.view(-1))
++    return reduce_loss(raw_loss, ddp)
++
++
+ def weighted_mean_squared_error_explicit_potential(
+     ref: Batch,
+     pred: TensorDict,
+@@ -1899,6 +1912,7 @@
+         charges_weight=0.0,
+         atomic_dipole_weight=0.0,
+         potential_weight=0.0,
++        fermi_level_weight=0.0,
+         density_3d_weight=0.0,
+         density_3d_file=None,
+         density_3d_sigma=0.5,
+@@ -1940,6 +1954,10 @@
+             torch.tensor(potential_weight, dtype=torch.get_default_dtype()),
+         )
+         self.register_buffer(
++            "fermi_level_weight",
++            torch.tensor(fermi_level_weight, dtype=torch.get_default_dtype()),
++        )
++        self.register_buffer(
+             "density_3d_weight",
+             torch.tensor(density_3d_weight, dtype=torch.get_default_dtype()),
+         )
+@@ -2039,6 +2057,10 @@
+             if loss_potential is not None:
+                 pred["potential"] = pred_potential
+                 loss = loss + self.potential_weight * loss_potential
++        if self.fermi_level_weight > 1e-12:
++            loss_fermi = mean_squared_error_fermi_level(ref, pred, ddp)
++            if loss_fermi is not None:
++                loss = loss + self.fermi_level_weight * loss_fermi
+         if self.density_3d_weight > 1e-12:
+             loss_density_3d = mean_squared_error_density_3d(
+                 ref=ref,
+@@ -2090,6 +2112,7 @@
+             f"forces_weight={self.forces_weight:.3f}, "
+             f"charges_weight={self.charges_weight:.3f}, atomic_dipole_weight={self.atomic_dipole_weight:.3f}, "
+             f"potential_weight={self.potential_weight:.3f}, "
++            f"fermi_level_weight={self.fermi_level_weight:.3f}, "
+             f"density_3d_weight={self.density_3d_weight:.3f}, "
+             f"density_3d_samples={self.density_3d_samples}, "
+             f"potential_1d_profile_weight={self.potential_1d_profile_weight:.3f}, "
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py	2026-06-11 17:40:10.671439862 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/arg_parser.py	2026-06-11 18:01:20.921998711 -0500
+@@ -772,6 +772,12 @@
+         default=DefaultKeys.POTENTIAL.value,
+     )
+     parser.add_argument(
++        "--fermi_level_key",
++        help="Key of reference Fermi level relative to the upper vacuum in training xyz",
++        type=str,
++        default=DefaultKeys.FERMI_LEVEL.value,
++    )
++    parser.add_argument(
+         "--polarizability_key",
+         help="Key of polarizability in training xyz",
+         type=str,
+@@ -925,6 +931,18 @@
+         type=float,
+         default=0.0,
+     )
++    parser.add_argument(
++        "--fermi_level_weight",
++        help="weight of Fermi-level loss using baseline - predicted potential difference + learned residual",
++        type=float,
++        default=0.0,
++    )
++    parser.add_argument(
++        "--fermi_level_baseline",
++        help="internal Fermi-level baseline in eV; normally fitted from the train split",
++        type=float,
++        default=0.0,
++    )
+     parser.add_argument(
+         "--density_3d_weight",
+         help="weight of partition-free 3D CHGCAR point density loss",
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/default_keys.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/default_keys.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/default_keys.py	2026-06-11 17:40:10.827440915 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/default_keys.py	2026-06-11 17:41:22.205922401 -0500
+@@ -12,6 +12,7 @@
+     EXPLICIT_DIPOLE = "dipole_explicit"
+     ATOMIC_DIPOLE = "atomic_dipole"
+     POTENTIAL = "potential"
++    FERMI_LEVEL = "fermi_level"
+     POLARIZABILITY = "polarizability"
+     HEAD = "head"
+     CHARGES = "REF_charges"
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py	2026-06-11 17:40:11.018442203 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/model_script_utils.py	2026-06-11 17:41:35.717013541 -0500
+@@ -335,6 +335,7 @@
+             solvent_potential_axis=args.solvent_potential_axis,
+             solvent_potential_sign=args.solvent_potential_sign,
+             solvent_center_mean_shift=args.solvent_center_mean_shift,
++            fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
+             atomic_valence_electrons=atomic_valence_electrons,
+             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
+         )
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/scripts_utils.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/scripts_utils.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/scripts_utils.py	2026-06-11 17:40:11.097442736 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/scripts_utils.py	2026-06-11 17:41:35.720013561 -0500
+@@ -379,6 +379,12 @@
+         config["solvent_center_mean_shift"] = getattr(
+             model, "solvent_center_mean_shift", 0.0
+         )
++        fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
++        config["fermi_level_baseline"] = (
++            float(fermi_level_baseline.detach().cpu().item())
++            if fermi_level_baseline is not None
++            else 0.0
++        )
+         atomic_valence = getattr(model, "atomic_valence_electrons", None)
+         config["atomic_valence_electrons"] = (
+             atomic_valence.detach().cpu().tolist()
+@@ -766,6 +772,7 @@
+             charges_weight=getattr(args, "charges_weight", 0.0),
+             atomic_dipole_weight=getattr(args, "atomic_dipole_weight", 0.0),
+             potential_weight=getattr(args, "potential_weight", 0.0),
++            fermi_level_weight=getattr(args, "fermi_level_weight", 0.0),
+             density_3d_weight=getattr(args, "density_3d_weight", 0.0),
+             density_3d_file=getattr(args, "density_3d_file", None),
+             density_3d_sigma=getattr(args, "density_3d_sigma", 0.5),
+@@ -855,6 +862,7 @@
+             charges_weight=swa_charges_weight,
+             atomic_dipole_weight=swa_atomic_dipole_weight,
+             potential_weight=swa_potential_weight,
++            fermi_level_weight=getattr(args, "fermi_level_weight", 0.0),
+             density_3d_weight=getattr(args, "density_3d_weight", 0.0),
+             density_3d_file=getattr(args, "density_3d_file", None),
+             density_3d_sigma=getattr(args, "density_3d_sigma", 0.5),
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/tables_utils.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/tables_utils.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/tables_utils.py	2026-06-11 17:40:11.247443748 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/tables_utils.py	2026-06-11 17:41:35.720013561 -0500
+@@ -26,6 +26,7 @@
+             ("rmse_q", "RMSE Q / e", 1.0, "8.4f"),
+             ("rmse_atomic_dipole", "RMSE Atomic Mu / eA", 1.0, "8.4f"),
+             ("rmse_potential", "RMSE Potential / eV", 1.0, "8.4f"),
++            ("rmse_fermi_level", "RMSE Fermi / eV", 1.0, "8.4f"),
+             ("rmse_density_3d", "RMSE Density3D / e/A^3", 1.0, "8.5f"),
+             ("rmse_potential_1d_profile", "RMSE Phi1D / eV", 1.0, "8.5f"),
+             ("rmse_solvent_center", "RMSE Solv Center / A", 1.0, "8.4f"),
+@@ -35,6 +36,7 @@
+             ("mae_q", "MAE Q / e", 1.0, "8.4f"),
+             ("mae_atomic_dipole", "MAE Atomic Mu / eA", 1.0, "8.4f"),
+             ("mae_potential", "MAE Potential / eV", 1.0, "8.4f"),
++            ("mae_fermi_level", "MAE Fermi / eV", 1.0, "8.4f"),
+             ("mae_density_3d", "MAE Density3D / e/A^3", 1.0, "8.5f"),
+             ("mae_potential_1d_profile", "MAE Phi1D / eV", 1.0, "8.5f"),
+             ("mae_solvent_center", "MAE Solv Center / A", 1.0, "8.4f"),
+diff -ru /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/train.py /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/train.py
+--- /tmp/codex_fermi_diff_base/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/train.py	2026-06-11 17:40:11.156443134 -0500
++++ /tmp/codex_fermi_diff_current/7-all_method/.venv_polar_mace_latest/lib/python3.9/site-packages/mace/tools/train.py	2026-06-11 17:41:35.720013561 -0500
+@@ -75,6 +75,8 @@
+     potential_msg = ""
+     if eval_metrics.get("rmse_potential") is not None:
+         potential_msg = f", RMSE_potential={eval_metrics['rmse_potential']:.4f} eV"
++    if eval_metrics.get("rmse_fermi_level") is not None:
++        potential_msg += f", RMSE_fermi={eval_metrics['rmse_fermi_level']:.4f} eV"
+     density_msg = ""
+     if eval_metrics.get("rmse_density_3d") is not None:
+         density_msg += (
+@@ -669,6 +671,10 @@
+         )
+         self.add_state("delta_potentials", default=[], dist_reduce_fx="cat")
+         self.add_state(
++            "FermiLevels_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
++        )
++        self.add_state("delta_fermi_levels", default=[], dist_reduce_fx="cat")
++        self.add_state(
+             "Density3D_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+         )
+         self.add_state("delta_density_3d", default=[], dist_reduce_fx="cat")
+@@ -786,6 +792,19 @@
+                 batch.potential_weight,
+                 spread_quantity_vector=False,
+             )
++        if (
++            getattr(self.loss_fn, "fermi_level_weight", 0.0) > 1.0e-12
++            and output.get("fermi_level_pred") is not None
++            and getattr(batch, "fermi_level", None) is not None
++        ):
++            self.delta_fermi_levels.append(
++                batch.fermi_level.view(-1) - output["fermi_level_pred"].view(-1)
++            )
++            self.FermiLevels_computed += torch.tensor(
++                float(output["fermi_level_pred"].view(-1).numel()),
++                dtype=self.FermiLevels_computed.dtype,
++                device=self.FermiLevels_computed.device,
++            )
+         density_3d_targets = getattr(self.loss_fn, "density_3d_targets", None)
+         if density_3d_targets:
+             density_3d_res = density_3d_residuals(
+@@ -942,6 +961,11 @@
+             aux["mae_potential"] = compute_mae(delta_potentials)
+             aux["rmse_potential"] = compute_rmse(delta_potentials)
+             aux["q95_potential"] = compute_q95(delta_potentials)
++        if self.FermiLevels_computed:
++            delta_fermi_levels = self.convert(self.delta_fermi_levels)
++            aux["mae_fermi_level"] = compute_mae(delta_fermi_levels)
++            aux["rmse_fermi_level"] = compute_rmse(delta_fermi_levels)
++            aux["q95_fermi_level"] = compute_q95(delta_fermi_levels)
+         if self.Density3D_computed:
+             delta_density_3d = self.convert(self.delta_density_3d)
+             aux["mae_density_3d"] = compute_mae(delta_density_3d)

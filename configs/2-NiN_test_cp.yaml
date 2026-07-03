@@ -1,0 +1,60 @@
+
+# ---------------------------------------------------------
+# General Experiment Settings
+# ---------------------------------------------------------
+name: "MACE_model"
+model: "FermiMACE"
+device: "cuda"
+default_dtype: "float64"  # Recommended for charge solver stability
+seed: 111
+
+# ---------------------------------------------------------
+# Data Paths & Splitting
+# ---------------------------------------------------------
+train_file: "train.xyz"
+test_file: "test.xyz"
+valid_file: "val.xyz"
+# Note: MACE will ignore valid_fraction if a valid_file is provided, 
+# but uses it to split train_file if no valid_file exists.
+
+# ---------------------------------------------------------
+# Data Keys (CRITICAL)
+# ---------------------------------------------------------
+# Maps to the column names in your specific .xyz file format
+energy_key: "energy"
+forces_key: "forces"
+
+# ---------------------------------------------------------
+# Model Architecture
+# ---------------------------------------------------------
+hidden_irreps: "64x0e + 64x1o + 64x2e"
+r_max: 5.0
+E0s: "average"  # Computes average atomic energies from data
+config_type_weights: '{"Default":1.0}'
+
+# ---------------------------------------------------------
+# Optimization & Training
+# ---------------------------------------------------------
+batch_size: 1
+max_num_epochs: 400
+restart_latest: True  # Resumes if a checkpoint exists
+amsgrad: True
+
+# Exponential Moving Average
+ema: True
+ema_decay: 0.99
+
+# Stage Two / SWA (Stochastic Weight Averaging)
+swa: False             # Corresponds to --stage_two
+#start_swa: 600       # Corresponds to --start_stage_two
+
+
+# Loss Weights
+energy_weight: 1.0
+forces_weight: 100.0  # Standard MACE default (or 10.0 depending on preference)
+potential_weight: 1
+loss: "fermi_weighted" 
+error_table: "Fermi_PerAtomRMSE" 
+
+distributed: true
+
