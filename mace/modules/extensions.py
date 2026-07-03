@@ -738,6 +738,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_tol: float = 1.0e-3,
         solvent_pb_nuclear_sigma: float = 0.4,
         solvent_pb_coarse_init: bool = True,
+        solvent_pb_include_bound: bool = True,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -855,6 +856,7 @@ class PolarMACE(ScaleShiftMACE):
         self.solvent_pb_tol = float(solvent_pb_tol)
         self.solvent_pb_nuclear_sigma = float(solvent_pb_nuclear_sigma)
         self.solvent_pb_coarse_init = bool(solvent_pb_coarse_init)
+        self.solvent_pb_include_bound = bool(solvent_pb_include_bound)
         self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
@@ -1246,7 +1248,7 @@ class PolarMACE(ScaleShiftMACE):
         profiles: List[Optional[Dict[str, Any]]] = []
         heights: List[float] = []
         q_ion = positions.new_zeros(num_graphs)
-        layer_mean = positions.new_zeros(num_graphs)
+        solvent_mu = positions.new_zeros(num_graphs)
         for g in range(num_graphs):
             cell_g = cells[g]
             heights.append(float(_axis_box_length(cell_g, axis).item()))
@@ -1286,22 +1288,46 @@ class PolarMACE(ScaleShiftMACE):
                 neutral_sigma=float(self.atomic_multipoles_smearing_width),
                 eval_net_density=eval_net_density,
             )
+            # The solvent layer the model sees: ionic charge alone, or the
+            # full implicit-region solvent charge (ionic + bound). The bound
+            # (polarization) charge integrates to ~0 but carries the
+            # dielectric screening dipole of the implicit region.
+            if self.solvent_pb_include_bound:
+                result = dict(result)
+                result["rho_layer_z"] = (
+                    result["rho_ion_z"] + result["rho_bound_z"]
+                )
+                mu_g = (
+                    result["q_ion"] * result["layer_mean"]
+                    + result["mu_bound"]
+                )
+            else:
+                result = dict(result)
+                result["rho_layer_z"] = result["rho_ion_z"]
+                mu_g = result["q_ion"] * result["layer_mean"]
             profiles.append(result)
             q_ion[g] = float(result["q_ion"])
-            layer_mean[g] = float(result["layer_mean"])
+            solvent_mu[g] = float(mu_g)
 
         prof_feat = profiles_to_tensors(
-            profiles, heights, 1024, False, positions.device, positions.dtype
+            profiles, heights, 1024, False, positions.device, positions.dtype,
+            key="rho_layer_z",
         )
         prof_energy = profiles_to_tensors(
-            profiles, heights, 512, True, positions.device, positions.dtype
+            profiles, heights, 512, True, positions.device, positions.dtype,
+            key="rho_layer_z",
+        )
+        # Effective layer mean of the combined profile (dipole / charge);
+        # the charge is the ionic one (bound integrates to ~0).
+        layer_mean = solvent_mu / torch.where(
+            torch.abs(q_ion) > 1.0e-12, q_ion, torch.full_like(q_ion, 1.0e-12)
         )
         return {
             "profile_features": prof_feat,
             "profile_energy": prof_energy,
             "q_ion": q_ion,
             "layer_mean": layer_mean,
-            "solvent_mu": q_ion * layer_mean,
+            "solvent_mu": solvent_mu,
         }
 
     def forward(

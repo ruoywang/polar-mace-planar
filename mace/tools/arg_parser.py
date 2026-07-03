@@ -534,6 +534,16 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument(
+        "--solvent_pb_include_bound",
+        help=(
+            "include the bound (dielectric polarization) charge profile in "
+            "the solvent layer in addition to the ionic charge; it carries "
+            "the implicit-region screening dipole"
+        ),
+        type=str2bool,
+        default=True,
+    )
+    parser.add_argument(
         "--scaling",
         help="type of scaling to the output",
         type=str,

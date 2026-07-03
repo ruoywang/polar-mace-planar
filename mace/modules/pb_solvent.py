@@ -302,15 +302,19 @@ class PBPlanarSolvent:
             qsol_cache, dsol_cache = self._solvent_moments(n_b + n_ion, cell)
         t_solve = perf_counter()
 
-        # Physics-sign ionic profile: rho_ion_z integrates (times area) to
-        # about -total_charge.
+        # Physics-sign profiles: rho_ion_z integrates (times area) to about
+        # -total_charge; rho_bound_z (dielectric polarization, -div P) to ~0
+        # but carries the implicit-region screening dipole.
         rho_ion_z = -(n_ion / volume).mean(axis=(0, 1))
+        rho_bound_z = -(n_b / volume).mean(axis=(0, 1))
         z = np.arange(nz) * (length_z / nz)
         dz = length_z / nz
         area = volume / length_z
         q_ion = float(rho_ion_z.sum() * dz * area)
+        q_bound = float(rho_bound_z.sum() * dz * area)
         denom = q_ion if abs(q_ion) > 1.0e-12 else 1.0e-12
         layer_mean = float((rho_ion_z * z).sum() * dz * area / denom)
+        mu_bound = float((rho_bound_z * z).sum() * dz * area)
 
         self.last_diagnostics = {
             "t_net_density": t_net - t0,
@@ -320,13 +324,18 @@ class PBPlanarSolvent:
             "t_total": t_solve - t0,
             "rms_last": float(history[-1][1]) if history else float("nan"),
             "q_ion": q_ion,
+            "q_bound": q_bound,
             "layer_mean": layer_mean,
+            "mu_bound": mu_bound,
         }
         return {
             "z": z,
             "rho_ion_z": rho_ion_z,
+            "rho_bound_z": rho_bound_z,
             "q_ion": q_ion,
+            "q_bound": q_bound,
             "layer_mean": layer_mean,
+            "mu_bound": mu_bound,
         }
 
 
@@ -349,8 +358,9 @@ def profiles_to_tensors(
     offset_half: bool,
     device: torch.device,
     dtype: torch.dtype,
+    key: str = "rho_ion_z",
 ) -> torch.Tensor:
-    """Stack per-graph rho_ion(z) onto a common [n_graphs, num_grid] tensor.
+    """Stack a per-graph z-profile onto a common [n_graphs, num_grid] tensor.
 
     Graphs without a profile (non-slab or failed solve) get zeros. The
     destination grid matches the conventions of the layer machinery:
@@ -364,6 +374,6 @@ def profiles_to_tensors(
         j = np.arange(num_grid) + (0.5 if offset_half else 0.0)
         z_dst = j * height / num_grid
         out[g] = resample_profile_periodic(
-            prof["z"], prof["rho_ion_z"], z_dst, height
+            prof["z"], prof[key], z_dst, height
         )
     return torch.as_tensor(out, device=device, dtype=dtype)

@@ -346,6 +346,7 @@ def _build_model(
             solvent_pb_tol=getattr(args, "solvent_pb_tol", 1.0e-3),
             solvent_pb_nuclear_sigma=getattr(args, "solvent_pb_nuclear_sigma", 0.4),
             solvent_pb_coarse_init=getattr(args, "solvent_pb_coarse_init", True),
+            solvent_pb_include_bound=getattr(args, "solvent_pb_include_bound", True),
             fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
             atomic_valence_electrons=atomic_valence_electrons,
             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),

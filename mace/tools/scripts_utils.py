@@ -400,6 +400,9 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_pb_coarse_init"] = getattr(
             model, "solvent_pb_coarse_init", True
         )
+        config["solvent_pb_include_bound"] = getattr(
+            model, "solvent_pb_include_bound", True
+        )
         fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
         config["fermi_level_baseline"] = (
             float(fermi_level_baseline.detach().cpu().item())
