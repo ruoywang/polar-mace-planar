@@ -748,7 +748,12 @@ class PBTorchBackend:
             dsol_z = float((solv * z_mesh).mean())
         t_solve = perf_counter()
 
-        if self.warm_start and sample_id is not None:
+        rms_last = float(history[-1][1]) if history else float("nan")
+        if (
+            self.warm_start and sample_id is not None
+            and rms_last == rms_last and rms_last < 10.0 * self.tol
+        ):
+            # never seed future solves from a diverged state
             self._phi_cache[sample_id] = {
                 "phi": phi_total.detach().to(torch.float32).cpu(),
                 "shape": shape,
@@ -772,7 +777,7 @@ class PBTorchBackend:
             "t_solve": t_solve - t_cav,
             "t_total": t_solve - t0,
             "warm": bool(warm),
-            "rms_last": float(history[-1][1]) if history else float("nan"),
+            "rms_last": rms_last,
             "q_ion": q_ion,
             "q_bound": q_bound,
             "layer_mean": layer_mean,
@@ -787,6 +792,7 @@ class PBTorchBackend:
             "q_bound": q_bound,
             "layer_mean": layer_mean,
             "mu_bound": mu_bound,
+            "rms_last": rms_last,
         }
 
 

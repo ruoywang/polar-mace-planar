@@ -1241,6 +1241,7 @@ class PolarMACE(ScaleShiftMACE):
         radial_blocks: torch.Tensor,
         node_valence_electrons: torch.Tensor,
         num_graphs: int,
+        planar_center: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Detached per-graph nonlinear PB solve on the current (pre-SCF)
         density; returns rho_ion(z) resampled onto the feature grid (1024,
@@ -1341,6 +1342,66 @@ class PolarMACE(ScaleShiftMACE):
                     neutral_sigma=float(self.atomic_multipoles_smearing_width),
                     eval_net_density=eval_net_density,
                 )
+            # Health guard: an untrained/excursive model density can make the
+            # PB solve diverge or produce unphysical moments (the PB<->density
+            # feedback loop). Per structure, per step, fall back to the planar
+            # truncated-Gaussian layer at the density-crossing center — the
+            # stable baseline physics. Self-deactivating: a converged model
+            # yields healthy solves and the guard never fires.
+            H_g = float(result.get("height", heights[g]))
+            rms_h = float(result.get("rms_last", 0.0))
+            lm_h = float(result["layer_mean"])
+            mb_h = float(result["mu_bound"])
+            healthy = (
+                rms_h == rms_h
+                and rms_h < 10.0 * self.solvent_pb_tol
+                and 0.0 <= lm_h <= H_g
+                and abs(mb_h) <= 2.0 * H_g
+            )
+            if not healthy and planar_center is not None:
+                import os as _os
+                if _os.environ.get("MACE_PB_DEBUG"):
+                    print(
+                        f"PBDBG-FALLBACK sid={sid} rms={rms_h:.2e} "
+                        f"layer_mean={lm_h:+.2f} mu_bound={mb_h:+.2f}",
+                        flush=True,
+                    )
+                cell_g33 = cell_g.view(3, 3)
+                area_g = _cell_area_for_axis_batch(
+                    cell_g33.unsqueeze(0).to(positions.dtype), axis
+                )[0]
+                c0 = planar_center[g].to(positions.dtype)
+                sg = float(self.solvent_sigma_g)
+                nzf = 512
+                zf = torch.arange(
+                    nzf, device=positions.device, dtype=positions.dtype
+                ) * (H_g / nzf)
+                inv_sqrt2 = 1.0 / math.sqrt(2.0)
+                normc = torch.clamp(
+                    0.5 * (torch.erf((H_g - c0) / sg * inv_sqrt2)
+                           - torch.erf((0.0 - c0) / sg * inv_sqrt2)),
+                    min=1.0e-12,
+                )
+                q_fb = -float(total_charge_g[g].item())
+                prof = (q_fb / area_g) * torch.exp(
+                    -0.5 * torch.square((zf - c0) / sg)
+                ) / (math.sqrt(2.0 * math.pi) * sg * normc)
+                lm_fb = _truncated_gaussian_mean(
+                    center=c0.view(1), sigma=sg,
+                    lower=torch.zeros(1, device=positions.device, dtype=positions.dtype),
+                    upper=torch.full((1,), H_g, device=positions.device, dtype=positions.dtype),
+                ).view(())
+                result = {
+                    "z": zf, "rho_ion_z": prof,
+                    "rho_bound_z": torch.zeros_like(prof),
+                    "height": H_g, "q_ion": q_fb,
+                    "layer_mean": float(lm_fb.item()), "mu_bound": 0.0,
+                }
+                if not use_torch:
+                    result = {
+                        k: (v.detach().cpu().numpy() if torch.is_tensor(v) else v)
+                        for k, v in result.items()
+                    }
             # The solvent layer the model sees: ionic charge alone, or the
             # full implicit-region solvent charge (ionic + bound). The bound
             # (polarization) charge integrates to ~0 but carries the
@@ -1702,6 +1763,7 @@ class PolarMACE(ScaleShiftMACE):
                 radial_blocks=self._radial_flat_to_blocks(comp_charge_density),
                 node_valence_electrons=node_valence_electrons,
                 num_graphs=num_graphs,
+                planar_center=comp_center_init,
             )
             (
                 compensation_external_features,
