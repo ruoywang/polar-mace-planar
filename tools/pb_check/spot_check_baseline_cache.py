@@ -68,8 +68,8 @@ def main():
     zval_map = {"H": 1.0, "C": 4.0, "N": 5.0, "O": 6.0, "Ni": 10.0}
     backend = PBTorchBackend(
         config_path=args.config, grid_spacing=args.spacing,
-        fixsol_steps=2, tol=1e-3, coarse_init=True,
-        warm_start=False, baseline_cache=args.cache,
+        fixsol_steps=5, tol=1e-3, coarse_init=True,  # 5 = the study protocol
+        warm_start=False, baseline_cache=args.cache,  # the reference row used it
     )
     dev = torch.device(args.device)
 
