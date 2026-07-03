@@ -1,5 +1,8 @@
 # polar-mace-planar
 
+
+**Reports:** https://ruoywang.github.io/polar-mace-planar/ (training and method
+pages; solver-level reports at https://ruoywang.github.io/cep-dip-python-pb/)
 Modified **PolarMACE** for machine-learning constant-potential electrochemistry:
 charged metal/water slabs whose net electrode charge is compensated by a
 **planar Gaussian implicit-solvent charge layer** (a learned surrogate for the

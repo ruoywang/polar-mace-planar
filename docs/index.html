@@ -1,0 +1,74 @@
+<title>polar-mace-planar — Reports</title>
+<style>
+  :root {
+    --plane: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
+    --muted: #898781; --grid: #e1e0d9; --border: rgba(11,11,11,0.10);
+    --accent: #1baf7a;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --plane: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+      --muted: #898781; --grid: #2c2c2a; --border: rgba(255,255,255,0.10);
+      --accent: #1fc98d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--plane); color: var(--ink);
+         font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 72px; }
+  .eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--muted); margin-bottom: 6px; }
+  h1 { font-size: 26px; margin: 0 0 8px; }
+  .lede { color: var(--ink-2); margin: 0 0 36px; max-width: 58ch; }
+  .report {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 18px 22px; margin-bottom: 14px;
+    transition: border-color .15s ease;
+  }
+  .report:hover { border-color: var(--accent); }
+  .report.pending { opacity: .75; }
+  .report .date { font: 12px var(--mono); color: var(--muted); margin-bottom: 4px; }
+  .report h2 { font-size: 16.5px; margin: 0 0 6px; color: var(--accent); }
+  .report p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+  .report .tag { display: inline-block; font: 11px var(--mono); letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); border: 1px solid var(--grid);
+    border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 1px; }
+  footer { margin-top: 44px; font-size: 12.5px; color: var(--muted); }
+  footer a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">polar-mace-planar</div>
+  <h1>Reports</h1>
+  <p class="lede">Result pages for the modified PolarMACE constant-potential
+  electrochemistry project: planar Gaussian solvent compensation layer and its
+  nonlinear Poisson&ndash;Boltzmann successor. Solver-level reports (validation,
+  CPU/GPU performance) live on the companion
+  <a href="https://ruoywang.github.io/cep-dip-python-pb/"
+     style="color:var(--accent)">cep-dip-python-pb site</a>.</p>
+
+  <div class="report pending">
+    <div class="date">upcoming<span class="tag">training</span></div>
+    <h2>PB vs Planar Solvent — Training A/B on 2-NiN</h2>
+    <p>Real s/step of the two complete training paths (NumPy-CPU vs
+    device-resident torch-GPU PB backend), grid-convergence study for the
+    training grid spacing, and accuracy of the PB-driven observables against
+    the 4-grid planar baseline.</p>
+  </div>
+
+  <div class="report pending">
+    <div class="date">2026-07-03 · in changelog form<span class="tag">method</span></div>
+    <h2>Nonlinear PB Solvent Model (--solvent_model pb)</h2>
+    <p>Detached 3D nonlinear PB solve per structure through the three planar
+    hook points (SCF features, 1D periodic energy, potential observable).
+    See <span style="font-family:var(--mono)">docs/changelogs/2026-07-03_pb_solvent.md</span>
+    on the pb-solvent branch; an HTML report follows with the training A/B.</p>
+  </div>
+
+  <footer>
+    Repository: <a href="https://github.com/ruoywang/polar-mace-planar">ruoywang/polar-mace-planar</a>
+    (private) · companion solver: <a href="https://ruoywang.github.io/cep-dip-python-pb/">cep-dip-python-pb reports</a>
+  </footer>
+</div>
