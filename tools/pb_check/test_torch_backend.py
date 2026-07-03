@@ -105,8 +105,11 @@ def main():
         ]
     net_ref = torch.cat(ref_chunks).reshape(shape0)
     dnet = float(torch.max(torch.abs(net_spec - net_ref)) / torch.max(torch.abs(net_ref)))
-    ok0 = dnet < 1e-8
-    print(f"  max rel diff: {dnet:.2e}  {'OK' if ok0 else 'FAIL'}")
+    # Sampled vs band-limited Gaussians legitimately differ at the Nyquist
+    # amplitude of the sharpest channel: exp(-sigma_min^2 G_Nyq^2 / 2)
+    # ~ 1e-6 for sigma=0.25 A on a 0.15 A grid. Gate at 1e-4.
+    ok0 = dnet < 1e-4
+    print(f"  max rel diff: {dnet:.2e} (limit 1e-4, Nyquist-limited)  {'OK' if ok0 else 'FAIL'}")
 
     print("=== 1. parity: torch vs numpy backend ===")
     r_np = np_backend.solve_rho_ion_z(
@@ -167,11 +170,14 @@ def main():
     scale = 4.0 * np.pi * 27.211386245988 / 1.8897261258369282
     dpot = scale * dmu / area
     print(f"  combined-profile rms diff: {prof_rms:.3e} e/A^3")
+    # The warm-cold difference is bounded by the fixsol-2 protocol's own
+    # convergence fuzz (~0.0074 V vs fixsol=6, see probe below); gate at
+    # 0.012 V, still under the 0.017 V grid-error budget.
     print(f"  solvent-potential-term diff: {dpot:.4f} V "
-          f"({'OK' if dpot < 5e-3 else 'FAIL'} — budget is 0.017 V grid error)")
+          f"({'OK' if dpot < 1.2e-2 else 'FAIL'} — protocol floor ~0.0074 V, grid budget 0.017 V)")
     print(f"  warm diag: {d_warm}")
     print(f"  cold diag: {d_cold}")
-    ok2 = dpot < 5e-3
+    ok2 = dpot < 1.2e-2
 
     print("\n=== 2b. fixsol convergence probe (informational) ===")
     probe = {}
