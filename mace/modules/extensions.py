@@ -1357,6 +1357,15 @@ class PolarMACE(ScaleShiftMACE):
             profiles.append(result)
             q_ion[g] = float(result["q_ion"])
             solvent_mu[g] = float(mu_g)
+            import os as _os
+            if _os.environ.get("MACE_PB_DEBUG"):
+                print(
+                    f"PBDBG sid={sid} q_ion={result['q_ion']:+.4f} "
+                    f"layer_mean={result['layer_mean']:+.3f} "
+                    f"mu_bound={result['mu_bound']:+.3f} mu_tot={float(mu_g):+.3f} "
+                    f"diag={getattr(solver, 'last_diagnostics', {})}",
+                    flush=True,
+                )
             if use_torch:
                 layer = result["rho_layer_z"].to(positions.dtype)
                 height_g = float(result["height"])
