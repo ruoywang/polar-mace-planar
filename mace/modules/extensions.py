@@ -740,6 +740,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_coarse_init: bool = True,
         solvent_pb_include_bound: bool = True,
         solvent_pb_backend: str = "torch",
+        solvent_pb_baseline_cache: Optional[str] = None,
         solvent_pb_warm_start: bool = True,
         solvent_pb_warm_fixsol_steps: int = 0,
         fermi_level_baseline: float = 0.0,
@@ -865,6 +866,7 @@ class PolarMACE(ScaleShiftMACE):
                 f"solvent_pb_backend must be 'numpy' or 'torch', got {solvent_pb_backend!r}"
             )
         self.solvent_pb_backend = str(solvent_pb_backend)
+        self.solvent_pb_baseline_cache = solvent_pb_baseline_cache
         self.solvent_pb_warm_start = bool(solvent_pb_warm_start)
         self.solvent_pb_warm_fixsol_steps = int(solvent_pb_warm_fixsol_steps)
         self._pb_solver = None
@@ -1222,6 +1224,7 @@ class PolarMACE(ScaleShiftMACE):
                 self._pb_solver = PBTorchBackend(
                     warm_start=self.solvent_pb_warm_start,
                     warm_fixsol_steps=self.solvent_pb_warm_fixsol_steps,
+                    baseline_cache=self.solvent_pb_baseline_cache,
                     **common,
                 )
             else:

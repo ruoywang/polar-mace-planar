@@ -404,6 +404,9 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
             model, "solvent_pb_include_bound", True
         )
         config["solvent_pb_backend"] = getattr(model, "solvent_pb_backend", "torch")
+        config["solvent_pb_baseline_cache"] = getattr(
+            model, "solvent_pb_baseline_cache", None
+        )
         config["solvent_pb_warm_start"] = getattr(
             model, "solvent_pb_warm_start", True
         )

@@ -534,6 +534,19 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument(
+        "--solvent_pb_baseline_cache",
+        help=(
+            "directory with the per-sample DFT baseline cache (neutral / "
+            "dencor / phi_base fields on the PB grid, built by "
+            "tools/pb_check/build_baseline_cache.py); replaces the Gaussian "
+            "baseline+nuclei surrogates with exact data-derived fields "
+            "(torch backend). Samples missing from the cache fall back to "
+            "the Gaussian surrogates."
+        ),
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
         "--solvent_pb_backend",
         help=(
             "PB solve backend: 'torch' (device-resident, GPU) or 'numpy' "

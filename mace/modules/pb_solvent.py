@@ -373,6 +373,7 @@ class PBTorchBackend:
         axis: int = 2,
         warm_start: bool = True,
         warm_fixsol_steps: int = 0,
+        baseline_cache: Optional[str] = None,
     ) -> None:
         self._init_kwargs = {
             "config_path": config_path,
@@ -387,6 +388,7 @@ class PBTorchBackend:
             "axis": axis,
             "warm_start": warm_start,
             "warm_fixsol_steps": warm_fixsol_steps,
+            "baseline_cache": baseline_cache,
         }
         if int(axis) != 2:
             raise NotImplementedError("PB solvent model is defined for z-axis slabs")
@@ -431,6 +433,23 @@ class PBTorchBackend:
         self._grids: Dict = {}
         self._phi_cache: Dict = {}
         self.last_diagnostics: Dict[str, float] = {}
+        # Optional per-sample DFT baseline cache (neutral / dencor / phi_base
+        # fields on the PB grid): replaces the Gaussian-baseline and
+        # Gaussian-nuclei surrogates with the exact data-derived fields.
+        # Memory-mapped so distributed ranks share physical pages.
+        self._bl_arr = None
+        self._bl_index: Dict[int, int] = {}
+        self._bl_shape = None
+        if baseline_cache:
+            bl = os.path.expandvars(os.path.expanduser(baseline_cache))
+            with open(os.path.join(bl, "baseline_index.json")) as f:
+                self._bl_index = {int(k): int(v) for k, v in json.load(f).items()}
+            with open(os.path.join(bl, "baseline_meta.json")) as f:
+                meta = json.load(f)
+            self._bl_shape = tuple(meta["pb_shape"])
+            self._bl_arr = np.load(
+                os.path.join(bl, "baseline_cache.npy"), mmap_mode="r"
+            )
 
     def __getstate__(self) -> Dict:
         return dict(self._init_kwargs)
@@ -607,32 +626,55 @@ class PBTorchBackend:
             net_g = grid.fft(net * volume)
         t_net = perf_counter()
 
-        # neutral baseline + nuclei via structure factors (grouped by zval)
-        g_abs2 = grid.gsq * (2.0 * math.pi) ** 2
-        damp_neutral = torch.exp(-0.5 * g_abs2 * float(neutral_sigma) ** 2)
-        damp_nuclear = torch.exp(-0.5 * g_abs2 * float(self.nuclear_sigma) ** 2)
         zv = z_valence.detach().to(dt)
-        neutral_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
-        nuclei_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
-        for v in torch.unique(zv):
-            sf = self._structure_factor(grid, pos_frac[zv == v])
-            neutral_g = neutral_g + float(v) * damp_neutral * sf
-            nuclei_g = nuclei_g + (-float(v)) * damp_nuclear * sf
-        n_e_g = neutral_g - net_g
-        n_e_values = grid.ifft_real(n_e_g)
-        # NOTE: positivity-clipping n_e for the solute potential was tried
-        # and REVERTED — the clip changes the electron count while q_sol
-        # stays nominal, breaking charge consistency and diverging the
-        # Newton solve (residual 10..178, |mu_bound| ~ 1e15 at init). The
-        # cavity input alone is clipped (log() needs positivity); the
-        # Hartree charge keeps the model density as-is.
-        n_e_density = torch.clamp(n_e_values / volume, min=0.0)
+        # baseline: exact per-sample DFT fields from the cache when
+        # available, else Gaussian surrogates via structure factors.
+        bl_row = (
+            self._bl_index.get(sample_id)
+            if (self._bl_arr is not None and sample_id is not None
+                and self._bl_shape == shape)
+            else None
+        )
+        if bl_row is not None:
+            fields = torch.as_tensor(
+                np.ascontiguousarray(self._bl_arr[bl_row]), device=device
+            ).to(dt)
+            neutral_v, dencor_v, phi_base = fields[0], fields[1], fields[2]
+            net_values = grid.ifft_real(net_g)
+            n_e_values = neutral_v - net_values  # valence only (dipole, Hartree-side shape)
+            # cavity sees valence + partial core (reference convention)
+            n_e_density = torch.clamp(
+                (neutral_v + dencor_v - net_values) / volume, min=0.0
+            )
+            # phi_base already contains Hartree(neutral) + exact local PSP
+            cvhar = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
+        else:
+            # Gaussian surrogates (fallback / no cache): neutral baseline +
+            # nuclei via structure factors grouped by zval.
+            g_abs2 = grid.gsq * (2.0 * math.pi) ** 2
+            damp_neutral = torch.exp(-0.5 * g_abs2 * float(neutral_sigma) ** 2)
+            damp_nuclear = torch.exp(-0.5 * g_abs2 * float(self.nuclear_sigma) ** 2)
+            neutral_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
+            nuclei_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
+            for v in torch.unique(zv):
+                sf = self._structure_factor(grid, pos_frac[zv == v])
+                neutral_g = neutral_g + float(v) * damp_neutral * sf
+                nuclei_g = nuclei_g + (-float(v)) * damp_nuclear * sf
+            n_e_g = neutral_g - net_g
+            n_e_values = grid.ifft_real(n_e_g)
+            # NOTE: positivity-clipping n_e for the solute potential was tried
+            # and REVERTED — the clip changes the electron count while q_sol
+            # stays nominal, breaking charge consistency and diverging the
+            # Newton solve (residual 10..178, |mu_bound| ~ 1e15 at init). The
+            # cavity input alone is clipped (log() needs positivity); the
+            # Hartree charge keeps the model density as-is.
+            n_e_density = torch.clamp(n_e_values / volume, min=0.0)
+            cvhar = grid.ifft_real(grid.l0_inv_op(n_e_g + nuclei_g))
         t_dens = perf_counter()
 
         s_ion, s_diel, _ = self._tp.create_cavity_torch(n_e_density, grid, self.params)
         t_cav = perf_counter()
 
-        cvhar = grid.ifft_real(grid.l0_inv_op(n_e_g + nuclei_g))
         q_sol = float(-total_charge)
 
         # valence+ion dipole via the reference routine on the plane profile

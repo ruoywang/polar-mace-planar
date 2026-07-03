@@ -348,6 +348,7 @@ def _build_model(
             solvent_pb_coarse_init=getattr(args, "solvent_pb_coarse_init", True),
             solvent_pb_include_bound=getattr(args, "solvent_pb_include_bound", True),
             solvent_pb_backend=getattr(args, "solvent_pb_backend", "torch"),
+            solvent_pb_baseline_cache=getattr(args, "solvent_pb_baseline_cache", None),
             solvent_pb_warm_start=getattr(args, "solvent_pb_warm_start", True),
             solvent_pb_warm_fixsol_steps=getattr(args, "solvent_pb_warm_fixsol_steps", 0),
             fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
