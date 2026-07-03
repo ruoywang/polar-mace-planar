@@ -507,7 +507,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--solvent_pb_grid_spacing",
         help="target real-space grid spacing (Angstrom) for the PB solve",
         type=float,
-        default=0.25,
+        default=0.15,
     )
     parser.add_argument(
         "--solvent_pb_fixsol_steps",

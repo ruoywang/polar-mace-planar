@@ -388,7 +388,7 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_pb_config"] = getattr(model, "solvent_pb_config", None)
         config["solvent_pb_repo"] = getattr(model, "solvent_pb_repo", None)
         config["solvent_pb_grid_spacing"] = getattr(
-            model, "solvent_pb_grid_spacing", 0.25
+            model, "solvent_pb_grid_spacing", 0.15
         )
         config["solvent_pb_fixsol_steps"] = getattr(
             model, "solvent_pb_fixsol_steps", 2

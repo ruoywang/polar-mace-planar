@@ -341,7 +341,7 @@ def _build_model(
             solvent_model=getattr(args, "solvent_model", "planar"),
             solvent_pb_config=getattr(args, "solvent_pb_config", None),
             solvent_pb_repo=getattr(args, "solvent_pb_repo", None),
-            solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.25),
+            solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.15),
             solvent_pb_fixsol_steps=getattr(args, "solvent_pb_fixsol_steps", 2),
             solvent_pb_tol=getattr(args, "solvent_pb_tol", 1.0e-3),
             solvent_pb_nuclear_sigma=getattr(args, "solvent_pb_nuclear_sigma", 0.4),

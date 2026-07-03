@@ -68,7 +68,7 @@ class PBPlanarSolvent:
         self,
         config_path: str,
         repo_path: Optional[str] = None,
-        grid_spacing: float = 0.25,
+        grid_spacing: float = 0.15,
         fixsol_steps: int = 2,
         tol: float = 1.0e-3,
         max_outer: int = 20,

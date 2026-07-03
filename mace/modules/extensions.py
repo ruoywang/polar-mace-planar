@@ -733,7 +733,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_model: str = "planar",
         solvent_pb_config: Optional[str] = None,
         solvent_pb_repo: Optional[str] = None,
-        solvent_pb_grid_spacing: float = 0.25,
+        solvent_pb_grid_spacing: float = 0.15,
         solvent_pb_fixsol_steps: int = 2,
         solvent_pb_tol: float = 1.0e-3,
         solvent_pb_nuclear_sigma: float = 0.4,
