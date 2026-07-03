@@ -29,7 +29,21 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from mace.modules.pb_solvent import PBTorchBackend  # noqa: E402
-from tools.pb_check.build_baseline_cache import _fourier_restrict  # noqa: E402
+
+
+def _fourier_restrict(values, shape_c):
+    spec_f = np.fft.fftn(values) / values.size
+    spec_c = np.zeros(shape_c, dtype=complex)
+    sl_f, sl_c = [], []
+    for nf, nc in zip(values.shape, shape_c):
+        h = nc // 2
+        sl_f.append((slice(0, h), slice(nf - (h - 1), nf)))
+        sl_c.append((slice(0, h), slice(nc - (h - 1), nc)))
+    for cf, cc in zip(sl_f[0], sl_c[0]):
+        for kf, kc in zip(sl_f[1], sl_c[1]):
+            for lf, lc in zip(sl_f[2], sl_c[2]):
+                spec_c[cc, kc, lc] = spec_f[cf, kf, lf]
+    return np.ascontiguousarray(np.fft.ifftn(spec_c * np.prod(shape_c)).real)
 
 SCALE = 4.0 * np.pi * 27.211386245988 / 1.8897261258369282
 
