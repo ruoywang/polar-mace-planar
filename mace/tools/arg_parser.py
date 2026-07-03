@@ -465,6 +465,18 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=0.7,
     )
     parser.add_argument(
+        "--solvent_plane_feature_convention",
+        help=(
+            "electrostatic convention for the compensation-plane SCF features: "
+            "'periodic' (G!=0, consistent with the explicit-density evaluator) "
+            "or 'isolated' (legacy erf potential; carries a spurious jellium "
+            "parabola for charged explicit subsystems)"
+        ),
+        type=str,
+        choices=["periodic", "isolated"],
+        default="periodic",
+    )
+    parser.add_argument(
         "--scaling",
         help="type of scaling to the output",
         type=str,

@@ -379,6 +379,11 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_center_mean_shift"] = getattr(
             model, "solvent_center_mean_shift", 0.0
         )
+        # Models saved before the periodic-plane-features fix used the
+        # isolated erf convention; keep their extracted configs reproducible.
+        config["solvent_plane_feature_convention"] = getattr(
+            model, "solvent_plane_feature_convention", "isolated"
+        )
         fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
         config["fermi_level_baseline"] = (
             float(fermi_level_baseline.detach().cpu().item())

@@ -335,6 +335,9 @@ def _build_model(
             solvent_potential_axis=args.solvent_potential_axis,
             solvent_potential_sign=args.solvent_potential_sign,
             solvent_center_mean_shift=args.solvent_center_mean_shift,
+            solvent_plane_feature_convention=getattr(
+                args, "solvent_plane_feature_convention", "periodic"
+            ),
             fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
             atomic_valence_electrons=atomic_valence_electrons,
             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),

@@ -49,6 +49,7 @@ from .solvent_charge_layer import (
     compute_density_threshold_crossing_from_mace_multipoles,
     compute_oh_structure_crossings,
     compute_ze_crossing_from_mace_multipoles,
+    periodic_gaussian_layer_potential_field_nodes,
     require_explicit_valence_electrons,
     predict_potential_from_dipole_and_solvent_layer,
 )
@@ -192,6 +193,7 @@ def _slab_compensation_gaussian_features(
     sigma_g: float,
     feature_sigmas: List[float],
     axis: int,
+    convention: str = "periodic",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     matrix = external_field_block.matrix.to(positions.dtype)
     features = positions.new_zeros((positions.shape[0], matrix.shape[0]))
@@ -199,17 +201,38 @@ def _slab_compensation_gaussian_features(
     field_ref = positions.new_zeros(positions.shape)
     n_sigmas = len(feature_sigmas)
     for i_s, receiver_sigma in enumerate(feature_sigmas):
-        sigma_eff = math.sqrt(float(sigma_g) ** 2 + float(receiver_sigma) ** 2)
-        phi, field = _slab_compensation_gaussian_potential_field_nodes(
-            total_charge=total_charge,
-            center=center,
-            cell=cell,
-            pbc=pbc,
-            batch=batch,
-            positions=positions,
-            sigma_g=sigma_eff,
-            axis=axis,
-        )
+        if convention == "periodic":
+            # Same G!=0 convention as the periodic evaluator used for the
+            # explicit density; together with the slab dipole-correction
+            # features this reproduces the neutral-total potential without a
+            # spurious jellium parabola for charged explicit subsystems.
+            phi, field = periodic_gaussian_layer_potential_field_nodes(
+                total_charge=total_charge,
+                center=center,
+                cell=cell,
+                pbc=pbc,
+                batch=batch,
+                positions=positions,
+                sigma_g=sigma_g,
+                receiver_sigma=float(receiver_sigma),
+                axis=axis,
+            )
+        elif convention == "isolated":
+            sigma_eff = math.sqrt(float(sigma_g) ** 2 + float(receiver_sigma) ** 2)
+            phi, field = _slab_compensation_gaussian_potential_field_nodes(
+                total_charge=total_charge,
+                center=center,
+                cell=cell,
+                pbc=pbc,
+                batch=batch,
+                positions=positions,
+                sigma_g=sigma_eff,
+                axis=axis,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported solvent_plane_feature_convention: {convention!r}"
+            )
         if i_s == 0:
             phi_ref = phi
             field_ref = field
@@ -641,6 +664,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_potential_axis: int = 2,
         solvent_potential_sign: float = 1.0,
         solvent_center_mean_shift: float = 0.0,
+        solvent_plane_feature_convention: str = "periodic",
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -738,6 +762,12 @@ class PolarMACE(ScaleShiftMACE):
         self.solvent_potential_axis = int(solvent_potential_axis)
         self.solvent_potential_sign = float(solvent_potential_sign)
         self.solvent_center_mean_shift = float(solvent_center_mean_shift)
+        if solvent_plane_feature_convention not in ("periodic", "isolated"):
+            raise ValueError(
+                "solvent_plane_feature_convention must be 'periodic' or 'isolated', "
+                f"got {solvent_plane_feature_convention!r}"
+            )
+        self.solvent_plane_feature_convention = str(solvent_plane_feature_convention)
         self.register_buffer(
             "fermi_level_baseline",
             torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
@@ -1381,6 +1411,7 @@ class PolarMACE(ScaleShiftMACE):
             sigma_g=self.solvent_sigma_g,
             feature_sigmas=self.field_feature_widths,
             axis=self.solvent_potential_axis,
+            convention=self.solvent_plane_feature_convention,
         )
         compensation_slab_features = _slab_compensation_slab_correction_features(
             external_field_block=self.external_field_contribution,

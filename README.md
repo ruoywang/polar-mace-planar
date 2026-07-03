@@ -72,16 +72,23 @@ requirements-freeze.txt  pip freeze of the 9-final run venv
 
 ## Known issues (code review 2026-07-02)
 
-1. **Feature-level jellium inconsistency (charged systems).** In the SCF field
-   features the explicit density uses the periodic G!=0 evaluator (implicit
-   uniform neutralizing background), while the compensation plane uses the
-   *isolated* erf potential (no background). For `total_charge != 0` the sum
-   is not the potential of the neutral total system: a spurious quadratic
-   potential with curvature ~ k*Q/V (k = 4*pi*14.3996 eV*Å/e) remains, as if
-   the compensation were applied twice (once as jellium, once as the plane).
-   The *energy* decomposition is exact and unaffected. Fix: build the plane's
-   features from the 1D periodic G!=0 solution plus its own dipole-correction
-   field (machinery already exists in `_slab_compensation_periodic_1d_energy_radial`).
+1. **Feature-level jellium inconsistency (charged systems) — FIXED.** In the
+   SCF field features the explicit density uses the periodic G!=0 evaluator
+   (implicit uniform neutralizing background), while the compensation plane
+   used the *isolated* erf potential (no background). For `total_charge != 0`
+   the sum is not the potential of the neutral total system: a spurious
+   quadratic potential with curvature -k*q_plane/V remains (verified at
+   machine precision on 2-NiN sample 0: 2.45 eV spread across the atoms;
+   `tools/jellium_check/verify_jellium.py`). The *energy* decomposition is
+   exact and was never affected. Fixed by
+   `periodic_gaussian_layer_potential_field_nodes` (1D periodic G!=0 layer
+   potential with receiver-width damping) selected via
+   `--solvent_plane_feature_convention` (default `periodic`; `isolated`
+   reproduces the legacy behavior, and configs extracted from old checkpoints
+   default to `isolated`). Validation: `tools/jellium_check/test_periodic_fix.py`
+   (spurious curvature -0.0196 -> -1.3e-10 eV/Å²; autograd field consistency
+   4e-16; legacy path byte-identical). Models trained before the fix must be
+   retrained to benefit.
 2. **`solvent_center_mean_shift` defaults to 0.7 Å** in `arg_parser.py` and is
    silently used whenever neither `density_3d_weight` nor `charges_weight` is
    active (e.g. the `*fermi*` runs). Should be explicit in configs.
