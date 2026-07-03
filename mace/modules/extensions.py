@@ -739,6 +739,9 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_nuclear_sigma: float = 0.4,
         solvent_pb_coarse_init: bool = True,
         solvent_pb_include_bound: bool = True,
+        solvent_pb_backend: str = "torch",
+        solvent_pb_warm_start: bool = True,
+        solvent_pb_warm_fixsol_steps: int = 1,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -857,6 +860,13 @@ class PolarMACE(ScaleShiftMACE):
         self.solvent_pb_nuclear_sigma = float(solvent_pb_nuclear_sigma)
         self.solvent_pb_coarse_init = bool(solvent_pb_coarse_init)
         self.solvent_pb_include_bound = bool(solvent_pb_include_bound)
+        if solvent_pb_backend not in ("numpy", "torch"):
+            raise ValueError(
+                f"solvent_pb_backend must be 'numpy' or 'torch', got {solvent_pb_backend!r}"
+            )
+        self.solvent_pb_backend = str(solvent_pb_backend)
+        self.solvent_pb_warm_start = bool(solvent_pb_warm_start)
+        self.solvent_pb_warm_fixsol_steps = int(solvent_pb_warm_fixsol_steps)
         self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
@@ -1196,9 +1206,7 @@ class PolarMACE(ScaleShiftMACE):
 
     def _get_pb_solver(self):
         if self._pb_solver is None:
-            from .pb_solvent import PBPlanarSolvent
-
-            self._pb_solver = PBPlanarSolvent(
+            common = dict(
                 config_path=self.solvent_pb_config,
                 repo_path=self.solvent_pb_repo,
                 grid_spacing=self.solvent_pb_grid_spacing,
@@ -1208,6 +1216,18 @@ class PolarMACE(ScaleShiftMACE):
                 nuclear_sigma=self.solvent_pb_nuclear_sigma,
                 axis=self.solvent_potential_axis,
             )
+            if self.solvent_pb_backend == "torch":
+                from .pb_solvent import PBTorchBackend
+
+                self._pb_solver = PBTorchBackend(
+                    warm_start=self.solvent_pb_warm_start,
+                    warm_fixsol_steps=self.solvent_pb_warm_fixsol_steps,
+                    **common,
+                )
+            else:
+                from .pb_solvent import PBPlanarSolvent
+
+                self._pb_solver = PBPlanarSolvent(**common)
         return self._pb_solver
 
     def _solve_pb_profiles(
@@ -1230,9 +1250,14 @@ class PolarMACE(ScaleShiftMACE):
         solve per forward suffices.
         """
         from .loss import _gto_density_at_points_axis2_pbc
-        from .pb_solvent import profiles_to_tensors
+        from .pb_solvent import (
+            profiles_to_tensors,
+            resample_profile_periodic_torch,
+        )
 
         solver = self._get_pb_solver()
+        use_torch = self.solvent_pb_backend == "torch"
+        eval_chunk = 262144 if positions.is_cuda else 4096
         axis = self.solvent_potential_axis
         cells = cell.detach()
         if cells.dim() == 2 and cells.shape[1] == 3:
@@ -1244,11 +1269,16 @@ class PolarMACE(ScaleShiftMACE):
         element_index = torch.argmax(data["node_attrs"], dim=-1)
         atomic_numbers_nodes = self.atomic_numbers[element_index]
         total_charge_g = data["total_charge"].view(-1)
+        sample_ids = data.get("sample_id")
+        if sample_ids is not None:
+            sample_ids = sample_ids.view(-1)
 
         profiles: List[Optional[Dict[str, Any]]] = []
         heights: List[float] = []
         q_ion = positions.new_zeros(num_graphs)
         solvent_mu = positions.new_zeros(num_graphs)
+        prof_feat = positions.new_zeros(num_graphs, 1024)
+        prof_energy = positions.new_zeros(num_graphs, 512)
         for g in range(num_graphs):
             cell_g = cells[g]
             heights.append(float(_axis_box_length(cell_g, axis).item()))
@@ -1260,14 +1290,16 @@ class PolarMACE(ScaleShiftMACE):
             coeffs_g = radial_blocks[atom_mask].detach()
             numbers_g = atomic_numbers_nodes[atom_mask]
             zval_g = node_valence_electrons[atom_mask].detach()
+            sid = (
+                int(sample_ids[g].detach().cpu().item())
+                if sample_ids is not None
+                else None
+            )
 
-            def eval_net_density(points_np):
+            def eval_net_density_t(pts):
                 with torch.no_grad():
-                    pts = torch.as_tensor(
-                        points_np, device=positions.device, dtype=positions.dtype
-                    )
                     chunks = []
-                    for chunk in pts.split(4096):
+                    for chunk in pts.to(positions.dtype).split(eval_chunk):
                         chunks.append(
                             _gto_density_at_points_axis2_pbc(
                                 chunk,
@@ -1278,22 +1310,39 @@ class PolarMACE(ScaleShiftMACE):
                                 self.atomic_density_sigmas,
                             )
                         )
-                    return torch.cat(chunks).detach().cpu().numpy()
+                    return torch.cat(chunks).detach()
 
-            result = solver.solve_rho_ion_z(
-                positions=pos_g.cpu().numpy(),
-                cell=cell_g.cpu().numpy(),
-                z_valence=zval_g.cpu().numpy(),
-                total_charge=float(total_charge_g[g].item()),
-                neutral_sigma=float(self.atomic_multipoles_smearing_width),
-                eval_net_density=eval_net_density,
-            )
+            if use_torch:
+                result = solver.solve_rho_ion_z(
+                    positions=pos_g,
+                    cell=cell_g,
+                    z_valence=zval_g,
+                    total_charge=float(total_charge_g[g].item()),
+                    neutral_sigma=float(self.atomic_multipoles_smearing_width),
+                    eval_net_density=eval_net_density_t,
+                    sample_id=sid,
+                )
+            else:
+                def eval_net_density(points_np):
+                    pts = torch.as_tensor(
+                        points_np, device=positions.device, dtype=positions.dtype
+                    )
+                    return eval_net_density_t(pts).cpu().numpy()
+
+                result = solver.solve_rho_ion_z(
+                    positions=pos_g.cpu().numpy(),
+                    cell=cell_g.cpu().numpy(),
+                    z_valence=zval_g.cpu().numpy(),
+                    total_charge=float(total_charge_g[g].item()),
+                    neutral_sigma=float(self.atomic_multipoles_smearing_width),
+                    eval_net_density=eval_net_density,
+                )
             # The solvent layer the model sees: ionic charge alone, or the
             # full implicit-region solvent charge (ionic + bound). The bound
             # (polarization) charge integrates to ~0 but carries the
             # dielectric screening dipole of the implicit region.
+            result = dict(result)
             if self.solvent_pb_include_bound:
-                result = dict(result)
                 result["rho_layer_z"] = (
                     result["rho_ion_z"] + result["rho_bound_z"]
                 )
@@ -1302,21 +1351,30 @@ class PolarMACE(ScaleShiftMACE):
                     + result["mu_bound"]
                 )
             else:
-                result = dict(result)
                 result["rho_layer_z"] = result["rho_ion_z"]
                 mu_g = result["q_ion"] * result["layer_mean"]
             profiles.append(result)
             q_ion[g] = float(result["q_ion"])
             solvent_mu[g] = float(mu_g)
+            if use_torch:
+                layer = result["rho_layer_z"].to(positions.dtype)
+                height_g = float(result["height"])
+                prof_feat[g] = resample_profile_periodic_torch(
+                    layer, height_g, 1024, False
+                )
+                prof_energy[g] = resample_profile_periodic_torch(
+                    layer, height_g, 512, True
+                )
 
-        prof_feat = profiles_to_tensors(
-            profiles, heights, 1024, False, positions.device, positions.dtype,
-            key="rho_layer_z",
-        )
-        prof_energy = profiles_to_tensors(
-            profiles, heights, 512, True, positions.device, positions.dtype,
-            key="rho_layer_z",
-        )
+        if not use_torch:
+            prof_feat = profiles_to_tensors(
+                profiles, heights, 1024, False, positions.device, positions.dtype,
+                key="rho_layer_z",
+            )
+            prof_energy = profiles_to_tensors(
+                profiles, heights, 512, True, positions.device, positions.dtype,
+                key="rho_layer_z",
+            )
         # Effective layer mean of the combined profile (dipole / charge);
         # the charge is the ionic one (bound integrates to ~0).
         layer_mean = solvent_mu / torch.where(

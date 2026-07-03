@@ -534,6 +534,32 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument(
+        "--solvent_pb_backend",
+        help=(
+            "PB solve backend: 'torch' (device-resident, GPU) or 'numpy' "
+            "(reference CPU path)"
+        ),
+        type=str,
+        choices=["numpy", "torch"],
+        default="torch",
+    )
+    parser.add_argument(
+        "--solvent_pb_warm_start",
+        help=(
+            "cache each sample's converged PB potential (and dipole fix-point "
+            "state) and reuse it as the next epoch's initial guess; the solve "
+            "still converges to the same residual tolerance (torch backend)"
+        ),
+        type=str2bool,
+        default=True,
+    )
+    parser.add_argument(
+        "--solvent_pb_warm_fixsol_steps",
+        help="dipole fix-steps on a warm-started solve (cold solves use --solvent_pb_fixsol_steps)",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
         "--solvent_pb_include_bound",
         help=(
             "include the bound (dielectric polarization) charge profile in "

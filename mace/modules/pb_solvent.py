@@ -339,6 +339,338 @@ class PBPlanarSolvent:
         }
 
 
+class PBTorchBackend:
+    """Device-resident PB solve: density sampling, cavity, and the Newton-PCG
+    solve all stay on the GPU (pure_python.torch_pb); only O(nz) profiles and
+    O(1) dipole bookkeeping touch the CPU.
+
+    Speed features, both result-preserving:
+    - per-sample warm start: the converged phi (float32, CPU-cached, keyed by
+      sample_id) seeds the next epoch's solve; convergence is still driven to
+      the same residual tolerance, so the solution is tolerance-identical.
+      On a warm hit the dipole fix-point state (qsol/dsol) is restored too and
+      ``warm_fixsol_steps`` (default 1) fix-steps suffice — across epochs the
+      fix-point is *more* converged than two cold steps.
+    - torch coarse-grid warm start for cold solves (same construction as the
+      numpy driver).
+    """
+
+    def __init__(
+        self,
+        config_path: str,
+        repo_path: Optional[str] = None,
+        grid_spacing: float = 0.15,
+        fixsol_steps: int = 2,
+        tol: float = 1.0e-3,
+        max_outer: int = 20,
+        cg_max_iter: int = 200,
+        coarse_init: bool = True,
+        nuclear_sigma: float = 0.4,
+        axis: int = 2,
+        warm_start: bool = True,
+        warm_fixsol_steps: int = 1,
+    ) -> None:
+        self._init_kwargs = {
+            "config_path": config_path,
+            "repo_path": repo_path,
+            "grid_spacing": grid_spacing,
+            "fixsol_steps": fixsol_steps,
+            "tol": tol,
+            "max_outer": max_outer,
+            "cg_max_iter": cg_max_iter,
+            "coarse_init": coarse_init,
+            "nuclear_sigma": nuclear_sigma,
+            "axis": axis,
+            "warm_start": warm_start,
+            "warm_fixsol_steps": warm_fixsol_steps,
+        }
+        if int(axis) != 2:
+            raise NotImplementedError("PB solvent model is defined for z-axis slabs")
+        if repo_path:
+            repo_path = os.path.expandvars(os.path.expanduser(repo_path))
+            if repo_path not in sys.path:
+                sys.path.insert(0, repo_path)
+        try:
+            from pure_python import torch_pb as tp
+            from pure_python.pb import derived_params
+            from pure_python.dipole_correction import (
+                EwaldDipoleMixer,
+                cdipol_indmin_from_center,
+                cdipol_potential_1d,
+                valence_ion_dipole_cart,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "solvent_pb_backend='torch' requires cep-dip-python-pb (with "
+                "torch_pb); pass --solvent_pb_repo or add it to PYTHONPATH"
+            ) from exc
+        self._tp = tp
+        self._EwaldDipoleMixer = EwaldDipoleMixer
+        self._cdipol_indmin_from_center = cdipol_indmin_from_center
+        self._cdipol_potential_1d = cdipol_potential_1d
+        self._valence_ion_dipole_cart = valence_ion_dipole_cart
+
+        config_path = os.path.expandvars(os.path.expanduser(config_path))
+        with open(config_path) as f:
+            cfg = json.load(f)
+        self.params = derived_params(cfg.get("solvation", cfg))
+        self.grid_spacing = float(grid_spacing)
+        self.fixsol_steps = int(fixsol_steps)
+        self.tol = float(tol)
+        self.max_outer = int(max_outer)
+        self.cg_max_iter = int(cg_max_iter)
+        self.coarse_init = bool(coarse_init)
+        self.nuclear_sigma = float(nuclear_sigma)
+        self.axis = int(axis)
+        self.warm_start = bool(warm_start)
+        self.warm_fixsol_steps = int(warm_fixsol_steps)
+        self._grids: Dict = {}
+        self._phi_cache: Dict = {}
+        self.last_diagnostics: Dict[str, float] = {}
+
+    def __getstate__(self) -> Dict:
+        return dict(self._init_kwargs)
+
+    def __setstate__(self, state: Dict) -> None:
+        self.__init__(**state)
+
+    def _grid_shape(self, cell: np.ndarray) -> tuple:
+        lengths = np.linalg.norm(cell, axis=1)
+        return tuple(
+            _fft_friendly_even(int(math.ceil(l / self.grid_spacing)))
+            for l in lengths
+        )
+
+    def _grid_for(self, cell_np: np.ndarray, shape, device):
+        key = (shape, cell_np.tobytes(), str(device))
+        g = self._grids.get(key)
+        if g is None:
+            g = self._tp.TorchGrid(
+                cell_np, shape, device=device, dtype=torch.float64, rspec=True
+            )
+            # per-shape frequency vectors for structure factors
+            nx, ny, nz = shape
+            g._hx = torch.fft.fftfreq(nx, device=g.device, dtype=g.dtype) * nx
+            g._hy = torch.fft.fftfreq(ny, device=g.device, dtype=g.dtype) * ny
+            g._hz = torch.arange(nz // 2 + 1, device=g.device, dtype=g.dtype)
+            self._grids[key] = g
+        return g
+
+    def _structure_factor(self, grid, pos_frac: torch.Tensor) -> torch.Tensor:
+        tpi = 2.0 * math.pi
+        ex = torch.exp(-1j * tpi * pos_frac[:, 0, None] * grid._hx[None, :])
+        ey = torch.exp(-1j * tpi * pos_frac[:, 1, None] * grid._hy[None, :])
+        ez = torch.exp(-1j * tpi * pos_frac[:, 2, None] * grid._hz[None, :])
+        return torch.einsum("ah,ak,al->hkl", ex, ey, ez)
+
+    @staticmethod
+    def _restrict_half_t(a: torch.Tensor) -> torch.Tensor:
+        return a[::2, ::2, ::2].contiguous()
+
+    def _prolong_double_t(self, phi_c: torch.Tensor, grid_c, grid_f) -> torch.Tensor:
+        spec_c = grid_c.fft(phi_c)
+        spec_f = torch.zeros(grid_f.spec_shape, dtype=grid_f.cdtype, device=grid_f.device)
+        ncx, ncy, ncz = grid_c.shape
+        hx, hy, hz = ncx // 2, ncy // 2, ncz // 2
+        spec_f[:hx, :hy, :hz] = spec_c[:hx, :hy, :hz]
+        spec_f[-(hx - 1):, :hy, :hz] = spec_c[-(hx - 1):, :hy, :hz]
+        spec_f[:hx, -(hy - 1):, :hz] = spec_c[:hx, -(hy - 1):, :hz]
+        spec_f[-(hx - 1):, -(hy - 1):, :hz] = spec_c[-(hx - 1):, -(hy - 1):, :hz]
+        return grid_f.ifft_real(spec_f)
+
+    def solve_rho_ion_z(
+        self,
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        z_valence: torch.Tensor,
+        total_charge: float,
+        neutral_sigma: float,
+        eval_net_density,
+        sample_id: Optional[int] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Device-resident analogue of PBPlanarSolvent.solve_rho_ion_z.
+
+        positions/cell/z_valence are torch tensors on the model device;
+        eval_net_density maps cartesian points [m, 3] (device tensor) to net
+        charge density [m] (device tensor, physics sign, e/A^3). Returns
+        z / rho_ion_z / rho_bound_z as device tensors plus float moments.
+        """
+        t0 = perf_counter()
+        device = positions.device
+        cell_np = cell.detach().cpu().numpy().astype(float).reshape(3, 3)
+        shape = self._grid_shape(cell_np)
+        grid = self._grid_for(cell_np, shape, device)
+        nx, ny, nz = shape
+        volume = grid.volume
+        dt = torch.float64
+
+        pos64 = positions.detach().to(dt)
+        cell64 = torch.as_tensor(cell_np, device=device, dtype=dt)
+        pos_frac = torch.remainder(
+            pos64 @ torch.linalg.inv(cell64), 1.0
+        )
+
+        # grid points (cached per grid)
+        if not hasattr(grid, "_cart_pts"):
+            fx = torch.arange(nx, device=device, dtype=dt) / nx
+            fy = torch.arange(ny, device=device, dtype=dt) / ny
+            fz = torch.arange(nz, device=device, dtype=dt) / nz
+            frac = torch.stack(
+                torch.meshgrid(fx, fy, fz, indexing="ij"), dim=-1
+            ).reshape(-1, 3)
+            grid._cart_pts = frac @ cell64
+        net = eval_net_density(grid._cart_pts).to(dt).reshape(shape)
+        t_net = perf_counter()
+
+        # neutral baseline + nuclei via structure factors (grouped by zval)
+        g_abs2 = grid.gsq * (2.0 * math.pi) ** 2
+        damp_neutral = torch.exp(-0.5 * g_abs2 * float(neutral_sigma) ** 2)
+        damp_nuclear = torch.exp(-0.5 * g_abs2 * float(self.nuclear_sigma) ** 2)
+        zv = z_valence.detach().to(dt)
+        neutral_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
+        nuclei_g = torch.zeros(grid.spec_shape, dtype=grid.cdtype, device=device)
+        for v in torch.unique(zv):
+            sf = self._structure_factor(grid, pos_frac[zv == v])
+            neutral_g = neutral_g + float(v) * damp_neutral * sf
+            nuclei_g = nuclei_g + (-float(v)) * damp_nuclear * sf
+        n_e_values = grid.ifft_real(neutral_g) - net * volume
+        n_e_density = torch.clamp(n_e_values / volume, min=0.0)
+        t_dens = perf_counter()
+
+        s_ion, s_diel, _ = self._tp.create_cavity_torch(n_e_density, grid, self.params)
+        t_cav = perf_counter()
+
+        cvhar = grid.ifft_real(grid.l0_inv_op(grid.fft(n_e_values) + nuclei_g))
+        q_sol = float(-total_charge)
+
+        # valence+ion dipole via the reference routine on the plane profile
+        # (identical by construction: it only uses the plane average).
+        prof_ne = n_e_values.mean(dim=(0, 1)).detach().cpu().numpy()
+        val_ion_dipole = self._valence_ion_dipole_cart(
+            prof_ne.reshape(1, 1, nz),
+            pos_frac.detach().cpu().numpy(),
+            [float(x) for x in zv.detach().cpu().numpy()],
+            [1] * int(pos64.shape[0]),
+            cell_np,
+        )
+        val_ion_dipole[0:2] = 0.0
+
+        # warm start
+        cached = self._phi_cache.get(sample_id) if (
+            self.warm_start and sample_id is not None
+        ) else None
+        warm = cached is not None and cached["shape"] == shape
+        if warm:
+            phi_total = cached["phi"].to(device=device, dtype=dt)
+            qsol_cache = cached["qsol"]
+            dsol_z = cached["dsol_z"]
+            n_steps = max(1, self.warm_fixsol_steps)
+        else:
+            phi_total = torch.zeros(shape, dtype=dt, device=device)
+            qsol_cache = 0.0
+            dsol_z = 0.0
+            n_steps = self.fixsol_steps
+
+        mixer = self._EwaldDipoleMixer.fresh()
+        indmin_z = self._cdipol_indmin_from_center(nz, 0.5)
+        length_z = float(np.linalg.norm(cell_np[2]))
+        center_abs_z = 0.5 * (cell_np[0, 2] + cell_np[1, 2] + cell_np[2, 2])
+        z_mesh = grid.z_mesh  # [nx,ny,nz] cartesian z of grid points
+        n_b = n_ion = None
+        history = []
+        for step in range(n_steps):
+            dip = val_ion_dipole.copy()
+            dip[2] += dsol_z - qsol_cache * center_abs_z
+            _, ef_direct = mixer.ewald_dipol(dip, cell_np, 3)
+            cvdip_z = torch.as_tensor(
+                self._cdipol_potential_1d(nz, length_z, ef_direct[2], indmin_z),
+                device=device, dtype=dt,
+            )
+            phi_sol = cvhar + cvdip_z[None, None, :]
+            if step == 0 and not warm and self.coarse_init and all(
+                n % 2 == 0 for n in shape
+            ):
+                grid_c = self._grid_for(
+                    cell_np, tuple(n // 2 for n in shape), device
+                )
+                phi_c, _, _, _, _ = self._tp.solve_nlpb_for_phi_sol_torch(
+                    torch.zeros(grid_c.shape, dtype=dt, device=device),
+                    self._restrict_half_t(phi_sol),
+                    self._restrict_half_t(s_ion),
+                    self._restrict_half_t(s_diel),
+                    grid_c, self.params, q_sol,
+                    self.tol, self.max_outer, self.cg_max_iter,
+                )
+                phi_total = self._prolong_double_t(phi_c, grid_c, grid)
+            phi_total, n_b, n_ion, _, history = self._tp.solve_nlpb_for_phi_sol_torch(
+                phi_total, phi_sol, s_ion, s_diel, grid, self.params,
+                q_sol, self.tol, self.max_outer, self.cg_max_iter,
+            )
+            solv = n_b + n_ion
+            qsol_cache = float(solv.mean())
+            dsol_z = float((solv * z_mesh).mean())
+        t_solve = perf_counter()
+
+        if self.warm_start and sample_id is not None:
+            self._phi_cache[sample_id] = {
+                "phi": phi_total.detach().to(torch.float32).cpu(),
+                "qsol": qsol_cache,
+                "dsol_z": dsol_z,
+                "shape": shape,
+            }
+
+        rho_ion_z = -(n_ion / volume).mean(dim=(0, 1))
+        rho_bound_z = -(n_b / volume).mean(dim=(0, 1))
+        dz = length_z / nz
+        area = volume / length_z
+        z = torch.arange(nz, device=device, dtype=dt) * dz
+        q_ion = float((rho_ion_z.sum() * dz * area).item())
+        q_bound = float((rho_bound_z.sum() * dz * area).item())
+        denom = q_ion if abs(q_ion) > 1.0e-12 else 1.0e-12
+        layer_mean = float(((rho_ion_z * z).sum() * dz * area).item() / denom)
+        mu_bound = float(((rho_bound_z * z).sum() * dz * area).item())
+
+        self.last_diagnostics = {
+            "t_net_density": t_net - t0,
+            "t_baseline": t_dens - t_net,
+            "t_cavity": t_cav - t_dens,
+            "t_solve": t_solve - t_cav,
+            "t_total": t_solve - t0,
+            "warm": bool(warm),
+            "rms_last": float(history[-1][1]) if history else float("nan"),
+            "q_ion": q_ion,
+            "q_bound": q_bound,
+            "layer_mean": layer_mean,
+            "mu_bound": mu_bound,
+        }
+        return {
+            "z": z,
+            "rho_ion_z": rho_ion_z,
+            "rho_bound_z": rho_bound_z,
+            "height": length_z,
+            "q_ion": q_ion,
+            "q_bound": q_bound,
+            "layer_mean": layer_mean,
+            "mu_bound": mu_bound,
+        }
+
+
+def resample_profile_periodic_torch(
+    profile: torch.Tensor,
+    height: float,
+    num_grid: int,
+    offset_half: bool,
+) -> torch.Tensor:
+    """Periodic linear resampling of a uniform-grid profile (torch, device)."""
+    nz = profile.shape[0]
+    j = torch.arange(num_grid, device=profile.device, dtype=profile.dtype)
+    u = (j + (0.5 if offset_half else 0.0)) * (nz / float(num_grid))
+    i0 = torch.floor(u).to(torch.long) % nz
+    i1 = (i0 + 1) % nz
+    w = (u - torch.floor(u)).to(profile.dtype)
+    return profile[i0] * (1.0 - w) + profile[i1] * w
+
+
 def resample_profile_periodic(
     z_src: np.ndarray,
     rho_src: np.ndarray,
