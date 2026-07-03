@@ -460,6 +460,75 @@ class PBTorchBackend:
             self._grids[key] = g
         return g
 
+    def _gto_spec_basis(self, grid, sigmas) -> torch.Tensor:
+        """Per-channel reciprocal form factors of the normalized-multipole
+        GTO basis, cached on the grid: [C, *spec_shape] complex with
+        C = len(sigmas) * 9 (sigma-major, then lm with l = 0, 1, 2).
+
+        FT[phi_lm^sigma](G) = (-i)^l A_l |G|^l Y_lm(G_hat) exp(-sigma^2 G^2/2),
+        A_l = (2 pi)^{3/2} / (sqrt(4 pi/(2l+1)) 2^{(2l+1)/2} Gamma(l+3/2));
+        the 'multipoles' normalization cancels sigma^{2l+3} exactly and gives
+        A_0 = 1, so a monopole coefficient c contributes amplitude c at G -> 0
+        — the same convention as the neutral/nuclear structure factors.
+        Y_lm is evaluated with the same e3nn call (and axis permutation) as
+        the real-space evaluator, so conventions match by construction.
+        """
+        key = tuple(float(s) for s in sigmas)
+        cache = getattr(grid, "_gto_spec_basis", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        from e3nn.o3 import spherical_harmonics
+        from graph_longrange.utils import permute_to_e3nn_convention
+        from scipy.special import gamma as _gamma
+
+        gvec = torch.stack([grid.gx, grid.gy, grid.gz], dim=-1) * (2.0 * math.pi)
+        g2 = (gvec * gvec).sum(-1)
+        gabs = torch.sqrt(g2)
+        nz = g2 > 1.0e-24
+        safe = torch.where(
+            nz.unsqueeze(-1), gvec,
+            torch.tensor([1.0, 0.0, 0.0], device=gvec.device, dtype=gvec.dtype),
+        )
+        Y = []
+        for l in range(3):
+            y = spherical_harmonics(
+                l, permute_to_e3nn_convention(safe.reshape(-1, 3)), normalize=True
+            )
+            Y.append(y.reshape(*grid.spec_shape, 2 * l + 1))
+        chans = []
+        for s in key:
+            damp = torch.exp(-0.5 * g2 * s * s)
+            for l in range(3):
+                A = (2.0 * math.pi) ** 1.5 / (
+                    math.sqrt(4.0 * math.pi / (2 * l + 1))
+                    * 2.0 ** ((2 * l + 1) / 2.0)
+                    * float(_gamma((2 * l + 3) / 2.0))
+                )
+                radial = damp * gabs ** l * A
+                if l > 0:
+                    radial = radial * nz  # kills G=0 (and the padded dirs)
+                phase = (-1j) ** l
+                for m in range(2 * l + 1):
+                    chans.append((phase * (radial * Y[l][..., m])).to(grid.cdtype))
+        B = torch.stack(chans)
+        grid._gto_spec_basis = (key, B)
+        return B
+
+    def _gto_net_density_g(
+        self, grid, pos_frac: torch.Tensor, coeffs: torch.Tensor, sigmas
+    ) -> torch.Tensor:
+        """Values-amplitude spectrum of the model net density from its GTO
+        multipole coefficients [n_atoms, n_sigmas, 9] — replaces the O(grid x
+        atoms) pointwise evaluation with structure factors x form factors."""
+        B = self._gto_spec_basis(grid, sigmas)
+        tpi = 2.0 * math.pi
+        ex = torch.exp(-1j * tpi * pos_frac[:, 0, None] * grid._hx[None, :])
+        ey = torch.exp(-1j * tpi * pos_frac[:, 1, None] * grid._hy[None, :])
+        ez = torch.exp(-1j * tpi * pos_frac[:, 2, None] * grid._hz[None, :])
+        W = coeffs.reshape(coeffs.shape[0], -1).to(B.dtype)  # [a, C]
+        S = torch.einsum("ac,ah,ak,al->chkl", W, ex, ey, ez)
+        return (B * S).sum(dim=0)
+
     def _structure_factor(self, grid, pos_frac: torch.Tensor) -> torch.Tensor:
         tpi = 2.0 * math.pi
         ex = torch.exp(-1j * tpi * pos_frac[:, 0, None] * grid._hx[None, :])
@@ -489,15 +558,20 @@ class PBTorchBackend:
         z_valence: torch.Tensor,
         total_charge: float,
         neutral_sigma: float,
-        eval_net_density,
+        eval_net_density=None,
         sample_id: Optional[int] = None,
+        radial_coeffs: Optional[torch.Tensor] = None,
+        sigmas=None,
     ) -> Dict[str, torch.Tensor]:
         """Device-resident analogue of PBPlanarSolvent.solve_rho_ion_z.
 
-        positions/cell/z_valence are torch tensors on the model device;
-        eval_net_density maps cartesian points [m, 3] (device tensor) to net
-        charge density [m] (device tensor, physics sign, e/A^3). Returns
-        z / rho_ion_z / rho_bound_z as device tensors plus float moments.
+        positions/cell/z_valence are torch tensors on the model device.
+        The net density enters either spectrally via ``radial_coeffs``
+        [n_atoms, n_sigmas, 9] + ``sigmas`` (fast path, exact reciprocal
+        assembly) or through ``eval_net_density`` mapping cartesian points
+        [m, 3] (device tensor) to net charge density [m] (device tensor,
+        physics sign, e/A^3). Returns z / rho_ion_z / rho_bound_z as device
+        tensors plus float moments.
         """
         t0 = perf_counter()
         device = positions.device
@@ -514,16 +588,23 @@ class PBTorchBackend:
             pos64 @ torch.linalg.inv(cell64), 1.0
         )
 
-        # grid points (cached per grid)
-        if not hasattr(grid, "_cart_pts"):
-            fx = torch.arange(nx, device=device, dtype=dt) / nx
-            fy = torch.arange(ny, device=device, dtype=dt) / ny
-            fz = torch.arange(nz, device=device, dtype=dt) / nz
-            frac = torch.stack(
-                torch.meshgrid(fx, fy, fz, indexing="ij"), dim=-1
-            ).reshape(-1, 3)
-            grid._cart_pts = frac @ cell64
-        net = eval_net_density(grid._cart_pts).to(dt).reshape(shape)
+        # net density: spectral assembly from coefficients (fast path) or
+        # pointwise evaluation on cached grid points (fallback)
+        if radial_coeffs is not None:
+            net_g = self._gto_net_density_g(
+                grid, pos_frac, radial_coeffs.detach().to(dt), sigmas
+            )
+        else:
+            if not hasattr(grid, "_cart_pts"):
+                fx = torch.arange(nx, device=device, dtype=dt) / nx
+                fy = torch.arange(ny, device=device, dtype=dt) / ny
+                fz = torch.arange(nz, device=device, dtype=dt) / nz
+                frac = torch.stack(
+                    torch.meshgrid(fx, fy, fz, indexing="ij"), dim=-1
+                ).reshape(-1, 3)
+                grid._cart_pts = frac @ cell64
+            net = eval_net_density(grid._cart_pts).to(dt).reshape(shape)
+            net_g = grid.fft(net * volume)
         t_net = perf_counter()
 
         # neutral baseline + nuclei via structure factors (grouped by zval)
@@ -537,14 +618,15 @@ class PBTorchBackend:
             sf = self._structure_factor(grid, pos_frac[zv == v])
             neutral_g = neutral_g + float(v) * damp_neutral * sf
             nuclei_g = nuclei_g + (-float(v)) * damp_nuclear * sf
-        n_e_values = grid.ifft_real(neutral_g) - net * volume
+        n_e_g = neutral_g - net_g
+        n_e_values = grid.ifft_real(n_e_g)
         n_e_density = torch.clamp(n_e_values / volume, min=0.0)
         t_dens = perf_counter()
 
         s_ion, s_diel, _ = self._tp.create_cavity_torch(n_e_density, grid, self.params)
         t_cav = perf_counter()
 
-        cvhar = grid.ifft_real(grid.l0_inv_op(grid.fft(n_e_values) + nuclei_g))
+        cvhar = grid.ifft_real(grid.l0_inv_op(n_e_g + nuclei_g))
         q_sol = float(-total_charge)
 
         # valence+ion dipole via the reference routine on the plane profile

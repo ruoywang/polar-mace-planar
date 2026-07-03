@@ -79,6 +79,35 @@ def main():
     cell_t = torch.as_tensor(cell, device=dev, dtype=torch.float64)
     zv_t = torch.as_tensor(zvals, device=dev, dtype=torch.float64)
 
+    print("=== 0. spectral vs pointwise net density (torch backend) ===")
+    from mace.modules.loss import _gto_density_at_points_axis2_pbc
+    torch.manual_seed(0)
+    sigmas = [0.25, 0.5, 1.0]
+    natoms = positions.shape[0]
+    coeffs = 0.1 * torch.randn(natoms, len(sigmas), 9, device=dev, dtype=torch.float64)
+    # build grid + spectral density via backend internals
+    shape0 = t_backend._grid_shape(cell)
+    grid0 = t_backend._grid_for(np.ascontiguousarray(cell), shape0, dev)
+    pos_frac_t = torch.remainder(pos_t @ torch.linalg.inv(cell_t), 1.0)
+    net_g = t_backend._gto_net_density_g(grid0, pos_frac_t, coeffs, sigmas)
+    net_spec = grid0.ifft_real(net_g) / grid0.volume  # e/A^3
+    # pointwise reference on the same grid points
+    nx0, ny0, nz0 = shape0
+    fx = torch.arange(nx0, device=dev, dtype=torch.float64) / nx0
+    fy = torch.arange(ny0, device=dev, dtype=torch.float64) / ny0
+    fz = torch.arange(nz0, device=dev, dtype=torch.float64) / nz0
+    pts = torch.stack(torch.meshgrid(fx, fy, fz, indexing="ij"), dim=-1).reshape(-1, 3) @ cell_t
+    numbers_dummy = torch.zeros(natoms, dtype=torch.long, device=dev)
+    with torch.no_grad():
+        ref_chunks = [
+            _gto_density_at_points_axis2_pbc(c, coeffs, pos_t, numbers_dummy, cell_t, sigmas)
+            for c in pts.split(262144)
+        ]
+    net_ref = torch.cat(ref_chunks).reshape(shape0)
+    dnet = float(torch.max(torch.abs(net_spec - net_ref)) / torch.max(torch.abs(net_ref)))
+    ok0 = dnet < 1e-8
+    print(f"  max rel diff: {dnet:.2e}  {'OK' if ok0 else 'FAIL'}")
+
     print("=== 1. parity: torch vs numpy backend ===")
     r_np = np_backend.solve_rho_ion_z(
         positions=positions, cell=cell, z_valence=zvals,
@@ -183,8 +212,8 @@ def main():
         print(f"  warm #{i+1}: {time.perf_counter()-t0:.2f} s  "
               f"stages={t_backend.last_diagnostics}")
 
-    print("\nRESULT:", "ALL PASS" if (ok1 and ok2) else "FAIL")
-    sys.exit(0 if (ok1 and ok2) else 1)
+    print("\nRESULT:", "ALL PASS" if (ok0 and ok1 and ok2) else "FAIL")
+    sys.exit(0 if (ok0 and ok1 and ok2) else 1)
 
 
 if __name__ == "__main__":

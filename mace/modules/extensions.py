@@ -1319,8 +1319,9 @@ class PolarMACE(ScaleShiftMACE):
                     z_valence=zval_g,
                     total_charge=float(total_charge_g[g].item()),
                     neutral_sigma=float(self.atomic_multipoles_smearing_width),
-                    eval_net_density=eval_net_density_t,
                     sample_id=sid,
+                    radial_coeffs=coeffs_g,
+                    sigmas=self.atomic_density_sigmas,
                 )
             else:
                 def eval_net_density(points_np):
