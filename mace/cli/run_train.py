@@ -13,6 +13,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
+import torch
 import torch.distributed
 from e3nn.util import jit
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -37,6 +39,18 @@ from mace.cli.convert_oeq_e3nn import run as run_oeq_to_e3nn
 from mace.cli.visualise_train import TrainingPlotter
 from mace.data import KeySpecification, update_keyspec_from_kwargs
 from mace.modules.lora import inject_LoRAs, merge_lora_weights
+from mace.modules.loss import (
+    POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2,
+    _load_density_3d_targets,
+    _load_potential_1d_profiles_npz,
+)
+from mace.modules.solvent_charge_layer import (
+    _axis_box_length,
+    _cell_cross_section_area,
+    _truncated_gaussian_mean,
+    compute_density_threshold_crossing_from_mace_multipoles,
+    compute_ze_crossing_from_mace_multipoles,
+)
 from mace.tools import torch_geometric
 from mace.tools.distributed_tools import init_distributed
 from mace.tools.model_script_utils import configure_model
@@ -77,12 +91,456 @@ from mace.tools.tables_utils import create_error_table
 from mace.tools.utils import AtomicNumberTable
 
 
+def _parse_float_list(value, name: str) -> List[float]:
+    if value is None:
+        raise ValueError(f"{name} must be specified")
+    parsed = ast.literal_eval(value) if isinstance(value, str) else value
+    if not isinstance(parsed, (list, tuple)):
+        raise ValueError(f"{name} must be a list")
+    return [float(x) for x in parsed]
+
+
+def _node_valence_for_config(config, z_table: AtomicNumberTable, args) -> torch.Tensor:
+    valence = _parse_float_list(args.atomic_valence_electrons, "atomic_valence_electrons")
+    if len(valence) != len(z_table.zs):
+        raise ValueError(
+            "atomic_valence_electrons must have the same length as the model atomic_numbers"
+        )
+    by_z = {int(z): float(v) for z, v in zip(z_table.zs, valence)}
+    return torch.as_tensor(
+        [by_z[int(z)] for z in config.atomic_numbers],
+        dtype=torch.get_default_dtype(),
+    )
+
+
+def _profile_crossing_from_density(
+    z_values: np.ndarray,
+    rho_values: np.ndarray,
+    z_top: float,
+    args,
+) -> Optional[float]:
+    z = np.asarray(z_values, dtype=np.float64)
+    rho = np.asarray(rho_values, dtype=np.float64)
+    if z.ndim != 1 or rho.ndim != 1 or z.shape != rho.shape or z.size < 2:
+        return None
+    z_lo = max(float(z_top) - float(args.solvent_window_inward), float(np.min(z)))
+    z_hi = min(float(z_top) + float(args.solvent_window_outward), float(np.max(z)))
+    mask = (z >= z_lo) & (z <= z_hi)
+    if int(np.count_nonzero(mask)) < 2:
+        return float(z_top)
+    z_win = z[mask]
+    rho_win = rho[mask]
+    threshold = getattr(args, "solvent_density_threshold", None)
+    if threshold is None:
+        rho_min = float(np.min(rho_win))
+        rho_max = float(np.max(rho_win))
+        span = max(rho_max - rho_min, 1.0e-12)
+        values = (rho_win - rho_min) / span
+        level = float(args.solvent_ze_level)
+    else:
+        values = rho_win
+        level = float(threshold)
+    for idx in range(z_win.size - 2, -1, -1):
+        v0 = float(values[idx])
+        v1 = float(values[idx + 1])
+        if (v0 - level) * (v1 - level) <= 0.0:
+            if abs(v1 - v0) < 1.0e-12:
+                return 0.5 * (float(z_win[idx]) + float(z_win[idx + 1]))
+            frac = (level - v0) / (v1 - v0)
+            frac = min(max(frac, 0.0), 1.0)
+            return float(z_win[idx] + frac * (z_win[idx + 1] - z_win[idx]))
+    return float(z_win[-1])
+
+
+def _invert_truncated_gaussian_mean(
+    target_mean: torch.Tensor,
+    sigma: float,
+    lower: torch.Tensor,
+    upper: torch.Tensor,
+) -> Optional[torch.Tensor]:
+    span = upper - lower
+    pad = target_mean.new_tensor(10.0 * max(float(sigma), 1.0e-12))
+    lo = lower - pad
+    hi = upper + pad
+    mean_lo = _truncated_gaussian_mean(lo, sigma, lower, upper)
+    mean_hi = _truncated_gaussian_mean(hi, sigma, lower, upper)
+    eps = target_mean.new_tensor(1.0e-8) * torch.clamp(span, min=1.0)
+    if bool(((target_mean < mean_lo - eps) | (target_mean > mean_hi + eps)).item()):
+        return None
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        mean_mid = _truncated_gaussian_mean(mid, sigma, lower, upper)
+        if bool((mean_mid < target_mean).item()):
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def _fit_density_solvent_center_mean_shift(
+    args,
+    head_configs,
+) -> Optional[float]:
+    density_file = getattr(args, "density_3d_file", None)
+    potential_file = getattr(args, "potential_1d_profile_file", None)
+    if density_file is None or potential_file is None:
+        raise ValueError(
+            "density_3d_weight > 0 requires density_3d_file and potential_1d_profile_file "
+            "to fit solvent_center_mean_shift"
+        )
+    density_targets = _load_density_3d_targets(density_file)
+    if not hasattr(density_targets, "plane_average"):
+        raise ValueError(
+            "density-derived solvent_center_mean_shift requires full-grid density_3d_file"
+        )
+    potential_targets = _load_potential_1d_profiles_npz(potential_file)
+    diffs: List[float] = []
+    axis = int(args.solvent_potential_axis)
+    if axis != 2:
+        raise NotImplementedError("density-derived solvent_center_mean_shift supports axis=2")
+    sign = torch.tensor(float(args.solvent_potential_sign), dtype=torch.get_default_dtype())
+    scale = torch.tensor(
+        POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2,
+        dtype=torch.get_default_dtype(),
+    )
+    for head_config in head_configs:
+        collections = getattr(head_config, "collections", None)
+        if collections is None:
+            continue
+        for config in collections.train:
+            sample_id = config.properties.get("sample_id", None)
+            ref_potential = config.properties.get("potential", None)
+            ref_total_charge = config.properties.get("total_charge", None)
+            if sample_id is None or ref_potential is None or ref_total_charge is None:
+                continue
+            sample_id = int(np.asarray(sample_id).reshape(-1)[0])
+            if sample_id not in potential_targets or sample_id not in density_targets:
+                continue
+            target = potential_targets[sample_id]
+            z_ref_np = np.asarray(target["z_A"], dtype=np.float64)
+            raw_neutral_np = np.asarray(target["raw_neutral_e"], dtype=np.float64)
+            raw_ion_np = np.asarray(target["raw_ion_potcar_e"], dtype=np.float64)
+            rho_residual = density_targets.plane_average(
+                sample_id=sample_id,
+                dtype=torch.get_default_dtype(),
+                device=torch.device("cpu"),
+            )
+            if int(rho_residual.numel()) != int(z_ref_np.size):
+                raise ValueError(
+                    f"sample_id {sample_id}: density grid nz does not match potential profile nz"
+                )
+            cell = torch.as_tensor(config.cell, dtype=torch.get_default_dtype()).view(3, 3)
+            area = _cell_cross_section_area(cell, axis)
+            z_ref = torch.as_tensor(z_ref_np, dtype=torch.get_default_dtype())
+            dz = torch.abs(z_ref[1] - z_ref[0])
+            height = torch.clamp(dz * float(z_ref.numel()), min=1.0e-12)
+            volume = area * height
+            raw_residual = rho_residual * volume
+            raw_neutral = torch.as_tensor(raw_neutral_np, dtype=torch.get_default_dtype())
+            raw_ion = torch.as_tensor(raw_ion_np, dtype=torch.get_default_dtype())
+            raw_explicit = raw_neutral - raw_residual + raw_ion
+            explicit_mu = -torch.mean(raw_explicit * z_ref)
+            potential = torch.as_tensor(
+                np.asarray(ref_potential).reshape(-1)[0],
+                dtype=torch.get_default_dtype(),
+            )
+            total_charge = torch.as_tensor(
+                np.asarray(ref_total_charge).reshape(-1)[0],
+                dtype=torch.get_default_dtype(),
+            )
+            solvent_charge = -total_charge
+            if bool((torch.abs(solvent_charge) <= 1.0e-12).item()):
+                continue
+            total_mu_ref = potential * area / (sign * scale)
+            target_layer_mean = (total_mu_ref - explicit_mu) / solvent_charge
+            lower = target_layer_mean.new_tensor(0.0)
+            upper = _axis_box_length(cell, axis).to(dtype=target_layer_mean.dtype)
+            target_center = _invert_truncated_gaussian_mean(
+                target_mean=target_layer_mean,
+                sigma=float(args.solvent_sigma_g),
+                lower=lower,
+                upper=upper,
+            )
+            if target_center is None:
+                continue
+            rho_total = raw_neutral_np / float(volume.item()) - rho_residual.detach().cpu().numpy()
+            z_top = float(np.max(np.asarray(config.positions)[:, axis]))
+            z_base = _profile_crossing_from_density(z_ref_np, rho_total, z_top, args)
+            if z_base is None:
+                continue
+            diffs.append(float(target_center.item()) - float(z_base))
+    if not diffs:
+        return None
+    mean_shift = float(sum(diffs) / len(diffs))
+    variance = sum((x - mean_shift) * (x - mean_shift) for x in diffs) / len(diffs)
+    logging.info(
+        "Fitted density-derived solvent-center mean shift: %.6f Å from %d configs (std=%.6f Å)",
+        mean_shift,
+        len(diffs),
+        variance**0.5,
+    )
+    return mean_shift
+
+
+def _fit_partition_solvent_center_mean_shift(
+    args,
+    head_configs,
+    z_table: AtomicNumberTable,
+) -> Optional[float]:
+    diffs: List[float] = []
+    axis = int(args.solvent_potential_axis)
+    sign = torch.tensor(float(args.solvent_potential_sign), dtype=torch.get_default_dtype())
+    scale = torch.tensor(
+        POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2,
+        dtype=torch.get_default_dtype(),
+    )
+    for head_config in head_configs:
+        collections = getattr(head_config, "collections", None)
+        if collections is None:
+            continue
+        for config in collections.train:
+            ref_potential = config.properties.get("potential", None)
+            ref_total_charge = config.properties.get("total_charge", None)
+            charges = config.properties.get("charges", None)
+            atomic_dipole = config.properties.get("atomic_dipole", None)
+            if (
+                ref_potential is None
+                or ref_total_charge is None
+                or charges is None
+                or atomic_dipole is None
+            ):
+                continue
+            positions = torch.as_tensor(config.positions, dtype=torch.get_default_dtype())
+            num_atoms = positions.shape[0]
+            batch = torch.zeros(num_atoms, dtype=torch.long)
+            charges_t = torch.as_tensor(charges, dtype=torch.get_default_dtype()).view(-1)
+            atomic_dipole_t = torch.as_tensor(
+                atomic_dipole, dtype=torch.get_default_dtype()
+            ).view(-1, 3)
+            cell = torch.as_tensor(config.cell, dtype=torch.get_default_dtype()).view(1, 3, 3)
+            node_valence = _node_valence_for_config(config, z_table, args)
+            density_coefficients = torch.cat(
+                [charges_t[:, None], atomic_dipole_t[:, [1, 2, 0]]], dim=1
+            )
+            if getattr(args, "solvent_density_threshold", None) is not None:
+                width_threshold = max(
+                    float(args.solvent_density_threshold) - 0.05,
+                    1.0e-6,
+                )
+                z_base, _ = compute_density_threshold_crossing_from_mace_multipoles(
+                    density_coefficients=density_coefficients,
+                    positions=positions,
+                    node_valence_electrons=node_valence,
+                    batch=batch,
+                    cell=cell,
+                    density_smearing_width=float(args.atomic_multipoles_smearing_width),
+                    density_threshold=float(args.solvent_density_threshold),
+                    width_density_threshold=width_threshold,
+                    inward=float(args.solvent_window_inward),
+                    outward=float(args.solvent_window_outward),
+                    axis=axis,
+                )
+            else:
+                z_base, _ = compute_ze_crossing_from_mace_multipoles(
+                    density_coefficients=density_coefficients,
+                    positions=positions,
+                    node_valence_electrons=node_valence,
+                    batch=batch,
+                    cell=cell,
+                    density_smearing_width=float(args.atomic_multipoles_smearing_width),
+                    level=float(args.solvent_ze_level),
+                    inward=float(args.solvent_window_inward),
+                    outward=float(args.solvent_window_outward),
+                    axis=axis,
+                )
+            explicit_mu = torch.sum(charges_t * positions[:, axis])
+            explicit_mu = explicit_mu + torch.sum(atomic_dipole_t[:, axis])
+            area = _cell_cross_section_area(cell.view(3, 3), axis)
+            potential = torch.as_tensor(
+                np.asarray(ref_potential).reshape(-1)[0],
+                dtype=torch.get_default_dtype(),
+            )
+            total_charge = torch.as_tensor(
+                np.asarray(ref_total_charge).reshape(-1)[0],
+                dtype=torch.get_default_dtype(),
+            )
+            solvent_charge = -total_charge
+            if bool((torch.abs(solvent_charge) <= 1.0e-12).item()):
+                continue
+            total_mu_ref = potential * area / (sign * scale)
+            target_layer_mean = (total_mu_ref - explicit_mu) / solvent_charge
+            lower = target_layer_mean.new_tensor(0.0)
+            upper = _axis_box_length(cell.view(3, 3), axis).to(dtype=target_layer_mean.dtype)
+            target_center = _invert_truncated_gaussian_mean(
+                target_mean=target_layer_mean,
+                sigma=float(args.solvent_sigma_g),
+                lower=lower,
+                upper=upper,
+            )
+            if target_center is None:
+                continue
+            diffs.append(float(target_center.item()) - float(z_base.view(-1)[0].item()))
+    if not diffs:
+        return None
+    mean_shift = float(sum(diffs) / len(diffs))
+    variance = sum((x - mean_shift) * (x - mean_shift) for x in diffs) / len(diffs)
+    logging.info(
+        "Fitted partition-derived solvent-center mean shift: %.6f Å from %d configs (std=%.6f Å)",
+        mean_shift,
+        len(diffs),
+        variance**0.5,
+    )
+    return mean_shift
+
+
+def _fit_train_solvent_center_mean_shift(
+    args,
+    head_configs,
+    z_table: AtomicNumberTable,
+) -> float:
+    if args.model != "PolarMACE":
+        return 0.0
+    use_density_shift = float(getattr(args, "density_3d_weight", 0.0)) > 1.0e-12
+    use_partition_shift = float(getattr(args, "charges_weight", 0.0)) > 1.0e-12
+    if use_density_shift and use_partition_shift:
+        raise ValueError(
+            "Cannot fit solvent_center_mean_shift with both density_3d_weight and "
+            "charges_weight enabled; choose one center definition."
+        )
+    if use_density_shift:
+        fitted = _fit_density_solvent_center_mean_shift(args, head_configs)
+    elif use_partition_shift:
+        fitted = _fit_partition_solvent_center_mean_shift(args, head_configs, z_table)
+    else:
+        learn_center = float(getattr(args, "solvent_center_weight", 0.0)) > 1.0e-12
+        if learn_center:
+            raise ValueError(
+                "solvent_center_weight > 0 requires density_3d_weight or "
+                "charges_weight to fit solvent_center_mean_shift."
+            )
+        configured_shift = float(getattr(args, "solvent_center_mean_shift", 0.0))
+        logging.info(
+            "No density_3d_weight or charges_weight enabled; using configured "
+            "solvent_center_mean_shift=%.6f Å.",
+            configured_shift,
+        )
+        return configured_shift
+    if fitted is None:
+        logging.warning(
+            "Could not fit solvent_center_mean_shift from training split; using configured value %.6f Å.",
+            float(getattr(args, "solvent_center_mean_shift", 0.0)),
+        )
+        return float(getattr(args, "solvent_center_mean_shift", 0.0))
+    logging.info(
+        "Using fitted solvent_center_mean_shift=%.6f Å.",
+        fitted,
+    )
+    return fitted
+
+
+def _fit_train_fermi_level_baseline(args, head_configs) -> float:
+    if args.model != "PolarMACE":
+        return 0.0
+    if float(getattr(args, "fermi_level_weight", 0.0)) <= 1.0e-12:
+        logging.info("No fermi_level_weight enabled; using fermi_level_baseline=0.000000 eV.")
+        return 0.0
+    values: List[float] = []
+    for head_config in head_configs:
+        collections = getattr(head_config, "collections", None)
+        if collections is None:
+            continue
+        for config in collections.train:
+            fermi_level = config.properties.get("fermi_level", None)
+            potential = config.properties.get("potential", None)
+            if fermi_level is None or potential is None:
+                continue
+            fermi_value = float(np.asarray(fermi_level, dtype=np.float64).reshape(-1)[0])
+            potential_value = float(np.asarray(potential, dtype=np.float64).reshape(-1)[0])
+            values.append(fermi_value + potential_value)
+    if not values:
+        raise ValueError(
+            "fermi_level_weight > 0 requires train configs with fermi_level and potential targets"
+        )
+    baseline = float(sum(values) / len(values))
+    variance = sum((x - baseline) * (x - baseline) for x in values) / len(values)
+    logging.info(
+        "Fitted train Fermi-level baseline: %.6f eV from %d configs (std=%.6f eV)",
+        baseline,
+        len(values),
+        variance**0.5,
+    )
+    return baseline
+
+
 def main() -> None:
     """
     This script runs the training/fine tuning for mace
     """
     args = tools.build_default_arg_parser().parse_args()
     run(args)
+
+
+def _compute_element_charge_baseline(
+    head_configs: List[HeadConfig],
+    heads: List[str],
+    z_table: AtomicNumberTable,
+) -> torch.Tensor:
+    baseline = torch.zeros(
+        (len(heads), len(z_table.zs)), dtype=torch.get_default_dtype()
+    )
+    baseline_weights = torch.zeros_like(baseline)
+    head_to_index = {head: i for i, head in enumerate(heads)}
+
+    for head_config in head_configs:
+        head_idx = head_to_index.get(head_config.head_name)
+        if head_idx is None:
+            continue
+        for config in head_config.collections.train:
+            charges = config.properties.get("charges")
+            charges_weight = float(config.property_weights.get("charges", 0.0))
+            config_weight = float(config.weight) * charges_weight
+            if charges is None or config_weight <= 0.0:
+                continue
+            for atomic_number, charge in zip(config.atomic_numbers, charges):
+                z_idx = z_table.z_to_index(int(atomic_number))
+                baseline[head_idx, z_idx] += config_weight * float(charge)
+                baseline_weights[head_idx, z_idx] += config_weight
+
+    mask = baseline_weights > 0
+    baseline[mask] = baseline[mask] / baseline_weights[mask]
+    return baseline
+
+
+def _compute_global_charge_residual_std(
+    head_configs: List[HeadConfig],
+    baseline: torch.Tensor,
+    heads: List[str],
+    z_table: AtomicNumberTable,
+    min_std: float = 1.0e-6,
+) -> float:
+    head_to_index = {head: i for i, head in enumerate(heads)}
+    residual_var = 0.0
+    residual_weight = 0.0
+
+    for head_config in head_configs:
+        head_idx = head_to_index.get(head_config.head_name)
+        if head_idx is None:
+            continue
+        for config in head_config.collections.train:
+            charges = config.properties.get("charges")
+            charges_weight = float(config.property_weights.get("charges", 0.0))
+            config_weight = float(config.weight) * charges_weight
+            if charges is None or config_weight <= 0.0:
+                continue
+            for atomic_number, charge in zip(config.atomic_numbers, charges):
+                z_idx = z_table.z_to_index(int(atomic_number))
+                residual = float(charge) - float(baseline[head_idx, z_idx])
+                residual_var += config_weight * (residual * residual)
+                residual_weight += config_weight
+
+    if residual_weight <= 0.0:
+        return 1.0
+    return float(max((residual_var / residual_weight) ** 0.5, min_std))
 
 
 def run(args) -> None:
@@ -523,6 +981,40 @@ def run(args) -> None:
             for z in z_table.zs
         }
     heads = sorted(heads, key=lambda x: -1000 if x == "pt_head" else 0)
+    element_charge_baseline = None
+    if args.model == "PolarMACE" and args.element_charge_baseline:
+        element_charge_baseline = _compute_element_charge_baseline(
+            head_configs=head_configs, heads=heads, z_table=z_table
+        )
+        atomic_numbers_per_head = {
+            head_config.head_name: set(head_config.atomic_numbers)
+            for head_config in head_configs
+        }
+        for head_idx, head_name in enumerate(heads):
+            baseline_entries = [
+                f"{z}: {element_charge_baseline[head_idx, z_idx].item():.6f}"
+                for z_idx, z in enumerate(z_table.zs)
+                if z in atomic_numbers_per_head.get(head_name, set())
+            ]
+            logging.info(
+                "Element charge baseline for head %s (z: e): {%s}",
+                head_name,
+                ", ".join(baseline_entries),
+            )
+        if args.element_charge_residual_scale is None:
+            args.element_charge_residual_scale = _compute_global_charge_residual_std(
+                head_configs=head_configs,
+                baseline=element_charge_baseline,
+                heads=heads,
+                z_table=z_table,
+            )
+            logging.info(
+                "Global charge residual std around the element baseline: %.8f e",
+                args.element_charge_residual_scale,
+            )
+
+    if args.element_charge_residual_scale is None:
+        args.element_charge_residual_scale = 1.0
     # Padding atomic energies if keeping all elements of the foundation model
     if args.foundation_model_elements and model_foundation:
         atomic_energies_dict_padded = {}
@@ -560,10 +1052,13 @@ def run(args) -> None:
             args.compute_virials = False
             args.compute_stress = False
             args.compute_polarizability = False
-        elif args.model == "PolarMACE" and args.loss == "energy_forces_dipole":
+        elif args.model == "PolarMACE" and args.loss in (
+            "energy_forces_dipole",
+            "energy_forces_electrostatics",
+        ):
             args.compute_dipole = True
-            args.compute_energy = True
-            args.compute_forces = True
+            args.compute_energy = bool(float(args.energy_weight) != 0.0)
+            args.compute_forces = bool(float(args.forces_weight) != 0.0)
             args.compute_virials = False
             args.compute_stress = False
             args.compute_polarizability = False
@@ -750,6 +1245,10 @@ def run(args) -> None:
 
     loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole)
     args.avg_num_neighbors = get_avg_num_neighbors(head_configs, args, train_loader, device)
+    args.solvent_center_mean_shift = _fit_train_solvent_center_mean_shift(
+        args, head_configs, z_table
+    )
+    args.fermi_level_baseline = _fit_train_fermi_level_baseline(args, head_configs)
 
     # Model
     model, output_args = configure_model(args, train_loader, atomic_energies, model_foundation, heads, z_table, head_configs)
@@ -890,10 +1389,17 @@ def run(args) -> None:
             if opt_start_epoch is not None:
                 start_epoch = opt_start_epoch
 
+    if element_charge_baseline is not None:
+        if not hasattr(model, "set_element_charge_baseline"):
+            raise AttributeError(
+                "Configured element_charge_baseline, but the current model does not support it"
+            )
+        model.set_element_charge_baseline(element_charge_baseline)
+
     if args.wandb:
         setup_wandb(args)
     if args.distributed:
-        distributed_model = DDP(model, device_ids=[local_rank])
+        distributed_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
     else:
         distributed_model = None
 
@@ -1053,7 +1559,7 @@ def run(args) -> None:
             # after param.requires_grad = False was called before evaluating stage-one model
             for param in model.parameters():
                 param.requires_grad = True
-            distributed_model = DDP(model, device_ids=[local_rank])
+            distributed_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
         model_to_evaluate = model if not args.distributed else distributed_model
         if swa_eval:
             logging.info(f"Loaded Stage two model from epoch {epoch} for evaluation")

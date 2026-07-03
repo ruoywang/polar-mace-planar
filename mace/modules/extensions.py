@@ -1,5 +1,8 @@
+import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import torch
 from e3nn import o3
 from e3nn.util.jit import compile_mode
@@ -12,6 +15,7 @@ try:
         gto_basis_kspace_cutoff,
     )
     from graph_longrange.kspace import compute_k_vectors_flat
+    from graph_longrange.utils import FIELD_CONSTANT
 
     GRAPH_LONGRANGE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):
@@ -36,6 +40,17 @@ from .field_blocks import (
     MultiLayerFeatureMixer,
     field_readout_blocks,
     field_update_blocks,
+)
+from .solvent_charge_layer import (
+    _axis_box_length,
+    _truncated_gaussian_mean,
+    compute_interface_qm_summaries,
+    compute_density_threshold_crossing_from_baseline_profile,
+    compute_density_threshold_crossing_from_mace_multipoles,
+    compute_oh_structure_crossings,
+    compute_ze_crossing_from_mace_multipoles,
+    require_explicit_valence_electrons,
+    predict_potential_from_dipole_and_solvent_layer,
 )
 from .utils import compute_total_charge_dipole_permuted
 
@@ -72,6 +87,294 @@ def _get_readout_input_dim(block: torch.nn.Module) -> int:
     if isinstance(block, NonLinearReadoutBlock):  # type: ignore
         return block.linear_1.irreps_in.dim  # type: ignore
     raise TypeError("Unsupported readout type for input dimension retrieval.")
+
+
+def _load_center_density_baselines_npz(path: str) -> Dict[int, tuple[np.ndarray, np.ndarray]]:
+    arrays = np.load(Path(path))
+    required = {"sample_ids", "z_A", "raw_neutral_e"}
+    missing = required.difference(arrays.files)
+    if missing:
+        raise ValueError(
+            f"Missing arrays in baseline density file {path}: {sorted(missing)}"
+        )
+    sample_ids = np.asarray(arrays["sample_ids"], dtype=np.int64)
+    z_values = np.asarray(arrays["z_A"], dtype=np.float64)
+    neutral_values = np.asarray(arrays["raw_neutral_e"], dtype=np.float64)
+    if z_values.shape != neutral_values.shape:
+        raise ValueError(f"z_A and raw_neutral_e shape mismatch in {path}")
+    if z_values.shape[0] != sample_ids.shape[0]:
+        raise ValueError(f"sample_ids length does not match z_A in {path}")
+    return {
+        int(sample_id): (z_values[idx], neutral_values[idx])
+        for idx, sample_id in enumerate(sample_ids)
+    }
+
+
+def _cell_area_for_axis_batch(cells: torch.Tensor, axis: int) -> torch.Tensor:
+    if axis == 0:
+        v1, v2 = cells[:, 1, :], cells[:, 2, :]
+    elif axis == 1:
+        v1, v2 = cells[:, 0, :], cells[:, 2, :]
+    else:
+        v1, v2 = cells[:, 0, :], cells[:, 1, :]
+    return torch.clamp(
+        torch.linalg.norm(torch.cross(v1, v2, dim=-1), dim=-1), min=1.0e-12
+    )
+
+
+def _slab_dipole_correction_delta(
+    explicit_dipole: torch.Tensor,
+    total_dipole: torch.Tensor,
+    volume: torch.Tensor,
+    pbc: torch.Tensor,
+    axis: int,
+) -> torch.Tensor:
+    """Replace explicit-only slab correction with compensated-total correction."""
+    if int(axis) != 2:
+        raise NotImplementedError("MACEPolar slab correction is defined for z-axis slabs only")
+    pbc_g = pbc.view(-1, 3).to(torch.bool)
+    slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+    slab[axis] = False
+    slab_mask = torch.all(pbc_g == slab, dim=1).to(total_dipole.dtype)
+    volume_g = torch.clamp(volume.view(-1).to(total_dipole.dtype), min=1.0e-12)
+    const = total_dipole.new_tensor(0.5 * float(FIELD_CONSTANT))
+    explicit_mu = explicit_dipole[:, axis]
+    total_mu = total_dipole[:, axis]
+    delta = const * (torch.square(total_mu) - torch.square(explicit_mu)) / volume_g
+    return delta * slab_mask
+
+
+def _slab_compensation_gaussian_potential_field_nodes(
+    total_charge: torch.Tensor,
+    center: torch.Tensor,
+    cell: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    sigma_g: float,
+    axis: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    cells = cell
+    if cells.dim() == 2 and cells.shape[1] == 3:
+        cells = cells.view(-1, 3, 3)
+    total_charge_g = total_charge.view(-1).to(positions.dtype)
+    center_g = center.view(-1).to(positions.dtype)
+    pbc_g = pbc.view(-1, 3).to(torch.bool)
+    slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+    slab[axis] = False
+    slab_mask = torch.all(pbc_g == slab, dim=1).to(positions.dtype)
+
+    area = _cell_area_for_axis_batch(cells.to(positions.dtype), axis)
+    solvent_charge = -total_charge_g
+    prefactor = positions.new_tensor(0.5 * float(FIELD_CONSTANT)) * solvent_charge / area
+    sigma = positions.new_tensor(float(max(sigma_g, 1.0e-12)))
+    inv_sqrt2 = positions.new_tensor(1.0 / math.sqrt(2.0))
+    sqrt_2_over_pi = positions.new_tensor(math.sqrt(2.0 / math.pi))
+
+    dz = positions[:, axis] - center_g[batch]
+    u = dz * inv_sqrt2 / sigma
+    shape_int = dz * torch.erf(u) + sqrt_2_over_pi * sigma * torch.exp(-(u * u))
+    phi = -prefactor[batch] * shape_int
+    field = positions.new_zeros(positions.shape)
+    field[:, axis] = -prefactor[batch] * torch.erf(u)
+    mask = slab_mask[batch]
+    return phi * mask, field * mask.unsqueeze(-1)
+
+
+def _slab_compensation_gaussian_features(
+    external_field_block: torch.nn.Module,
+    total_charge: torch.Tensor,
+    center: torch.Tensor,
+    cell: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    sigma_g: float,
+    feature_sigmas: List[float],
+    axis: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    matrix = external_field_block.matrix.to(positions.dtype)
+    features = positions.new_zeros((positions.shape[0], matrix.shape[0]))
+    phi_ref = positions.new_zeros(positions.shape[0])
+    field_ref = positions.new_zeros(positions.shape)
+    n_sigmas = len(feature_sigmas)
+    for i_s, receiver_sigma in enumerate(feature_sigmas):
+        sigma_eff = math.sqrt(float(sigma_g) ** 2 + float(receiver_sigma) ** 2)
+        phi, field = _slab_compensation_gaussian_potential_field_nodes(
+            total_charge=total_charge,
+            center=center,
+            cell=cell,
+            pbc=pbc,
+            batch=batch,
+            positions=positions,
+            sigma_g=sigma_eff,
+            axis=axis,
+        )
+        if i_s == 0:
+            phi_ref = phi
+            field_ref = field
+        node_fields = positions.new_zeros((positions.shape[0], 4))
+        node_fields[:, 0] = phi
+        node_fields[:, 1:] = field
+        node_fields = node_fields[:, [0, 3, 1, 2]]
+        rows = [i_s]
+        if matrix.shape[0] >= n_sigmas * 4:
+            rows.extend(range(n_sigmas + i_s * 3, n_sigmas + (i_s + 1) * 3))
+        row_index = torch.tensor(rows, dtype=torch.long, device=positions.device)
+        features[:, row_index] = torch.einsum(
+            "rf,nf->nr", torch.index_select(matrix, 0, row_index), node_fields
+        )
+    return features, phi_ref, field_ref
+
+
+def _slab_compensation_slab_correction_features(
+    external_field_block: torch.nn.Module,
+    total_charge: torch.Tensor,
+    center: torch.Tensor,
+    cell: torch.Tensor,
+    volume: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    sigma_g: float,
+    axis: int,
+) -> torch.Tensor:
+    if int(axis) != 2:
+        raise NotImplementedError("MACEPolar slab correction is defined for z-axis slabs only")
+    cells = cell
+    if cells.dim() == 2 and cells.shape[1] == 3:
+        cells = cells.view(-1, 3, 3)
+    pbc_g = pbc.view(-1, 3).to(torch.bool)
+    slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+    slab[axis] = False
+    slab_mask = torch.all(pbc_g == slab, dim=1).to(positions.dtype)
+    l_axis = torch.stack(
+        [_axis_box_length(cells[i], axis) for i in range(cells.shape[0])]
+    ).to(positions.dtype)
+    layer_mean = _truncated_gaussian_mean(
+        center=center.view(-1).to(positions.dtype),
+        sigma=sigma_g,
+        lower=torch.zeros_like(l_axis),
+        upper=l_axis,
+    )
+    solvent_mu = -total_charge.view(-1).to(positions.dtype) * layer_mean
+    volume_g = torch.clamp(volume.view(-1).to(positions.dtype), min=1.0e-12)
+    field_z = positions.new_tensor(float(FIELD_CONSTANT)) * solvent_mu / volume_g
+    field_z = field_z * slab_mask
+    spread_field_z = torch.index_select(field_z, 0, batch)
+
+    node_fields = positions.new_zeros((positions.shape[0], 4))
+    node_fields[:, 0] = spread_field_z * positions[:, axis]
+    node_fields[:, 1 + axis] = spread_field_z
+    node_fields = node_fields[:, [0, 3, 1, 2]]
+    return torch.einsum(
+        "pf,nf->np", external_field_block.matrix.to(positions.dtype), node_fields
+    )
+
+
+def _slab_compensation_periodic_1d_energy_radial(
+    radial_coefficients: torch.Tensor,
+    atomic_density_sigmas: List[float],
+    total_charge: torch.Tensor,
+    center: torch.Tensor,
+    cell: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    num_graphs: int,
+    sigma_g: float,
+    axis: int,
+    num_grid: int = 512,
+) -> torch.Tensor:
+    """Compensation contribution in the same 1D Poisson convention as profile loss."""
+    if int(axis) != 2:
+        raise NotImplementedError("1D compensation energy is currently defined for z-axis slabs")
+    if radial_coefficients.dim() != 3:
+        raise ValueError("radial_coefficients must have shape [n_atoms, n_sigmas, n_coeffs]")
+
+    cells = cell
+    if cells.dim() == 2 and cells.shape[1] == 3:
+        cells = cells.view(-1, 3, 3)
+    pbc_g = pbc.view(-1, 3).to(torch.bool)
+    slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+    slab[axis] = False
+    slab_mask = torch.all(pbc_g == slab, dim=1).to(positions.dtype)
+
+    energies = positions.new_zeros(num_graphs)
+    sigma_comp = positions.new_tensor(float(max(sigma_g, 1.0e-12)))
+    inv_sqrt2 = positions.new_tensor(1.0 / math.sqrt(2.0))
+    sqrt_2pi = positions.new_tensor(math.sqrt(2.0 * math.pi))
+    mode = torch.fft.fftfreq(num_grid, d=1.0, device=positions.device).to(positions.dtype)
+    mode = mode * float(num_grid)
+
+    for graph_idx in range(num_graphs):
+        if graph_idx >= cells.shape[0] or slab_mask[graph_idx] == 0:
+            continue
+        atom_mask = batch == graph_idx
+        if not torch.any(atom_mask):
+            continue
+        cell_g = cells[graph_idx].to(positions.dtype)
+        area = _cell_area_for_axis_batch(cell_g.view(1, 3, 3), axis)[0]
+        height = _axis_box_length(cell_g, axis).to(positions.dtype)
+        volume = torch.clamp(area * height, min=1.0e-12)
+        z_grid = (torch.arange(num_grid, dtype=positions.dtype, device=positions.device) + 0.5)
+        z_grid = z_grid * height / float(num_grid)
+
+        z_atom = positions[atom_mask, axis].to(positions.dtype)
+        coeff = radial_coefficients[atom_mask].to(positions.dtype)
+        rho_exp = z_grid.new_zeros(num_grid)
+        for i_s, source_sigma in enumerate(atomic_density_sigmas):
+            sigma = z_grid.new_tensor(float(max(source_sigma, 1.0e-12)))
+            dz = z_grid[:, None] - z_atom[None, :]
+            gaussian = torch.exp(-0.5 * torch.square(dz / sigma)) / (sqrt_2pi * sigma)
+            c = coeff[:, i_s, :]
+            rho_exp = rho_exp + (gaussian * (c[:, 0] / area)[None, :]).sum(dim=1)
+            if c.shape[1] > 1:
+                gaussian_d1 = -(dz / (sigma * sigma)) * gaussian
+                rho_exp = rho_exp + (
+                    gaussian_d1 * ((-c[:, 2] / area)[None, :])
+                ).sum(dim=1)
+            if c.shape[1] >= 9:
+                sigma2 = sigma * sigma
+                gaussian_d2 = ((dz * dz) / (sigma2 * sigma2) - 1.0 / sigma2) * gaussian
+                rho_exp = rho_exp + (
+                    gaussian_d2 * (((c[:, 6] / 3.0) / area)[None, :])
+                ).sum(dim=1)
+
+        lower = z_grid.new_zeros(())
+        upper = height
+        center_g = center.view(-1).to(positions.dtype)[graph_idx]
+        a = (lower - center_g) / sigma_comp
+        b = (upper - center_g) / sigma_comp
+        norm = 0.5 * (
+            torch.erf(b * inv_sqrt2) - torch.erf(a * inv_sqrt2)
+        )
+        norm = torch.clamp(norm, min=1.0e-12)
+        dz_comp = z_grid - center_g
+        comp_profile = torch.exp(-0.5 * torch.square(dz_comp / sigma_comp))
+        comp_profile = comp_profile / (sqrt_2pi * sigma_comp * norm)
+        solvent_charge = -total_charge.view(-1).to(positions.dtype)[graph_idx]
+        rho_comp = (solvent_charge / area) * comp_profile
+
+        raw_exp = rho_exp * volume
+        raw_comp = rho_comp * volume
+        g_abs = torch.abs(2.0 * math.pi * mode / height)
+        phi_rec = torch.zeros(
+            num_grid, dtype=torch.complex128 if positions.dtype == torch.float64 else torch.complex64,
+            device=positions.device,
+        )
+        rec_comp = torch.fft.fft(raw_comp.to(positions.dtype)) / float(num_grid)
+        mask = g_abs > 1.0e-14
+        phi_rec[mask] = rec_comp[mask] * float(FIELD_CONSTANT) / (
+            torch.square(g_abs[mask]) * volume
+        )
+        phi_comp = torch.fft.ifft(phi_rec * float(num_grid)).real
+        phi_comp = phi_comp - torch.mean(phi_comp)
+        energies[graph_idx] = (
+            torch.mean(raw_exp * phi_comp)
+            + 0.5 * torch.mean(raw_comp * phi_comp)
+        )
+    return energies
 
 
 @compile_mode("script")
@@ -128,6 +431,12 @@ class MACELES(ScaleShiftMACE):
         vectors = ctx.vectors
         lengths = ctx.lengths
         cell = ctx.cell
+        if cell.dim() == 2 and cell.shape[1] == 3 and cell.shape[0] == num_graphs * 3:
+            cell = cell.view(num_graphs, 3, 3)
+        elif cell.dim() == 2 and cell.shape[0] == num_graphs and cell.shape[1] == 9:
+            cell = cell.view(num_graphs, 3, 3)
+        elif cell.dim() == 1 and cell.numel() == num_graphs * 9:
+            cell = cell.view(num_graphs, 3, 3)
         node_heads = ctx.node_heads
         interaction_kwargs = ctx.interaction_kwargs
         lammps_natoms = interaction_kwargs.lammps_natoms
@@ -322,6 +631,20 @@ class PolarMACE(ScaleShiftMACE):
         field_norm_factor: Optional[float] = 0.02,
         fixedpoint_update_config: Optional[Dict[str, Any]] = None,
         field_readout_config: Optional[Dict[str, Any]] = None,
+        atomic_density_sigmas: Optional[List[float]] = None,
+        element_charge_residual_scale: float = 1.0,
+        solvent_sigma_g: float = 0.85,
+        solvent_density_threshold: Optional[float] = None,
+        solvent_ze_level: float = 0.5,
+        solvent_window_inward: float = 5.0,
+        solvent_window_outward: float = 5.0,
+        solvent_potential_axis: int = 2,
+        solvent_potential_sign: float = 1.0,
+        solvent_center_mean_shift: float = 0.0,
+        fermi_level_baseline: float = 0.0,
+        atomic_valence_electrons: Optional[List[float]] = None,
+        potential_1d_profile_file: Optional[str] = None,
+        learn_solvent_center_residual: bool = True,
         **kwargs,
     ):
         if not GRAPH_LONGRANGE_AVAILABLE:
@@ -375,6 +698,17 @@ class PolarMACE(ScaleShiftMACE):
         self.num_recursion_steps = int(num_recursion_steps)
         self.atomic_multipoles_max_l = int(atomic_multipoles_max_l)
         self.atomic_multipoles_smearing_width = float(atomic_multipoles_smearing_width)
+        self.atomic_density_sigmas = (
+            [self.atomic_multipoles_smearing_width]
+            if atomic_density_sigmas is None
+            else [float(value) for value in atomic_density_sigmas]
+        )
+        self.atomic_density_num_sigmas = len(self.atomic_density_sigmas)
+        self.atomic_multipoles_dim = (self.atomic_multipoles_max_l + 1) ** 2
+        self.electrostatic_multipoles_max_l = min(self.atomic_multipoles_max_l, 1)
+        self.electrostatic_multipoles_dim = (
+            self.electrostatic_multipoles_max_l + 1
+        ) ** 2
         self.field_feature_max_l = int(field_feature_max_l)
         self.field_feature_widths = list(field_feature_widths)
         self.field_norm_factor = float(field_norm_factor)
@@ -387,7 +721,48 @@ class PolarMACE(ScaleShiftMACE):
         self.quadrupole_feature_corrections = quadrupole_feature_corrections
         self.field_si = field_si
         self.keep_last_layer_irreps = True
-
+        self.element_charge_residual_scale = float(element_charge_residual_scale)
+        self.register_buffer(
+            "element_charge_baseline",
+            torch.zeros((len(heads), num_elements), dtype=torch.get_default_dtype()),
+        )
+        self.solvent_sigma_g = float(solvent_sigma_g)
+        self.solvent_density_threshold = (
+            None
+            if solvent_density_threshold is None
+            else float(solvent_density_threshold)
+        )
+        self.solvent_ze_level = float(solvent_ze_level)
+        self.solvent_window_inward = float(solvent_window_inward)
+        self.solvent_window_outward = float(solvent_window_outward)
+        self.solvent_potential_axis = int(solvent_potential_axis)
+        self.solvent_potential_sign = float(solvent_potential_sign)
+        self.solvent_center_mean_shift = float(solvent_center_mean_shift)
+        self.register_buffer(
+            "fermi_level_baseline",
+            torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
+        )
+        self.center_density_baselines = (
+            _load_center_density_baselines_npz(potential_1d_profile_file)
+            if potential_1d_profile_file is not None
+            else {}
+        )
+        self.solvent_residual_hidden_dim = 16
+        self.fermi_residual_hidden_dim = 16
+        self.solvent_residual_max_abs_shift = 1.5
+        self.solvent_residual_init_shift = 0.0
+        self.learn_solvent_center_residual = bool(learn_solvent_center_residual)
+        explicit_valence = None
+        if atomic_valence_electrons is not None:
+            explicit_valence = torch.tensor(
+                atomic_valence_electrons,
+                dtype=torch.get_default_dtype(),
+                device=self.atomic_numbers.device,
+            )
+        valence_electrons = require_explicit_valence_electrons(
+            self.atomic_numbers, explicit_valence
+        )
+        self.register_buffer("atomic_valence_electrons", valence_electrons)
         # k-space cutoff heuristic
         kspace_cutoff = kspace_cutoff_factor * gto_basis_kspace_cutoff(
             [atomic_multipoles_smearing_width] + list(field_feature_widths),
@@ -422,13 +797,18 @@ class PolarMACE(ScaleShiftMACE):
             EnvironmentDependentSpinSourceBlock(
                 irreps_in=hidden_irreps,
                 max_l=atomic_multipoles_max_l,
+                num_radial=self.atomic_density_num_sigmas,
                 cueq_config=cueq_config,
             )
             for _ in range(num_interactions)
         )
 
         # Field-dependent components
-        self.charges_irreps = 2 * o3.Irreps.spherical_harmonics(atomic_multipoles_max_l)
+        radial_source_irreps = (
+            self.atomic_density_num_sigmas
+            * o3.Irreps.spherical_harmonics(atomic_multipoles_max_l)
+        ).sort()[0].simplify()
+        self.charges_irreps = radial_source_irreps + radial_source_irreps
         charges_layout = (
             cueq_config.layout_str
             if (cueq_config is not None and cueq_config.enabled)
@@ -455,7 +835,7 @@ class PolarMACE(ScaleShiftMACE):
         )  # 2 spin channels for the potential irreps
 
         self.electric_potential_descriptor = GTOElectrostaticFeatures(
-            density_max_l=atomic_multipoles_max_l,
+            density_max_l=self.electrostatic_multipoles_max_l,
             density_smearing_width=atomic_multipoles_smearing_width,
             feature_max_l=field_feature_max_l,
             feature_smearing_widths=list(field_feature_widths),
@@ -558,26 +938,29 @@ class PolarMACE(ScaleShiftMACE):
         field_readout_cls = field_readout_config.pop("type", "OneBodyMLPFieldReadout")
         if isinstance(field_readout_cls, str):
             field_readout_cls = field_readout_blocks[field_readout_cls]
-        self.local_electron_energy = field_readout_cls(
-            node_attrs_irreps=node_attr_irreps,
-            node_feats_irreps=hidden_irreps,
-            edge_attrs_irreps=field_update_sh_irreps,
-            edge_feats_irreps=edge_feats_irreps,
-            target_irreps=field_interaction_irreps,
-            hidden_irreps=hidden_irreps,
-            avg_num_neighbors=avg_num_neighbors,
-            potential_irreps=self.potential_irreps,
-            charges_irreps=self.charges_irreps,
-            cueq_config=cueq_config,
-            oeq_config=oeq_config,
-            **field_readout_config,
-        )
+        if self.add_local_electron_energy:
+            self.local_electron_energy = field_readout_cls(
+                node_attrs_irreps=node_attr_irreps,
+                node_feats_irreps=hidden_irreps,
+                edge_attrs_irreps=field_update_sh_irreps,
+                edge_feats_irreps=edge_feats_irreps,
+                target_irreps=field_interaction_irreps,
+                hidden_irreps=hidden_irreps,
+                avg_num_neighbors=avg_num_neighbors,
+                potential_irreps=self.potential_irreps,
+                charges_irreps=self.charges_irreps,
+                cueq_config=cueq_config,
+                oeq_config=oeq_config,
+                **field_readout_config,
+            )
+        else:
+            self.local_electron_energy = None
 
         self.external_field_contribution = DisplacedGTOExternalFieldBlock(
             field_feature_max_l, list(field_feature_widths), "receiver"
         )
         self.coulomb_energy = GTOElectrostaticEnergy(
-            density_max_l=atomic_multipoles_max_l,
+            density_max_l=self.electrostatic_multipoles_max_l,
             density_smearing_width=atomic_multipoles_smearing_width,
             kspace_cutoff=float(kspace_cutoff),
             include_self_interaction=include_electrostatic_self_interaction,
@@ -588,6 +971,108 @@ class PolarMACE(ScaleShiftMACE):
             num_interactions=num_interactions,
             cueq_config=cueq_config,
         )
+        self.solvent_scalar_feature_dim = 3
+        self.solvent_interface_pool_sigma = 1.0
+        self.solvent_center_residual = torch.nn.Sequential(
+            torch.nn.Linear(
+                hidden_irreps.dim * num_interactions * 2
+                + self.solvent_scalar_feature_dim,
+                self.solvent_residual_hidden_dim,
+            ),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.solvent_residual_hidden_dim, 1),
+        )
+        final_linear = self.solvent_center_residual[-1]
+        torch.nn.init.zeros_(final_linear.weight)
+        init_frac = max(
+            min(
+                self.solvent_residual_init_shift
+                / max(self.solvent_residual_max_abs_shift, 1.0e-12),
+                0.999,
+            ),
+            -0.999,
+        )
+        torch.nn.init.constant_(
+            final_linear.bias,
+            float(torch.atanh(torch.tensor(init_frac, dtype=final_linear.bias.dtype))),
+        )
+        self.fermi_level_residual = torch.nn.Sequential(
+            torch.nn.Linear(
+                hidden_irreps.dim * num_interactions,
+                self.fermi_residual_hidden_dim,
+            ),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.fermi_residual_hidden_dim, 1),
+        )
+        fermi_final_linear = self.fermi_level_residual[-1]
+        torch.nn.init.zeros_(fermi_final_linear.weight)
+        torch.nn.init.zeros_(fermi_final_linear.bias)
+    def set_element_charge_baseline(self, baseline: torch.Tensor) -> None:
+        if baseline.shape != self.element_charge_baseline.shape:
+            raise ValueError(
+                f"Expected element_charge_baseline shape {tuple(self.element_charge_baseline.shape)}, got {tuple(baseline.shape)}"
+            )
+        self.element_charge_baseline.copy_(
+            baseline.to(
+                device=self.element_charge_baseline.device,
+                dtype=self.element_charge_baseline.dtype,
+            )
+        )
+
+    def _radial_flat_to_blocks(self, radial_flat: torch.Tensor) -> torch.Tensor:
+        out = radial_flat.new_zeros(
+            (
+                radial_flat.shape[0],
+                self.atomic_density_num_sigmas,
+                self.atomic_multipoles_dim,
+            )
+        )
+        offset = 0
+        for ell in range(self.atomic_multipoles_max_l + 1):
+            width = 2 * ell + 1
+            block = radial_flat[
+                :, offset : offset + self.atomic_density_num_sigmas * width
+            ].view(radial_flat.shape[0], self.atomic_density_num_sigmas, width)
+            out[:, :, ell * ell : (ell + 1) * (ell + 1)] = block
+            offset += self.atomic_density_num_sigmas * width
+        return out
+
+    def _radial_flat_to_effective(self, radial_flat: torch.Tensor) -> torch.Tensor:
+        return self._radial_flat_to_blocks(radial_flat).sum(dim=1)
+
+    def _center_profile_inputs(
+        self,
+        data: Dict[str, torch.Tensor],
+        num_graphs: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[tuple[List[torch.Tensor], List[torch.Tensor]]]:
+        if not self.center_density_baselines:
+            return None
+        sample_ids = data.get("sample_id")
+        if sample_ids is None:
+            raise KeyError(
+                "A baseline density profile file was provided, but batch data has no sample_id"
+            )
+        sample_ids = sample_ids.view(-1)
+        if sample_ids.numel() != num_graphs:
+            raise ValueError(
+                f"sample_id count {sample_ids.numel()} does not match num_graphs {num_graphs}"
+            )
+        z_values: List[torch.Tensor] = []
+        raw_neutral_values: List[torch.Tensor] = []
+        for value in sample_ids:
+            sample_id = int(value.detach().cpu().item())
+            if sample_id not in self.center_density_baselines:
+                raise KeyError(
+                    f"sample_id {sample_id} is missing from baseline density profile file"
+                )
+            z_np, neutral_np = self.center_density_baselines[sample_id]
+            z_values.append(torch.as_tensor(z_np, device=device, dtype=dtype))
+            raw_neutral_values.append(
+                torch.as_tensor(neutral_np, device=device, dtype=dtype)
+            )
+        return z_values, raw_neutral_values
 
     def forward(
         self,
@@ -668,6 +1153,14 @@ class PolarMACE(ScaleShiftMACE):
             device=data["batch"].device,
             dtype=vectors.dtype,
         )
+        node_charge_baseline = torch.sum(
+            self.element_charge_baseline.index_select(0, node_heads.to(torch.long))
+            * data["node_attrs"].to(self.element_charge_baseline.dtype),
+            dim=-1,
+        ).to(vectors.dtype)
+        node_charge_residual_scale = torch.full_like(
+            node_charge_baseline, self.element_charge_residual_scale
+        )
 
         for i, (interaction, product, lr_src) in enumerate(
             zip(self.interactions, self.products, self.lr_source_maps)
@@ -700,6 +1193,18 @@ class PolarMACE(ScaleShiftMACE):
             node_es_list.append(node_es)
 
             spin_charge_sources = lr_src(node_feats).squeeze(-2)
+            if self.element_charge_residual_scale != 1.0:
+                spin_charge_sources = spin_charge_sources.view(
+                    spin_charge_sources.shape[0], 2, -1
+                )
+                spin_charge_sources = spin_charge_sources.clone()
+                spin_charge_sources[:, :, : self.atomic_density_num_sigmas] = (
+                    node_charge_residual_scale[:, None, None]
+                    * spin_charge_sources[:, :, : self.atomic_density_num_sigmas]
+                )
+                spin_charge_sources = spin_charge_sources.view(
+                    spin_charge_sources.shape[0], -1
+                )
             spin_charge_density = spin_charge_density + spin_charge_sources
 
         node_feats_out = torch.cat(node_feats_list, dim=-1)
@@ -734,6 +1239,16 @@ class PolarMACE(ScaleShiftMACE):
         spin_charge_density = spin_charge_density.view(
             spin_charge_density.shape[0], 2, -1
         )
+        spin_charge_density = spin_charge_density.clone()
+        half_node_charge_baseline = 0.5 * node_charge_baseline
+        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
+            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
+        )
+        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
+            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
+        )
         fukui_input = node_feats
         fukui_to_mul_ir = getattr(self, "_fukui_to_mul_ir", None)
         if fukui_to_mul_ir is not None:
@@ -752,18 +1267,26 @@ class PolarMACE(ScaleShiftMACE):
         Q_p_S = (data["total_charge"] + (data["total_spin"] - 1))[data["batch"]]
         Q_m_S = (data["total_charge"] - (data["total_spin"] - 1))[data["batch"]]
         pred_total_charges_0 = scatter_sum(
-            src=spin_charge_density[:, :, 0].double(),
+            src=spin_charge_density[:, :, : self.atomic_density_num_sigmas]
+            .sum(dim=-1)
+            .double(),
             index=data["batch"],
             dim=0,
             dim_size=num_graphs,
         )[data["batch"]].to(vectors.dtype)
         spin_charge_density = spin_charge_density.clone()
-        spin_charge_density[:, 0, 0] = spin_charge_density[:, 0, 0] + fukui_sources[
-            :, 0
-        ] * ((Q_p_S / 2) - pred_total_charges_0[:, 0])
-        spin_charge_density[:, 1, 0] = spin_charge_density[:, 1, 0] + fukui_sources[
-            :, 1
-        ] * ((Q_m_S / 2) - pred_total_charges_0[:, 1])
+        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
+            + fukui_sources[:, 0, None]
+            * ((Q_p_S / 2) - pred_total_charges_0[:, 0])[:, None]
+            / float(self.atomic_density_num_sigmas)
+        )
+        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
+            + fukui_sources[:, 1, None]
+            * ((Q_m_S / 2) - pred_total_charges_0[:, 1])[:, None]
+            / float(self.atomic_density_num_sigmas)
+        )
         # print("spin_charge_density", spin_charge_density)
 
         potential_features = torch.zeros(
@@ -772,14 +1295,128 @@ class PolarMACE(ScaleShiftMACE):
             dtype=vectors.dtype,
         )
         field_independent_spin_charge_density = spin_charge_density.clone()
+        element_index = torch.argmax(data["node_attrs"], dim=-1)
+        node_valence_electrons = self.atomic_valence_electrons[element_index]
+        center_profile_inputs = self._center_profile_inputs(
+            data=data,
+            num_graphs=num_graphs,
+            device=positions.device,
+            dtype=positions.dtype,
+        )
+        comp_charge_density = field_independent_spin_charge_density.sum(dim=1)
+        comp_density_coefficients = self._radial_flat_to_effective(
+            comp_charge_density
+        )
+        if (
+            self.solvent_density_threshold is not None
+            and center_profile_inputs is not None
+        ):
+            comp_density_width_threshold = max(
+                float(self.solvent_density_threshold) - 0.05,
+                1.0e-6,
+            )
+            comp_z_base, _ = compute_density_threshold_crossing_from_baseline_profile(
+                z_values=center_profile_inputs[0],
+                raw_neutral_values=center_profile_inputs[1],
+                radial_coefficients=self._radial_flat_to_blocks(comp_charge_density).detach(),
+                positions=positions.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                atomic_density_sigmas=self.atomic_density_sigmas,
+                density_threshold=float(self.solvent_density_threshold),
+                width_density_threshold=comp_density_width_threshold,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        elif self.solvent_density_threshold is not None:
+            comp_density_width_threshold = max(
+                float(self.solvent_density_threshold) - 0.05,
+                1.0e-6,
+            )
+            comp_z_base, _ = compute_density_threshold_crossing_from_mace_multipoles(
+                density_coefficients=comp_density_coefficients.detach(),
+                positions=positions.detach(),
+                node_valence_electrons=node_valence_electrons.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                density_smearing_width=self.atomic_multipoles_smearing_width,
+                density_threshold=float(self.solvent_density_threshold),
+                width_density_threshold=comp_density_width_threshold,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        else:
+            comp_z_base, _ = compute_ze_crossing_from_mace_multipoles(
+                density_coefficients=comp_density_coefficients.detach(),
+                positions=positions.detach(),
+                node_valence_electrons=node_valence_electrons.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                density_smearing_width=self.atomic_multipoles_smearing_width,
+                level=self.solvent_ze_level,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        comp_center_init = (
+            comp_z_base
+            + comp_z_base.new_full(
+                comp_z_base.shape, float(self.solvent_center_mean_shift)
+            )
+        ).detach()
+        (
+            compensation_external_features,
+            _compensation_phi_nodes,
+            _compensation_external_field_nodes,
+        ) = _slab_compensation_gaussian_features(
+            external_field_block=self.external_field_contribution,
+            total_charge=data["total_charge"],
+            center=comp_center_init,
+            cell=cell.detach(),
+            pbc=data["pbc"].view(-1, 3),
+            batch=data["batch"],
+            positions=positions,
+            sigma_g=self.solvent_sigma_g,
+            feature_sigmas=self.field_feature_widths,
+            axis=self.solvent_potential_axis,
+        )
+        compensation_slab_features = _slab_compensation_slab_correction_features(
+            external_field_block=self.external_field_contribution,
+            total_charge=data["total_charge"],
+            center=comp_center_init,
+            cell=cell.detach(),
+            volume=data["volume"],
+            pbc=data["pbc"].view(-1, 3),
+            batch=data["batch"],
+            positions=positions,
+            sigma_g=self.solvent_sigma_g,
+            axis=self.solvent_potential_axis,
+        )
+        compensation_external_features = (
+            compensation_external_features + compensation_slab_features
+        )
+        compensation_external_features = compensation_external_features.to(vectors.dtype)
+        scf_external_potential = external_potential
         esps: Optional[torch.Tensor] = None
 
         for i in range(self.num_recursion_steps):
-            source_feats_alpha = spin_charge_density[:, 0, :].clone()
-            source_feats_beta = spin_charge_density[:, 1, :].clone()
+            source_feats_alpha = self._radial_flat_to_effective(
+                spin_charge_density[:, 0, :]
+            )
+            source_feats_beta = self._radial_flat_to_effective(
+                spin_charge_density[:, 1, :]
+            )
             if charges_to_mul_ir is not None:
                 source_feats_alpha = charges_to_mul_ir(source_feats_alpha)
                 source_feats_beta = charges_to_mul_ir(source_feats_beta)
+            source_feats_alpha = source_feats_alpha[
+                :, : self.electrostatic_multipoles_dim
+            ]
+            source_feats_beta = source_feats_beta[
+                :, : self.electrostatic_multipoles_dim
+            ]
             field_feats_alpha = self.electric_potential_descriptor.forward_dynamic(
                 cache=field_feature_cache,
                 source_feats=source_feats_alpha.unsqueeze(-2),
@@ -803,10 +1440,13 @@ class PolarMACE(ScaleShiftMACE):
                 dim=0,
                 dim_size=num_graphs,
             ).to(positions.dtype)
-            half_external_field = 0.5 * self.external_field_contribution(
-                data["batch"],
-                positions - barycenter[data["batch"], :],
-                external_potential,
+            half_external_field = 0.5 * (
+                self.external_field_contribution(
+                    data["batch"],
+                    positions - barycenter[data["batch"], :],
+                    scf_external_potential,
+                )
+                + compensation_external_features
             )
             field_feats_alpha = (
                 field_feats_alpha + half_external_field
@@ -837,6 +1477,14 @@ class PolarMACE(ScaleShiftMACE):
             spin_charge_density_sources = charge_sources.view(
                 spin_charge_density.shape[0], 2, -1
             )
+            if self.element_charge_residual_scale != 1.0:
+                spin_charge_density_sources = spin_charge_density_sources.clone()
+                spin_charge_density_sources[:, :, : self.atomic_density_num_sigmas] = (
+                    node_charge_residual_scale[:, None, None]
+                    * spin_charge_density_sources[
+                        :, :, : self.atomic_density_num_sigmas
+                    ]
+                )
             spin_charge_density = spin_charge_density + spin_charge_density_sources
 
             fukui_norm2 = scatter_sum(
@@ -850,82 +1498,316 @@ class PolarMACE(ScaleShiftMACE):
             )
             current_fukui_sources = current_fukui_sources / fukui_norm2
             pred_total_charges = scatter_sum(
-                src=spin_charge_density[:, :, 0].double(),
+                src=spin_charge_density[:, :, : self.atomic_density_num_sigmas]
+                .sum(dim=-1)
+                .double(),
                 index=data["batch"],
                 dim=0,
                 dim_size=num_graphs,
             )[data["batch"]].to(vectors.dtype)
             spin_charge_density = spin_charge_density.clone()
-            spin_charge_density[:, 0, 0] = spin_charge_density[
-                :, 0, 0
-            ] + current_fukui_sources[:, 0] * ((Q_p_S / 2) - pred_total_charges[:, 0])
-            spin_charge_density[:, 1, 0] = spin_charge_density[
-                :, 1, 0
-            ] + current_fukui_sources[:, 1] * ((Q_m_S / 2) - pred_total_charges[:, 1])
+            spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
+                spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
+                + current_fukui_sources[:, 0, None]
+                * ((Q_p_S / 2) - pred_total_charges[:, 0])[:, None]
+                / float(self.atomic_density_num_sigmas)
+            )
+            spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
+                spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
+                + current_fukui_sources[:, 1, None]
+                * ((Q_m_S / 2) - pred_total_charges[:, 1])[:, None]
+                / float(self.atomic_density_num_sigmas)
+            )
 
         total_energy = e0 + inter_e
-        local_q_e = self.local_electron_energy(
-            node_attrs=data["node_attrs"],
-            node_feats=node_feats,
-            edge_attrs=edge_attrs[:, : self.from_ell_max_field_update],
-            edge_feats=edge_feats,
-            edge_index=data["edge_index"],
-            field_feats=potential_features,
-            charges_0=field_independent_spin_charge_density.view(
-                field_independent_spin_charge_density.shape[0], -1
-            ),
-            charges_induced=spin_charge_density.view(spin_charge_density.shape[0], -1),
-        )
-        le_total = scatter_sum(
-            src=local_q_e, index=data["batch"], dim=-1, dim_size=num_graphs
-        )
-        if getattr(self, "add_local_electron_energy", False):
+        if self.local_electron_energy is not None:
+            local_q_e = self.local_electron_energy(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs[:, : self.from_ell_max_field_update],
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+                field_feats=potential_features,
+                charges_0=field_independent_spin_charge_density.view(
+                    field_independent_spin_charge_density.shape[0], -1
+                ),
+                charges_induced=spin_charge_density.view(spin_charge_density.shape[0], -1),
+            )
+            le_total = scatter_sum(
+                src=local_q_e, index=data["batch"], dim=-1, dim_size=num_graphs
+            )
             total_energy = total_energy + le_total
         else:
-            le_total = torch.zeros_like(le_total)
+            le_total = torch.zeros_like(total_energy)
 
         charge_density = spin_charge_density.sum(dim=1)
         spin_density = spin_charge_density[:, 0, :] - spin_charge_density[:, 1, :]
-        charge_density_mul_ir = (
-            charges_to_mul_ir(charge_density)
-            if charges_to_mul_ir is not None
-            else charge_density
+        charge_density_radial_mul_ir = charge_density
+        spin_density_radial_mul_ir = spin_density
+        spin_charge_density_radial_mul_ir = spin_charge_density
+        charge_density_mul_ir = self._radial_flat_to_effective(
+            charge_density_radial_mul_ir
         )
-        spin_density_mul_ir = (
-            charges_to_mul_ir(spin_density)
-            if charges_to_mul_ir is not None
-            else spin_density
+        spin_density_mul_ir = self._radial_flat_to_effective(spin_density_radial_mul_ir)
+        spin_charge_density_mul_ir = torch.stack(
+            [
+                self._radial_flat_to_effective(spin_charge_density_radial_mul_ir[:, 0, :]),
+                self._radial_flat_to_effective(spin_charge_density_radial_mul_ir[:, 1, :]),
+            ],
+            dim=1,
         )
-        spin_charge_density_mul_ir = (
-            torch.stack(
-                [
-                    charges_to_mul_ir(spin_charge_density[:, 0, :]),
-                    charges_to_mul_ir(spin_charge_density[:, 1, :]),
-                ],
-                dim=1,
-            )
-            if charges_to_mul_ir is not None
-            else spin_charge_density
-        )
-        total_charge, total_dipole = compute_total_charge_dipole_permuted(
+        total_charge, explicit_dipole = compute_total_charge_dipole_permuted(
             charge_density_mul_ir, positions, data["batch"], num_graphs
+        )
+        if charge_density_mul_ir.shape[1] > 1:
+            atomic_dipole = charge_density_mul_ir[:, 1:4][:, [2, 0, 1]]
+        else:
+            atomic_dipole = torch.zeros_like(positions)
+        element_index = torch.argmax(data["node_attrs"], dim=-1)
+        node_valence_electrons = self.atomic_valence_electrons[element_index]
+        charge_density_radial_coefficients = self._radial_flat_to_blocks(
+            charge_density_radial_mul_ir
+        )
+        density_width_threshold = None
+        if (
+            self.solvent_density_threshold is not None
+            and center_profile_inputs is not None
+        ):
+            density_width_threshold = max(
+                float(self.solvent_density_threshold) - 0.05,
+                1.0e-6,
+            )
+            z_e50, w_e50 = compute_density_threshold_crossing_from_baseline_profile(
+                z_values=center_profile_inputs[0],
+                raw_neutral_values=center_profile_inputs[1],
+                radial_coefficients=charge_density_radial_coefficients.detach(),
+                positions=positions.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                atomic_density_sigmas=self.atomic_density_sigmas,
+                density_threshold=float(self.solvent_density_threshold),
+                width_density_threshold=density_width_threshold,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        elif self.solvent_density_threshold is not None:
+            density_width_threshold = max(
+                float(self.solvent_density_threshold) - 0.05,
+                1.0e-6,
+            )
+            z_e50, w_e50 = compute_density_threshold_crossing_from_mace_multipoles(
+                density_coefficients=charge_density_mul_ir.detach(),
+                positions=positions.detach(),
+                node_valence_electrons=node_valence_electrons.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                density_smearing_width=self.atomic_multipoles_smearing_width,
+                density_threshold=float(self.solvent_density_threshold),
+                width_density_threshold=density_width_threshold,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        else:
+            z_e50, w_e50 = compute_ze_crossing_from_mace_multipoles(
+                density_coefficients=charge_density_mul_ir.detach(),
+                positions=positions.detach(),
+                node_valence_electrons=node_valence_electrons.detach(),
+                batch=data["batch"],
+                cell=cell.detach(),
+                density_smearing_width=self.atomic_multipoles_smearing_width,
+                level=self.solvent_ze_level,
+                inward=self.solvent_window_inward,
+                outward=self.solvent_window_outward,
+                axis=self.solvent_potential_axis,
+            )
+        z50_o, w_o, z50_h, w_h = compute_oh_structure_crossings(
+            positions=positions.detach(),
+            node_attrs=data["node_attrs"],
+            batch=data["batch"],
+            cell=cell.detach(),
+            atomic_numbers=self.atomic_numbers,
+            level=0.5,
+            axis=self.solvent_potential_axis,
+        )
+        qsum_o, qsum_h, msum_o, msum_h = compute_interface_qm_summaries(
+            charges=charge_density_mul_ir[:, 0].detach(),
+            atomic_dipole=atomic_dipole.detach(),
+            positions=positions.detach(),
+            node_attrs=data["node_attrs"],
+            batch=data["batch"],
+            atomic_numbers=self.atomic_numbers,
+            z_o_anchor=z50_o.detach(),
+            z_h_anchor=z50_h.detach(),
+            axis=self.solvent_potential_axis,
+        )
+        graph_feats_global = scatter_mean(
+            src=node_feats_out, index=data["batch"], dim=0, dim_size=num_graphs
+        )
+        z_axis = positions[:, self.solvent_potential_axis].detach()
+        z_center_nodes = z_e50[data["batch"]].detach()
+        sigma_if = max(float(self.solvent_interface_pool_sigma), 1.0e-12)
+        interface_w = torch.exp(
+            -0.5
+            * torch.square(
+                (z_axis - z_center_nodes)
+                / z_axis.new_tensor(float(sigma_if))
+            )
+        )
+        interface_w_sum = torch.clamp(
+            scatter_sum(
+                src=interface_w,
+                index=data["batch"],
+                dim=0,
+                dim_size=num_graphs,
+            ),
+            min=1.0e-12,
+        )
+        graph_feats_if = scatter_sum(
+            src=node_feats_out * interface_w.unsqueeze(-1),
+            index=data["batch"],
+            dim=0,
+            dim_size=num_graphs,
+        ) / interface_w_sum.unsqueeze(-1)
+        input_total_charge = data["total_charge"].view(-1).to(total_charge.dtype)
+        explicit_potential_base, _, _ = predict_potential_from_dipole_and_solvent_layer(
+            dipole=explicit_dipole,
+            total_charge=torch.zeros_like(total_charge),
+            center=z_e50,
+            cell=cell.detach(),
+            sigma_g=self.solvent_sigma_g,
+            axis=self.solvent_potential_axis,
+            potential_sign=self.solvent_potential_sign,
+        )
+        solvent_scalar_inputs = torch.stack(
+            [
+                z_e50.to(graph_feats_global.dtype) / 10.0,
+                input_total_charge.to(graph_feats_global.dtype) / 10.0,
+                explicit_potential_base.to(graph_feats_global.dtype) / 10.0,
+            ],
+            dim=-1,
+        )
+        solvent_head_inputs = torch.cat(
+            [graph_feats_global, graph_feats_if, solvent_scalar_inputs], dim=-1
+        )
+        solvent_raw_shift = self.solvent_center_residual(solvent_head_inputs).view(-1)
+        if self.learn_solvent_center_residual:
+            solvent_center_residual = (
+                self.solvent_residual_max_abs_shift
+                * torch.tanh(solvent_raw_shift)
+            )
+        else:
+            solvent_center_residual = solvent_raw_shift * 0.0
+        solv_center = (
+            z_e50
+            + z_e50.new_full(z_e50.shape, float(self.solvent_center_mean_shift))
+            + solvent_center_residual
+        )
+        cell_for_axis = cell.detach()
+        n_graphs_local = int(solv_center.shape[0])
+        if cell_for_axis.dim() == 1 and cell_for_axis.numel() == n_graphs_local * 9:
+            cell_for_axis = cell_for_axis.view(n_graphs_local, 3, 3)
+        elif cell_for_axis.dim() == 2:
+            if cell_for_axis.shape == (3, 3) and n_graphs_local == 1:
+                cell_for_axis = cell_for_axis.unsqueeze(0)
+            elif (
+                cell_for_axis.shape[1] == 9
+                and cell_for_axis.shape[0] == n_graphs_local
+            ):
+                cell_for_axis = cell_for_axis.view(n_graphs_local, 3, 3)
+            elif (
+                cell_for_axis.shape[1] == 3
+                and cell_for_axis.shape[0] == n_graphs_local * 3
+            ):
+                cell_for_axis = cell_for_axis.view(n_graphs_local, 3, 3)
+        if cell_for_axis.dim() == 3:
+            l_axis = torch.stack(
+                [
+                    _axis_box_length(cell_for_axis[i], self.solvent_potential_axis)
+                    for i in range(cell_for_axis.shape[0])
+                ]
+            ).to(solv_center.dtype)
+        elif cell_for_axis.dim() == 2 and cell_for_axis.shape[1] == 3:
+            l_axis = torch.clamp(
+                torch.abs(cell_for_axis[:, self.solvent_potential_axis]),
+                min=1.0e-12,
+            ).to(solv_center.dtype)
+        else:
+            raise ValueError(
+                f"Unsupported cell shape for solvent axis length: {tuple(cell_for_axis.shape)}"
+            )
+        layer_mean = _truncated_gaussian_mean(
+            center=solv_center,
+            sigma=self.solvent_sigma_g,
+            lower=torch.zeros_like(solv_center),
+            upper=l_axis,
+        )
+        solvent_mu = (-input_total_charge.view(-1)) * layer_mean
+        solvent_dipole = torch.zeros_like(explicit_dipole)
+        solvent_dipole[:, self.solvent_potential_axis] = solvent_mu.to(
+            solvent_dipole.dtype
+        )
+        total_dipole = explicit_dipole + solvent_dipole
+        _, explicit_potential_base, solvent_potential = (
+            predict_potential_from_dipole_and_solvent_layer(
+                dipole=explicit_dipole,
+                total_charge=input_total_charge,
+                center=solv_center,
+                cell=cell.detach(),
+                sigma_g=self.solvent_sigma_g,
+                axis=self.solvent_potential_axis,
+                potential_sign=self.solvent_potential_sign,
+            )
+        )
+        explicit_potential = explicit_potential_base
+        total_potential = explicit_potential + solvent_potential
+        fermi_level_residual = self.fermi_level_residual(graph_feats_global).view(-1)
+        fermi_level_pred = (
+            self.fermi_level_baseline.to(dtype=total_potential.dtype)
+            - total_potential
+            + fermi_level_residual.to(dtype=total_potential.dtype)
         )
         electro_energy = self.coulomb_energy(
             k_vectors=k_vectors,
             k_norm2=kv_norms_squared,
             k_vector_batch=k_vectors_batch,
             k0_mask=k_vectors_0mask,
-            source_feats=charge_density_mul_ir,
+            source_feats=charge_density_mul_ir[
+                :, : self.electrostatic_multipoles_dim
+            ],
             node_positions=positions,
             batch=data["batch"],
             volume=data["volume"],
             pbc=data["pbc"].view(-1, 3),
             force_pbc_evaluator=use_pbc_evaluator,
         )
+        compensation_periodic_1d_energy = _slab_compensation_periodic_1d_energy_radial(
+            radial_coefficients=charge_density_radial_coefficients,
+            atomic_density_sigmas=self.atomic_density_sigmas,
+            total_charge=input_total_charge,
+            center=solv_center,
+            cell=cell.detach(),
+            pbc=data["pbc"].view(-1, 3),
+            batch=data["batch"],
+            positions=positions,
+            num_graphs=num_graphs,
+            sigma_g=self.solvent_sigma_g,
+            axis=self.solvent_potential_axis,
+        )
+        compensation_slab_correction_energy = _slab_dipole_correction_delta(
+            explicit_dipole=explicit_dipole,
+            total_dipole=total_dipole,
+            volume=data["volume"],
+            pbc=data["pbc"].view(-1, 3),
+            axis=self.solvent_potential_axis,
+        )
         total_energy = (
             total_energy
             + electro_energy
-            + torch.sum(external_potential[:, 1:] * total_dipole, dim=-1)
+            + compensation_periodic_1d_energy
+            + compensation_slab_correction_energy
+            + torch.sum(external_potential[:, 1:] * explicit_dipole, dim=-1)
         )
 
         forces, virials, stress, hessian, edge_forces = get_outputs(
@@ -970,6 +1852,7 @@ class PolarMACE(ScaleShiftMACE):
             "displacement": displacement,
             "node_feats": node_feats_out,
             "density_coefficients": charge_density_mul_ir,
+            "charge_density_radial_coefficients": charge_density_radial_coefficients,
             "spin_density": spin_density_mul_ir,
             "charges_history": torch.stack(
                 [spin_charge_density_mul_ir.clone().detach()], dim=-1
@@ -979,8 +1862,37 @@ class PolarMACE(ScaleShiftMACE):
             "charges": charge_density_mul_ir[:, 0],
             "spins": spin_density_mul_ir[:, 0],
             "dipole": total_dipole,
+            "explicit_dipole": explicit_dipole,
+            "solvent_dipole": solvent_dipole,
+            "atomic_dipole": atomic_dipole,
             "total_charge": total_charge,
+            "potential": total_potential,
+            "fermi_level_pred": fermi_level_pred,
+            "fermi_level_residual": fermi_level_residual,
+            "fermi_level_baseline": self.fermi_level_baseline.expand_as(total_potential),
+            "explicit_potential": explicit_potential,
+            "explicit_potential_base": explicit_potential_base,
+            "solvent_potential": solvent_potential,
+            "z_e50": z_e50,
+            "w_e50": w_e50,
+            "z_e0p15": z_e50,
+            "w_e0p15": w_e50,
+            "z50_o": z50_o,
+            "w_o": w_o,
+            "z50_h": z50_h,
+            "w_h": w_h,
+            "qsum_o": qsum_o,
+            "qsum_h": qsum_h,
+            "msum_o": msum_o,
+            "msum_h": msum_h,
+            "solv_center_physical_shift": torch.zeros_like(solv_center),
+            "solv_center": solv_center,
+            "solv_center_residual": solvent_center_residual,
+            "compensation_scf_center": comp_center_init,
+            "solvent_layer_mean": layer_mean,
             "electrostatic_energy": electro_energy,
+            "compensation_periodic_1d_energy": compensation_periodic_1d_energy,
+            "compensation_slab_correction_energy": compensation_slab_correction_energy,
             "electron_energy": le_total,
             "electrostatic_potentials": esps,
             "spin_charge_density": spin_charge_density_mul_ir,

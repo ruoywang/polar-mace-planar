@@ -288,6 +288,8 @@ def _build_model(
     if args.model == "PolarMACE":
         field_feature_widths = _parse_literal_or_none(args.field_feature_widths)
         field_feature_norms = _parse_literal_or_none(args.field_feature_norms)
+        atomic_density_sigmas = _parse_literal_or_none(args.atomic_density_sigmas)
+        atomic_valence_electrons = _parse_literal_or_none(args.atomic_valence_electrons)
         fixedpoint_update_config = _parse_literal_or_none(args.fixedpoint_update_config)
         field_readout_config = _parse_literal_or_none(args.field_readout_config)
         return modules.PolarMACE(
@@ -310,6 +312,7 @@ def _build_model(
             kspace_cutoff_factor=args.kspace_cutoff_factor,
             atomic_multipoles_max_l=args.atomic_multipoles_max_l,
             atomic_multipoles_smearing_width=args.atomic_multipoles_smearing_width,
+            atomic_density_sigmas=atomic_density_sigmas,
             field_feature_max_l=args.field_feature_max_l,
             field_feature_widths=(
                 field_feature_widths if field_feature_widths is not None else [1.0]
@@ -324,6 +327,20 @@ def _build_model(
             field_norm_factor=args.field_norm_factor,
             fixedpoint_update_config=fixedpoint_update_config,
             field_readout_config=field_readout_config,
+            solvent_sigma_g=args.solvent_sigma_g,
+            solvent_density_threshold=getattr(args, "solvent_density_threshold", None),
+            solvent_ze_level=args.solvent_ze_level,
+            solvent_window_inward=args.solvent_window_inward,
+            solvent_window_outward=args.solvent_window_outward,
+            solvent_potential_axis=args.solvent_potential_axis,
+            solvent_potential_sign=args.solvent_potential_sign,
+            solvent_center_mean_shift=args.solvent_center_mean_shift,
+            fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
+            atomic_valence_electrons=atomic_valence_electrons,
+            potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
+            learn_solvent_center_residual=(
+                float(getattr(args, "solvent_center_weight", 0.0)) > 1.0e-12
+            ),
         )
     if args.model == "FoundationMACE":
         return modules.ScaleShiftMACE(**model_config_foundation)

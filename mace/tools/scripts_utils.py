@@ -356,6 +356,41 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
             model, "_fixedpoint_update_config"
         ).copy()
         config["field_readout_config"] = getattr(model, "_field_readout_config").copy()
+        config["element_charge_residual_scale"] = getattr(
+            model, "element_charge_residual_scale", 1.0
+        )
+        config["solvent_sigma_g"] = getattr(model, "solvent_sigma_g", 0.85)
+        config["solvent_density_threshold"] = getattr(
+            model, "solvent_density_threshold", None
+        )
+        config["solvent_ze_level"] = getattr(model, "solvent_ze_level", 0.5)
+        config["solvent_window_inward"] = getattr(
+            model, "solvent_window_inward", 5.0
+        )
+        config["solvent_window_outward"] = getattr(
+            model, "solvent_window_outward", 5.0
+        )
+        config["solvent_potential_axis"] = getattr(
+            model, "solvent_potential_axis", 2
+        )
+        config["solvent_potential_sign"] = getattr(
+            model, "solvent_potential_sign", 1.0
+        )
+        config["solvent_center_mean_shift"] = getattr(
+            model, "solvent_center_mean_shift", 0.0
+        )
+        fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
+        config["fermi_level_baseline"] = (
+            float(fermi_level_baseline.detach().cpu().item())
+            if fermi_level_baseline is not None
+            else 0.0
+        )
+        atomic_valence = getattr(model, "atomic_valence_electrons", None)
+        config["atomic_valence_electrons"] = (
+            atomic_valence.detach().cpu().tolist()
+            if atomic_valence is not None
+            else None
+        )
         config["keep_last_layer_irreps"] = model.keep_last_layer_irreps
     return config
 
@@ -663,7 +698,13 @@ def get_loss_fn(
 ) -> torch.nn.Module:
     if args.loss == "weighted":
         loss_fn = modules.WeightedEnergyForcesLoss(
-            energy_weight=args.energy_weight, forces_weight=args.forces_weight
+            energy_weight=args.energy_weight,
+            forces_weight=args.forces_weight,
+            charges_weight=getattr(args, "charges_weight", 0.0),
+            atomic_dipole_weight=getattr(args, "atomic_dipole_weight", 0.0),
+            potential_weight=getattr(args, "potential_weight", 0.0),
+            potential_axis=getattr(args, "potential_axis", 2),
+            potential_sign=getattr(args, "potential_sign", 1.0),
         )
     elif args.loss == "forces_only":
         loss_fn = modules.WeightedForcesLoss(forces_weight=args.forces_weight)
@@ -704,6 +745,11 @@ def get_loss_fn(
         ), "dipole loss can only be used with AtomicDipolesMACE model"
         loss_fn = modules.DipoleSingleLoss(
             dipole_weight=args.dipole_weight,
+            charges_weight=getattr(args, "charges_weight", 0.0),
+            atomic_dipole_weight=getattr(args, "atomic_dipole_weight", 0.0),
+            potential_weight=getattr(args, "potential_weight", 0.0),
+            potential_axis=getattr(args, "potential_axis", 2),
+            potential_sign=getattr(args, "potential_sign", 1.0),
         )
     elif args.loss == "dipole_polar":
         loss_fn = modules.DipolePolarLoss(
@@ -716,6 +762,32 @@ def get_loss_fn(
             energy_weight=args.energy_weight,
             forces_weight=args.forces_weight,
             dipole_weight=args.dipole_weight,
+        )
+    elif args.loss == "energy_forces_electrostatics":
+        assert dipole_only is False and compute_dipole is True
+        loss_fn = modules.WeightedEnergyForcesElectrostaticsLoss(
+            energy_weight=args.energy_weight,
+            forces_weight=args.forces_weight,
+            dipole_weight=args.dipole_weight,
+            charges_weight=getattr(args, "charges_weight", 0.0),
+            atomic_dipole_weight=getattr(args, "atomic_dipole_weight", 0.0),
+            potential_weight=getattr(args, "potential_weight", 0.0),
+            fermi_level_weight=getattr(args, "fermi_level_weight", 0.0),
+            fermi_residual_reg_weight=getattr(
+                args, "fermi_residual_reg_weight", 0.0
+            ),
+            density_3d_weight=getattr(args, "density_3d_weight", 0.0),
+            density_3d_file=getattr(args, "density_3d_file", None),
+            density_3d_sigma=getattr(args, "density_3d_sigma", 0.5),
+            density_3d_samples=getattr(args, "density_3d_samples", 0),
+            density_3d_seed=getattr(args, "density_3d_seed", 12345),
+            potential_1d_profile_weight=getattr(args, "potential_1d_profile_weight", 0.0),
+            potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
+            potential_1d_profile_align=getattr(args, "potential_1d_profile_align", "mean"),
+            solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
+            potential_axis=getattr(args, "potential_axis", 2),
+            potential_sign=getattr(args, "potential_sign", 1.0),
+            solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),
         )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)
@@ -731,6 +803,15 @@ def get_swa(
 ):
     assert dipole_only is False, "Stage Two for dipole fitting not implemented"
     swas.append(True)
+    swa_charges_weight = getattr(args, "swa_charges_weight", None)
+    if swa_charges_weight is None:
+        swa_charges_weight = getattr(args, "charges_weight", 0.0)
+    swa_atomic_dipole_weight = getattr(args, "swa_atomic_dipole_weight", None)
+    if swa_atomic_dipole_weight is None:
+        swa_atomic_dipole_weight = getattr(args, "atomic_dipole_weight", 0.0)
+    swa_potential_weight = getattr(args, "swa_potential_weight", None)
+    if swa_potential_weight is None:
+        swa_potential_weight = getattr(args, "potential_weight", 0.0)
     if args.start_swa is None:
         args.start_swa = max(1, args.max_num_epochs // 4 * 3)
     else:
@@ -776,6 +857,34 @@ def get_swa(
         logging.info(
             f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy}, with energy weight : {args.swa_energy_weight}, forces weight : {args.swa_forces_weight}, dipole weight : {args.swa_dipole_weight} and learning rate : {args.swa_lr}"
         )
+    elif args.loss == "energy_forces_electrostatics":
+        loss_fn_energy = modules.WeightedEnergyForcesElectrostaticsLoss(
+            args.swa_energy_weight,
+            forces_weight=args.swa_forces_weight,
+            dipole_weight=args.swa_dipole_weight,
+            charges_weight=swa_charges_weight,
+            atomic_dipole_weight=swa_atomic_dipole_weight,
+            potential_weight=swa_potential_weight,
+            fermi_level_weight=getattr(args, "fermi_level_weight", 0.0),
+            fermi_residual_reg_weight=getattr(
+                args, "fermi_residual_reg_weight", 0.0
+            ),
+            density_3d_weight=getattr(args, "density_3d_weight", 0.0),
+            density_3d_file=getattr(args, "density_3d_file", None),
+            density_3d_sigma=getattr(args, "density_3d_sigma", 0.5),
+            density_3d_samples=getattr(args, "density_3d_samples", 0),
+            density_3d_seed=getattr(args, "density_3d_seed", 12345),
+            potential_1d_profile_weight=getattr(args, "potential_1d_profile_weight", 0.0),
+            potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
+            potential_1d_profile_align=getattr(args, "potential_1d_profile_align", "mean"),
+            solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
+            potential_axis=getattr(args, "potential_axis", 2),
+            potential_sign=getattr(args, "potential_sign", 1.0),
+            solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),
+        )
+        logging.info(
+            f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy}, with energy weight : {args.swa_energy_weight}, forces weight : {args.swa_forces_weight}, dipole weight : {args.swa_dipole_weight} and learning rate : {args.swa_lr}"
+        )
     elif args.loss == "universal":
         loss_fn_energy = modules.UniversalLoss(
             energy_weight=args.swa_energy_weight,
@@ -790,6 +899,11 @@ def get_swa(
         loss_fn_energy = modules.WeightedEnergyForcesLoss(
             energy_weight=args.swa_energy_weight,
             forces_weight=args.swa_forces_weight,
+            charges_weight=swa_charges_weight,
+            atomic_dipole_weight=swa_atomic_dipole_weight,
+            potential_weight=swa_potential_weight,
+            potential_axis=getattr(args, "potential_axis", 2),
+            potential_sign=getattr(args, "potential_sign", 1.0),
         )
         logging.info(
             f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy}, with energy weight : {args.swa_energy_weight}, forces weight : {args.swa_forces_weight} and learning rate : {args.swa_lr}"
@@ -826,6 +940,25 @@ def get_params_options(
 
     lr_params_factors = json.loads(args.lr_params_factors)
 
+    # PolarMACE with the custom charge/atomic_dipole/potential loss can disable
+    # both energy and force supervision. In that regime the backbone readouts are
+    # only used to build the energy branch and receive no gradients, which causes
+    # DDP to fail on unused parameters. Freeze them automatically so the active
+    # training graph matches the configured objective.
+    if (
+        getattr(args, "model", None) == "PolarMACE"
+        and getattr(args, "loss", None)
+        in ("energy_forces_dipole", "energy_forces_electrostatics")
+        and float(getattr(args, "energy_weight", 0.0)) <= 1.0e-12
+        and float(getattr(args, "forces_weight", 0.0)) <= 1.0e-12
+    ):
+        logging.info(
+            "Energy and force losses are disabled; freezing readout weights "
+            "because the energy branch is inactive for this training run."
+        )
+        lr_params_factors["readouts_lr_factor"] = 0.0
+        freeze_module(model.readouts, True)
+
     if args.freeze:
         if args.freeze >= 7:
             logging.info("Freezing readout weights")
@@ -844,35 +977,41 @@ def get_params_options(
             lr_params_factors["embedding_lr_factor"] = 0.0
             freeze_module(model.node_embedding, True)
 
+    embedding_params = list(model.node_embedding.parameters())
+    interaction_decay_params = list(decay_interactions.values())
+    interaction_no_decay_params = list(no_decay_interactions.values())
+    product_params = list(model.products.parameters())
+    readout_params = list(model.readouts.parameters())
+
     param_options = dict(
         params=[
             {
                 "name": "embedding",
-                "params": model.node_embedding.parameters(),
+                "params": embedding_params,
                 "weight_decay": 0.0,
                 "lr": lr_params_factors.get("embedding_lr_factor", 1.0) * args.lr,
             },
             {
                 "name": "interactions_decay",
-                "params": list(decay_interactions.values()),
+                "params": interaction_decay_params,
                 "weight_decay": args.weight_decay,
                 "lr": lr_params_factors.get("interactions_lr_factor", 1.0) * args.lr,
             },
             {
                 "name": "interactions_no_decay",
-                "params": list(no_decay_interactions.values()),
+                "params": interaction_no_decay_params,
                 "weight_decay": 0.0,
                 "lr": lr_params_factors.get("interactions_lr_factor", 1.0) * args.lr,
             },
             {
                 "name": "products",
-                "params": model.products.parameters(),
+                "params": product_params,
                 "weight_decay": args.weight_decay,
                 "lr": lr_params_factors.get("products_lr_factor", 1.0) * args.lr,
             },
             {
                 "name": "readouts",
-                "params": model.readouts.parameters(),
+                "params": readout_params,
                 "weight_decay": 0.0,
                 "lr": lr_params_factors.get("readouts_lr_factor", 1.0) * args.lr,
             },
@@ -881,11 +1020,44 @@ def get_params_options(
         amsgrad=args.amsgrad,
         betas=(args.beta, 0.999),
     )
+    assigned_param_ids = set()
+    for group in param_options["params"]:
+        for param in group["params"]:
+            assigned_param_ids.add(id(param))
+
+    extra_decay = []
+    extra_no_decay = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad or id(param) in assigned_param_ids:
+            continue
+        if param.ndim >= 2 and name.endswith("weight"):
+            extra_decay.append(param)
+        else:
+            extra_no_decay.append(param)
+
+    if extra_decay:
+        param_options["params"].append(
+            {
+                "name": "extra_decay",
+                "params": extra_decay,
+                "weight_decay": args.weight_decay,
+                "lr": args.lr,
+            }
+        )
+    if extra_no_decay:
+        param_options["params"].append(
+            {
+                "name": "extra_no_decay",
+                "params": extra_no_decay,
+                "weight_decay": 0.0,
+                "lr": args.lr,
+            }
+        )
     if hasattr(model, "joint_embedding") and model.joint_embedding is not None:
         param_options["params"].append(
             {
                 "name": "joint_embedding",
-                "params": model.joint_embedding.parameters(),
+                "params": list(model.joint_embedding.parameters()),
                 "weight_decay": 0.0,
             }
         )
@@ -893,7 +1065,7 @@ def get_params_options(
         param_options["params"].append(
             {
                 "name": "embedding_readout",
-                "params": model.embedding_readout.parameters(),
+                "params": list(model.embedding_readout.parameters()),
                 "weight_decay": 0.0,
             }
         )
@@ -901,7 +1073,7 @@ def get_params_options(
         param_options["params"].append(
             {
                 "name": "les_readouts",
-                "params": model.les_readouts.parameters(),
+                "params": list(model.les_readouts.parameters()),
                 "weight_decay": 0.0,
             }
         )

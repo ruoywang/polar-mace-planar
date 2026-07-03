@@ -9,11 +9,16 @@ class DefaultKeys(Enum):
     STRESS = "REF_stress"
     VIRIALS = "REF_virials"
     DIPOLE = "dipole"
+    EXPLICIT_DIPOLE = "dipole_explicit"
+    ATOMIC_DIPOLE = "atomic_dipole"
+    POTENTIAL = "potential"
+    FERMI_LEVEL = "fermi_level"
     POLARIZABILITY = "polarizability"
     HEAD = "head"
     CHARGES = "REF_charges"
     TOTAL_CHARGE = "total_charge"
     TOTAL_SPIN = "total_spin"
+    SAMPLE_ID = "sample_id"
     ELEC_TEMP = "elec_temp"
 
     @staticmethod

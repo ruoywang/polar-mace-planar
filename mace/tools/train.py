@@ -23,6 +23,13 @@ from torch_ema import ExponentialMovingAverage
 from torchmetrics import Metric
 
 from mace.cli.visualise_train import TrainingPlotter
+from mace.modules.loss import (
+    attach_density_3d_samples_to_batch,
+    density_3d_residuals,
+    potential_1d_profile_residuals,
+    predict_potential_from_dipole,
+    solvent_layer_mean_residuals,
+)
 
 from . import torch_geometric
 from .checkpoint import CheckpointHandler, CheckpointState
@@ -62,11 +69,35 @@ def valid_err_log(
         inintial_phrase = "Initial"
     else:
         inintial_phrase = f"Epoch {epoch}"
+    charge_msg = ""
+    if eval_metrics.get("rmse_q") is not None:
+        charge_msg = f", RMSE_Q={eval_metrics['rmse_q']:.4f} e"
+    potential_msg = ""
+    if eval_metrics.get("rmse_potential") is not None:
+        potential_msg = f", RMSE_potential={eval_metrics['rmse_potential']:.4f} eV"
+    if eval_metrics.get("rmse_fermi_level") is not None:
+        potential_msg += f", RMSE_fermi={eval_metrics['rmse_fermi_level']:.4f} eV"
+    density_msg = ""
+    if eval_metrics.get("rmse_density_3d") is not None:
+        density_msg += (
+            f", RMSE_density_3d={eval_metrics['rmse_density_3d']:.5f} e/A^3"
+        )
+    if eval_metrics.get("rmse_potential_1d_profile") is not None:
+        density_msg += (
+            f", RMSE_potential_1d_profile={eval_metrics['rmse_potential_1d_profile']:.5f} eV"
+        )
+    if eval_metrics.get("rmse_solvent_layer_mean") is not None:
+        density_msg += (
+            f", RMSE_solvent_layer_mean={eval_metrics['rmse_solvent_layer_mean']:.5f} A"
+        )
+    atomic_dipole_msg = ""
+    if eval_metrics.get("rmse_atomic_dipole") is not None:
+        atomic_dipole_msg = f", RMSE_atomic_dipole={eval_metrics['rmse_atomic_dipole']:.4f} eA"
     if log_errors == "PerAtomRMSE":
         error_e = eval_metrics["rmse_e_per_atom"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A"
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}"
         )
     elif (
         log_errors == "PerAtomRMSEstressvirials"
@@ -76,7 +107,7 @@ def valid_err_log(
         error_f = eval_metrics["rmse_f"] * 1e3
         error_stress = eval_metrics["rmse_stress"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_stress={error_stress:8.2f} meV / A^3",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_stress={error_stress:8.2f} meV / A^3{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif (
         log_errors == "PerAtomRMSEstressvirials"
@@ -86,7 +117,7 @@ def valid_err_log(
         error_f = eval_metrics["rmse_f"] * 1e3
         error_virials = eval_metrics["rmse_virials_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_virials_per_atom={error_virials:8.2f} meV",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_virials_per_atom={error_virials:8.2f} meV{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif (
         log_errors == "PerAtomMAEstressvirials"
@@ -96,7 +127,7 @@ def valid_err_log(
         error_f = eval_metrics["mae_f"] * 1e3
         error_stress = eval_metrics["mae_stress"] * 1e3
         logging.info(
-            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_stress={error_stress:8.2f} meV / A^3"
+            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_stress={error_stress:8.2f} meV / A^3{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}"
         )
     elif (
         log_errors == "PerAtomMAEstressvirials"
@@ -106,43 +137,43 @@ def valid_err_log(
         error_f = eval_metrics["mae_f"] * 1e3
         error_virials = eval_metrics["mae_virials"] * 1e3
         logging.info(
-            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_virials={error_virials:8.2f} meV"
+            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_virials={error_virials:8.2f} meV{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}"
         )
     elif log_errors == "TotalRMSE":
         error_e = eval_metrics["rmse_e"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif log_errors == "PerAtomMAE":
         error_e = eval_metrics["mae_e_per_atom"] * 1e3
         error_f = eval_metrics["mae_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif log_errors == "TotalMAE":
         error_e = eval_metrics["mae_e"] * 1e3
         error_f = eval_metrics["mae_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif log_errors == "DipoleRMSE":
         error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_MU_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_MU_per_atom={error_mu:8.2f} mDebye{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif log_errors == "DipolePolarRMSE":
         error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
         error_polarizability = eval_metrics["rmse_polarizability_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:.4f}, RMSE_MU_per_atom={error_mu:.2f} me A, RMSE_polarizability_per_atom={error_polarizability:.2f} me A^2 / V",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:.4f}, RMSE_MU_per_atom={error_mu:.2f} me A, RMSE_polarizability_per_atom={error_polarizability:.2f} me A^2 / V{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
     elif log_errors == "EnergyDipoleRMSE":
         error_e = eval_metrics["rmse_e_per_atom"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_Mu_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_Mu_per_atom={error_mu:8.2f} mDebye{charge_msg}{potential_msg}{density_msg}{atomic_dipole_msg}",
         )
 
 
@@ -277,14 +308,27 @@ def train(
                             valid_loader_name,
                         )
                         if log_wandb:
-                            wandb_log_dict[valid_loader_name] = {
+                            wandb_metrics = {
                                 "epoch": epoch,
                                 "valid_loss": valid_loss_head,
-                                "valid_rmse_e_per_atom": eval_metrics[
+                                "valid_rmse_e_per_atom": eval_metrics.get(
                                     "rmse_e_per_atom"
-                                ],
-                                "valid_rmse_f": eval_metrics["rmse_f"],
+                                ),
+                                "valid_rmse_f": eval_metrics.get("rmse_f"),
                             }
+                            if eval_metrics.get("rmse_q") is not None:
+                                wandb_metrics["valid_rmse_q"] = eval_metrics["rmse_q"]
+                            if eval_metrics.get("rmse_potential") is not None:
+                                wandb_metrics["valid_rmse_potential"] = eval_metrics["rmse_potential"]
+                            if eval_metrics.get("rmse_atomic_dipole") is not None:
+                                wandb_metrics["valid_rmse_atomic_dipole"] = eval_metrics["rmse_atomic_dipole"]
+                            if eval_metrics.get("mae_q") is not None:
+                                wandb_metrics["valid_mae_q"] = eval_metrics["mae_q"]
+                            if eval_metrics.get("mae_potential") is not None:
+                                wandb_metrics["valid_mae_potential"] = eval_metrics["mae_potential"]
+                            if eval_metrics.get("mae_atomic_dipole") is not None:
+                                wandb_metrics["valid_mae_atomic_dipole"] = eval_metrics["mae_atomic_dipole"]
+                            wandb_log_dict[valid_loader_name] = wandb_metrics
                 if plotter and epoch % plotter.plot_frequency == 0:
                     try:
                         plotter.plot(epoch, model_to_evaluate, rank)
@@ -411,6 +455,7 @@ def take_step(
 ) -> Tuple[float, Dict[str, Any]]:
     start_time = time.time()
     batch = batch.to(device)
+    attach_density_3d_samples_to_batch(batch, loss_fn)
     batch_dict = batch.to_dict()
 
     def closure():
@@ -488,6 +533,7 @@ def take_step_lbfgs(
         # Process each batch and then collect the results we pass to the optimizer
         for batch in data_loader:
             batch = batch.to(device)
+            attach_density_3d_samples_to_batch(batch, loss_fn)
             batch_dict = batch.to_dict()
             output = model(
                 batch_dict,
@@ -566,19 +612,29 @@ def evaluate(
     metrics = MACELoss(loss_fn=loss_fn).to(device)
 
     start_time = time.time()
+    density_rng = getattr(loss_fn, "density_3d_rng", None)
+    density_rng_state = None
+    if density_rng is not None and hasattr(loss_fn, "density_3d_seed"):
+        density_rng_state = density_rng.getstate()
+        density_rng.seed(int(getattr(loss_fn, "density_3d_seed")))
 
-    with preserve_grad_state(model):
-        for batch in data_loader:
-            batch = batch.to(device)
-            batch_dict = batch.to_dict()
-            output = model(
-                batch_dict,
-                training=False,
-                compute_force=output_args["forces"],
-                compute_virials=output_args["virials"],
-                compute_stress=output_args["stress"],
-            )
-            avg_loss, aux = metrics(batch, output)
+    try:
+        with preserve_grad_state(model):
+            for batch in data_loader:
+                batch = batch.to(device)
+                attach_density_3d_samples_to_batch(batch, loss_fn)
+                batch_dict = batch.to_dict()
+                output = model(
+                    batch_dict,
+                    training=False,
+                    compute_force=output_args["forces"],
+                    compute_virials=output_args["virials"],
+                    compute_stress=output_args["stress"],
+                )
+                avg_loss, aux = metrics(batch, output)
+    finally:
+        if density_rng is not None and density_rng_state is not None:
+            density_rng.setstate(density_rng_state)
     avg_loss, aux = metrics.compute()
     aux["time"] = time.time() - start_time
     metrics.reset()
@@ -607,6 +663,33 @@ class MACELoss(Metric):
         )
         self.add_state("delta_virials", default=[], dist_reduce_fx="cat")
         self.add_state("delta_virials_per_atom", default=[], dist_reduce_fx="cat")
+        self.add_state("Qs_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("qs", default=[], dist_reduce_fx="cat")
+        self.add_state("delta_qs", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "Potentials_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_potentials", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "FermiLevels_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_fermi_levels", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "Density3D_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_density_3d", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "Potential1DProfile_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_potential_1d_profile", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "SolventLayerMean_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_solvent_layer_mean", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "AtomicMus_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_atomic_mus", default=[], dist_reduce_fx="cat")
         self.add_state("Mus_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("mus", default=[], dist_reduce_fx="cat")
         self.add_state("delta_mus", default=[], dist_reduce_fx="cat")
@@ -656,6 +739,17 @@ class MACELoss(Metric):
             self.virials_computed += filter_nonzero_weight(
                 batch, self.delta_virials, batch.weight, batch.virials_weight
             )
+        if output.get("charges") is not None and batch.charges is not None:
+            self.qs.append(batch.charges)
+            self.delta_qs.append(batch.charges - output["charges"])
+            self.Qs_computed += filter_nonzero_weight(
+                batch,
+                self.delta_qs,
+                batch.weight,
+                batch.charges_weight,
+                spread_atoms=True,
+                spread_quantity_vector=False,
+            )
         if output.get("dipole") is not None and batch.dipole is not None:
             self.mus.append(batch.dipole)
             self.delta_mus.append(batch.dipole - output["dipole"])
@@ -670,6 +764,110 @@ class MACELoss(Metric):
                 batch.dipole_weight,
                 spread_quantity_vector=False,
             )
+        if output.get("atomic_dipole") is not None and getattr(batch, "atomic_dipole", None) is not None:
+            self.delta_atomic_mus.append(batch.atomic_dipole - output["atomic_dipole"])
+            self.AtomicMus_computed += filter_nonzero_weight(
+                batch,
+                self.delta_atomic_mus,
+                batch.weight,
+                batch.atomic_dipole_weight,
+                spread_atoms=True,
+                spread_quantity_vector=True,
+            )
+        if output.get("potential") is None and output.get("dipole") is not None:
+            pred_potential = predict_potential_from_dipole(
+                ref=batch,
+                pred=output,
+                axis=int(getattr(self.loss_fn, "potential_axis", 2)),
+                potential_sign=float(getattr(self.loss_fn, "potential_sign", 1.0)),
+            )
+            if pred_potential is not None:
+                output["potential"] = pred_potential
+        if output.get("potential") is not None and getattr(batch, "potential", None) is not None:
+            self.delta_potentials.append(batch.potential.view(-1) - output["potential"].view(-1))
+            self.Potentials_computed += filter_nonzero_weight(
+                batch,
+                self.delta_potentials,
+                batch.weight,
+                batch.potential_weight,
+                spread_quantity_vector=False,
+            )
+        if (
+            getattr(self.loss_fn, "fermi_level_weight", 0.0) > 1.0e-12
+            and output.get("fermi_level_pred") is not None
+            and getattr(batch, "fermi_level", None) is not None
+        ):
+            self.delta_fermi_levels.append(
+                batch.fermi_level.view(-1) - output["fermi_level_pred"].view(-1)
+            )
+            self.FermiLevels_computed += torch.tensor(
+                float(output["fermi_level_pred"].view(-1).numel()),
+                dtype=self.FermiLevels_computed.dtype,
+                device=self.FermiLevels_computed.device,
+            )
+        density_3d_targets = getattr(self.loss_fn, "density_3d_targets", None)
+        if density_3d_targets:
+            density_3d_res = density_3d_residuals(
+                ref=batch,
+                pred=output,
+                density_targets=density_3d_targets,
+                density_smearing_width=getattr(self.loss_fn, "density_3d_sigma", 0.5),
+                samples_per_graph=int(getattr(self.loss_fn, "density_3d_samples", 0)),
+                rng=getattr(self.loss_fn, "density_3d_rng", None),
+            )
+            if density_3d_res is not None:
+                self.delta_density_3d.append(density_3d_res.detach())
+                self.Density3D_computed += torch.tensor(
+                    float(density_3d_res.numel()),
+                    dtype=self.Density3D_computed.dtype,
+                    device=self.Density3D_computed.device,
+                )
+        potential_1d_targets = getattr(self.loss_fn, "potential_1d_profile_targets", None)
+        if potential_1d_targets:
+            potential_1d_res = potential_1d_profile_residuals(
+                ref=batch,
+                pred=output,
+                potential_targets=potential_1d_targets,
+                density_smearing_width=getattr(self.loss_fn, "density_3d_sigma", 0.5),
+                axis=int(getattr(self.loss_fn, "potential_axis", 2)),
+                solvent_sigma_g=float(getattr(self.loss_fn, "solvent_sigma_g", 0.85)),
+                align=str(getattr(self.loss_fn, "potential_1d_profile_align", "mean")),
+            )
+            if potential_1d_res is not None:
+                self.delta_potential_1d_profile.append(potential_1d_res.detach())
+                self.Potential1DProfile_computed += torch.tensor(
+                    float(potential_1d_res.numel()),
+                    dtype=self.Potential1DProfile_computed.dtype,
+                    device=self.Potential1DProfile_computed.device,
+                )
+        if getattr(self.loss_fn, "solvent_center_weight", 0.0) > 1.0e-12:
+            solvent_layer_res, pred_layer_mean, target_layer_mean = (
+                solvent_layer_mean_residuals(
+                    ref=batch,
+                    pred=output,
+                    potential_targets=getattr(self.loss_fn, "potential_1d_profile_targets", {}),
+                    density_targets=getattr(self.loss_fn, "density_3d_targets", {}),
+                    use_density_center=bool(
+                        getattr(self.loss_fn, "use_density_center_target", False)
+                    ),
+                    use_partition_center=bool(
+                        getattr(self.loss_fn, "use_partition_center_target", False)
+                    ),
+                    axis=int(getattr(self.loss_fn, "potential_axis", 2)),
+                    potential_sign=float(getattr(self.loss_fn, "potential_sign", 1.0)),
+                    sigma_g=float(getattr(self.loss_fn, "solvent_sigma_g", 0.85)),
+                )
+            )
+            if solvent_layer_res is not None and pred_layer_mean is not None:
+                output["solvent_layer_mean"] = pred_layer_mean
+                self.delta_solvent_layer_mean.append(
+                    solvent_layer_res.detach()
+                )
+                self.SolventLayerMean_computed += torch.tensor(
+                    float(target_layer_mean.numel()),
+                    dtype=self.SolventLayerMean_computed.dtype,
+                    device=self.SolventLayerMean_computed.device,
+                )
         if (
             output.get("polarizability") is not None
             and batch.polarizability is not None
@@ -739,6 +937,14 @@ class MACELoss(Metric):
             aux["rmse_virials"] = compute_rmse(delta_virials)
             aux["rmse_virials_per_atom"] = compute_rmse(delta_virials_per_atom)
             aux["q95_virials"] = compute_q95(delta_virials)
+        if self.Qs_computed:
+            qs = self.convert(self.qs)
+            delta_qs = self.convert(self.delta_qs)
+            aux["mae_q"] = compute_mae(delta_qs)
+            aux["rel_mae_q"] = compute_rel_mae(delta_qs, qs)
+            aux["rmse_q"] = compute_rmse(delta_qs)
+            aux["rel_rmse_q"] = compute_rel_rmse(delta_qs, qs)
+            aux["q95_q"] = compute_q95(delta_qs)
         if self.Mus_computed:
             mus = self.convert(self.mus)
             delta_mus = self.convert(self.delta_mus)
@@ -750,6 +956,36 @@ class MACELoss(Metric):
             aux["rmse_mu_per_atom"] = compute_rmse(delta_mus_per_atom)
             aux["rel_rmse_mu"] = compute_rel_rmse(delta_mus, mus)
             aux["q95_mu"] = compute_q95(delta_mus)
+        if self.Potentials_computed:
+            delta_potentials = self.convert(self.delta_potentials)
+            aux["mae_potential"] = compute_mae(delta_potentials)
+            aux["rmse_potential"] = compute_rmse(delta_potentials)
+            aux["q95_potential"] = compute_q95(delta_potentials)
+        if self.FermiLevels_computed:
+            delta_fermi_levels = self.convert(self.delta_fermi_levels)
+            aux["mae_fermi_level"] = compute_mae(delta_fermi_levels)
+            aux["rmse_fermi_level"] = compute_rmse(delta_fermi_levels)
+            aux["q95_fermi_level"] = compute_q95(delta_fermi_levels)
+        if self.Density3D_computed:
+            delta_density_3d = self.convert(self.delta_density_3d)
+            aux["mae_density_3d"] = compute_mae(delta_density_3d)
+            aux["rmse_density_3d"] = compute_rmse(delta_density_3d)
+            aux["q95_density_3d"] = compute_q95(delta_density_3d)
+        if self.Potential1DProfile_computed:
+            delta_potential_1d_profile = self.convert(self.delta_potential_1d_profile)
+            aux["mae_potential_1d_profile"] = compute_mae(delta_potential_1d_profile)
+            aux["rmse_potential_1d_profile"] = compute_rmse(delta_potential_1d_profile)
+            aux["q95_potential_1d_profile"] = compute_q95(delta_potential_1d_profile)
+        if self.SolventLayerMean_computed:
+            delta_solvent_layer_mean = self.convert(self.delta_solvent_layer_mean)
+            aux["mae_solvent_layer_mean"] = compute_mae(delta_solvent_layer_mean)
+            aux["rmse_solvent_layer_mean"] = compute_rmse(delta_solvent_layer_mean)
+            aux["q95_solvent_layer_mean"] = compute_q95(delta_solvent_layer_mean)
+        if self.AtomicMus_computed:
+            delta_atomic_mus = self.convert(self.delta_atomic_mus)
+            aux["mae_atomic_dipole"] = compute_mae(delta_atomic_mus)
+            aux["rmse_atomic_dipole"] = compute_rmse(delta_atomic_mus)
+            aux["q95_atomic_dipole"] = compute_q95(delta_atomic_mus)
         if self.polarizability_computed:
             delta_polarizability = self.convert(self.delta_polarizability)
             delta_polarizability_per_atom = self.convert(

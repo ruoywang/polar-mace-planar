@@ -56,19 +56,24 @@ class EnvironmentDependentSpinSourceBlock(torch.nn.Module):
         self,
         irreps_in: o3.Irreps,
         max_l: int,
+        num_radial: int = 1,
         zero_charges: bool = False,
         cueq_config: Optional[CuEquivarianceConfig] = None,
     ):
         super().__init__()
         self.zero_charges = zero_charges
-        self.irreps_out = 2 * o3.Irreps.spherical_harmonics(max_l)
+        self.num_radial = int(num_radial)
+        radial_irreps = (
+            self.num_radial * o3.Irreps.spherical_harmonics(max_l)
+        ).sort()[0].simplify()
+        self.irreps_out = radial_irreps + radial_irreps
         self.linear = Linear(irreps_in, self.irreps_out, cueq_config=cueq_config)
 
     def forward(self, node_feats: torch.Tensor) -> torch.Tensor:
         mp = self.linear(node_feats)
         if self.zero_charges:
             mp_z = torch.zeros_like(mp)
-            mp_z[:, 1:] = mp[:, 1:]
+            mp_z[:, self.num_radial :] = mp[:, self.num_radial :]
             mp = mp_z
         return mp.unsqueeze(-2)  # [n_nodes, 1, (max_l+1)^2 * 2]
 

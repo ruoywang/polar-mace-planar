@@ -315,6 +315,24 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=1.0,
     )
     parser.add_argument(
+        "--atomic_density_sigmas",
+        help=(
+            "optional list of Gaussian widths for the density-only radial GTO "
+            "branch, e.g. '[0.25, 0.5, 1.0]'"
+        ),
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--atomic_valence_electrons",
+        help=(
+            "optional list of valence electron counts in the same order as "
+            "atomic_numbers, e.g. '[1.0, 6.0, 11.0]'"
+        ),
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
         "--field_feature_max_l",
         help="maximum l for projected field features in PolarMACE",
         type=int,
@@ -385,6 +403,66 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="dict-like config for PolarMACE field readout block",
         type=str,
         default=None,
+    )
+    parser.add_argument(
+        "--element_charge_baseline",
+        help="initialize PolarMACE monopoles around per-head per-element mean training charges",
+        type=str2bool,
+        default=False,
+    )
+    parser.add_argument(
+        "--element_charge_residual_scale",
+        help="scale factor applied to PolarMACE monopole residual updates when using an element-charge baseline; if None, automatically use the global training-set residual std around the baseline",
+        type=check_float_or_none,
+        default=None,
+    )
+    parser.add_argument(
+        "--solvent_sigma_g",
+        help="fixed Gaussian width (Angstrom) for the implicit solvent charge layer",
+        type=float,
+        default=0.85,
+    )
+    parser.add_argument(
+        "--solvent_density_threshold",
+        help="fixed absolute electron-density threshold (e/Ang^3) used for the solvent baseline center; if omitted, fall back to normalized z_e crossing",
+        type=check_float_or_none,
+        default=None,
+    )
+    parser.add_argument(
+        "--solvent_ze_level",
+        help="crossing level used to define z_e from the reconstructed 1D electron density",
+        type=float,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--solvent_window_inward",
+        help="inward half-window (Angstrom) from z_top used for z_e crossing extraction",
+        type=float,
+        default=5.0,
+    )
+    parser.add_argument(
+        "--solvent_window_outward",
+        help="outward half-window (Angstrom) from z_top used for z_e crossing extraction",
+        type=float,
+        default=5.0,
+    )
+    parser.add_argument(
+        "--solvent_potential_axis",
+        help="cell axis used for solvent potential correction",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--solvent_potential_sign",
+        help="sign convention for solvent potential correction",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--solvent_center_mean_shift",
+        help="fixed mean shift (Angstrom) added to z_e before any learned solvent-center residual",
+        type=float,
+        default=0.7,
     )
     parser.add_argument(
         "--scaling",
@@ -682,6 +760,24 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=DefaultKeys.DIPOLE.value,
     )
     parser.add_argument(
+        "--atomic_dipole_key",
+        help="Key of reference per-atom local dipoles in training xyz",
+        type=str,
+        default=DefaultKeys.ATOMIC_DIPOLE.value,
+    )
+    parser.add_argument(
+        "--potential_key",
+        help="Key of reference potential differences in training xyz",
+        type=str,
+        default=DefaultKeys.POTENTIAL.value,
+    )
+    parser.add_argument(
+        "--fermi_level_key",
+        help="Key of reference Fermi level relative to the upper vacuum in training xyz",
+        type=str,
+        default=DefaultKeys.FERMI_LEVEL.value,
+    )
+    parser.add_argument(
         "--polarizability_key",
         help="Key of polarizability in training xyz",
         type=str,
@@ -716,6 +812,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="Key of total charge in training xyz",
         type=str,
         default=DefaultKeys.TOTAL_CHARGE.value,
+    )
+    parser.add_argument(
+        "--sample_id_key",
+        help="Key of integer sample id in training xyz",
+        type=str,
+        default=DefaultKeys.SAMPLE_ID.value,
     )
     parser.add_argument(
         "--embedding_specs",
@@ -763,6 +865,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "huber",
             "universal",
             "energy_forces_dipole",
+            "energy_forces_electrostatics",
             "l1l2energyforces",
         ],
     )
@@ -814,12 +917,131 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--dipole_weight", help="weight of dipoles loss", type=float, default=1.0
     )
     parser.add_argument(
+        "--atomic_dipole_weight",
+        help="weight of per-atom local dipole loss",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--charges_weight", help="weight of atomic charges loss", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--potential_weight",
+        help="weight of potential-difference loss computed from the predicted total dipole",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--fermi_level_weight",
+        help="weight of Fermi-level loss using baseline - predicted potential difference + learned residual",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--fermi_level_baseline",
+        help="internal Fermi-level baseline in eV; normally fitted from the train split",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--fermi_residual_reg_weight",
+        help="L2 regularization weight on the learned Fermi residual in eV; only active when fermi_level_weight > 0",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--density_3d_weight",
+        help="weight of partition-free 3D CHGCAR point density loss",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--density_3d_file",
+        help="TSV file with sample_id, point_index, x_A, y_A, z_A, rho_e_per_A3 columns",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--density_3d_sigma",
+        help="Gaussian width in Angstrom used to reconstruct rho_e(x,y,z) for density_3d loss",
+        type=str,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--density_3d_samples",
+        help=(
+            "if positive, randomly sample this many 3D density points per "
+            "structure each loss call from density_3d_file"
+        ),
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--density_3d_seed",
+        help="random seed for density_3d_samples point sampling",
+        type=int,
+        default=12345,
+    )
+    parser.add_argument(
+        "--potential_1d_profile_weight",
+        help="weight of 1D total potential profile loss against PHI",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--potential_1d_profile_file",
+        help="NPZ file with sample_ids, z_A, phi_eV, raw_neutral_e, raw_ion_potcar_e and cdipol_indmin arrays",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--potential_1d_profile_align",
+        help="alignment for 1D potential profile loss: upper, mean or none",
+        type=str,
+        default="mean",
+    )
+    parser.add_argument(
+        "--solvent_center_weight",
+        help=(
+            "weight of the compensating-layer mean loss. With density_3d_file "
+            "and potential_1d_profile_file it is inferred from the density/profile "
+            "targets; otherwise it is inferred from partition charges, atomic "
+            "dipoles, reference potential, and total charge"
+        ),
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--swa_dipole_weight",
         "--stage_two_dipole_weight",
         help="weight of dipoles after starting Stage Two (previously called swa)",
         type=float,
         default=1.0,
         dest="swa_dipole_weight",
+    )
+    parser.add_argument(
+        "--swa_atomic_dipole_weight",
+        "--stage_two_atomic_dipole_weight",
+        help="weight of per-atom local dipoles after starting Stage Two (previously called swa)",
+        type=float,
+        default=None,
+        dest="swa_atomic_dipole_weight",
+    )
+    parser.add_argument(
+        "--swa_charges_weight",
+        "--stage_two_charges_weight",
+        help="weight of atomic charges after starting Stage Two (previously called swa)",
+        type=float,
+        default=None,
+        dest="swa_charges_weight",
+    )
+    parser.add_argument(
+        "--swa_potential_weight",
+        "--stage_two_potential_weight",
+        help="weight of potential differences after starting Stage Two (previously called swa)",
+        type=float,
+        default=None,
+        dest="swa_potential_weight",
     )
     parser.add_argument(
         "--swa_polarizability_weight",
@@ -834,6 +1056,19 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="weight of polarizability loss",
         type=float,
         default=1.0,
+    )
+    parser.add_argument(
+        "--potential_axis",
+        help="Axis normal to the slab used for converting dipole density into a potential difference (0/1/2)",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--potential_sign",
+        help="Final sign multiplier for the dipole-to-potential conversion (+1 or -1)",
+        type=int,
+        choices=[-1, 1],
+        default=1,
     )
     parser.add_argument(
         "--config_type_weights",
@@ -986,6 +1221,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--eval_interval", help="evaluate model every <n> epochs", type=int, default=1
+    )
+    parser.add_argument(
+        "--primary_valid_metric",
+        help="Primary validation metric used for checkpoint selection and patience",
+        type=str,
+        choices=["loss"],
+        default="loss",
     )
     parser.add_argument(
         "--keep_checkpoints",
@@ -1198,6 +1440,12 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Key of reference dipoles in training xyz",
         type=str,
         default=DefaultKeys.DIPOLE.value,
+    )
+    parser.add_argument(
+        "--atomic_dipole_key",
+        help="Key of reference per-atom local dipoles in training xyz",
+        type=str,
+        default=DefaultKeys.ATOMIC_DIPOLE.value,
     )
     parser.add_argument(
         "--polarizability_key",

@@ -55,20 +55,24 @@ def update_keyspec_from_kwargs(
         "stress_key",
         "virials_key",
         "dipole_key",
+        "explicit_dipole_key",
+        "potential_key",
+        "fermi_level_key",
         "head_key",
         "elec_temp_key",
         "total_charge_key",
+        "sample_id_key",
         "polarizability_key",
         "total_spin_key",
     ]
-    arrays = ["forces_key", "charges_key"]
+    arrays = ["forces_key", "charges_key", "atomic_dipole_key"]
     info_keys = {}
     arrays_keys = {}
     for key in infos:
-        if key in keydict:
+        if key in keydict and keydict[key] is not None:
             info_keys[key[:-4]] = keydict[key]
     for key in arrays:
-        if key in keydict:
+        if key in keydict and keydict[key] is not None:
             arrays_keys[key[:-4]] = keydict[key]
 
     # automagically add properties for embeddings
