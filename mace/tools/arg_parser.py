@@ -555,9 +555,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--solvent_pb_warm_fixsol_steps",
-        help="dipole fix-steps on a warm-started solve (cold solves use --solvent_pb_fixsol_steps)",
+        help=(
+            "dipole fix-steps on a warm-started solve; 0 (default) = same as "
+            "--solvent_pb_fixsol_steps (protocol-identical warm start)"
+        ),
         type=int,
-        default=1,
+        default=0,
     )
     parser.add_argument(
         "--solvent_pb_include_bound",

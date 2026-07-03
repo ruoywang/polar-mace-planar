@@ -741,7 +741,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_include_bound: bool = True,
         solvent_pb_backend: str = "torch",
         solvent_pb_warm_start: bool = True,
-        solvent_pb_warm_fixsol_steps: int = 1,
+        solvent_pb_warm_fixsol_steps: int = 0,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,

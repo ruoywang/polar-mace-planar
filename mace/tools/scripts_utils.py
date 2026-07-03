@@ -408,7 +408,7 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
             model, "solvent_pb_warm_start", True
         )
         config["solvent_pb_warm_fixsol_steps"] = getattr(
-            model, "solvent_pb_warm_fixsol_steps", 1
+            model, "solvent_pb_warm_fixsol_steps", 0
         )
         fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
         config["fermi_level_baseline"] = (

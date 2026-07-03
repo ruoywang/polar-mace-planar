@@ -346,13 +346,17 @@ class PBTorchBackend:
 
     Speed features, both result-preserving:
     - per-sample warm start: the converged phi (float32, CPU-cached, keyed by
-      sample_id) seeds the next epoch's solve; convergence is still driven to
-      the same residual tolerance, so the solution is tolerance-identical.
-      On a warm hit the dipole fix-point state (qsol/dsol) is restored too and
-      ``warm_fixsol_steps`` (default 1) fix-steps suffice — across epochs the
-      fix-point is *more* converged than two cold steps.
+      sample_id) seeds the next epoch's fixstep-0 Newton solve. The dipole
+      fix-point loop still runs the FULL cold protocol from a zero state, so
+      the only difference vs a cold solve is the Newton initial guess —
+      convergence is driven to the same residual tolerance either way
+      (tolerance-identical results; verified in test_torch_backend.py).
+      Caching the dipole state with a single warm fix-step was tried and
+      rejected: the undamped fix-point update oscillates (~0.03 A in the
+      layer mean, ~0.07 V).
     - torch coarse-grid warm start for cold solves (same construction as the
       numpy driver).
+    ``warm_fixsol_steps=0`` (default) means "same as fixsol_steps".
     """
 
     def __init__(
@@ -368,7 +372,7 @@ class PBTorchBackend:
         nuclear_sigma: float = 0.4,
         axis: int = 2,
         warm_start: bool = True,
-        warm_fixsol_steps: int = 1,
+        warm_fixsol_steps: int = 0,
     ) -> None:
         self._init_kwargs = {
             "config_path": config_path,
@@ -555,21 +559,24 @@ class PBTorchBackend:
         )
         val_ion_dipole[0:2] = 0.0
 
-        # warm start
+        # warm start: phi only — the dipole fix-point loop always runs the
+        # cold protocol from a zero state so results are protocol-identical.
         cached = self._phi_cache.get(sample_id) if (
             self.warm_start and sample_id is not None
         ) else None
         warm = cached is not None and cached["shape"] == shape
         if warm:
             phi_total = cached["phi"].to(device=device, dtype=dt)
-            qsol_cache = cached["qsol"]
-            dsol_z = cached["dsol_z"]
-            n_steps = max(1, self.warm_fixsol_steps)
+            n_steps = (
+                self.warm_fixsol_steps
+                if self.warm_fixsol_steps > 0
+                else self.fixsol_steps
+            )
         else:
             phi_total = torch.zeros(shape, dtype=dt, device=device)
-            qsol_cache = 0.0
-            dsol_z = 0.0
             n_steps = self.fixsol_steps
+        qsol_cache = 0.0
+        dsol_z = 0.0
 
         mixer = self._EwaldDipoleMixer.fresh()
         indmin_z = self._cdipol_indmin_from_center(nz, 0.5)
@@ -614,8 +621,6 @@ class PBTorchBackend:
         if self.warm_start and sample_id is not None:
             self._phi_cache[sample_id] = {
                 "phi": phi_total.detach().to(torch.float32).cpu(),
-                "qsol": qsol_cache,
-                "dsol_z": dsol_z,
                 "shape": shape,
             }
 

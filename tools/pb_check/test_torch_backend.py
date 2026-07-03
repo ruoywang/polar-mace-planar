@@ -6,10 +6,15 @@
    (coarse-init cold start, fixsol_steps=2, tol 1e-3, rfft f64).
    Expect profile/moment agreement at machine precision.
 
-2. WARM-START INVARIANCE: warm solve (cached phi + dipole state,
-   warm_fixsol_steps=1) on a slightly perturbed density vs a cold solve of
-   the same density. Differences must be at the residual-tolerance scale,
-   far below the grid-convergence error budget (0.017 V).
+2. WARM-START INVARIANCE: warm solve (cached phi as the Newton initial
+   guess; the dipole fix-point loop runs the full cold protocol) on a
+   slightly perturbed density vs a cold solve of the same density.
+   Differences must be at the residual-tolerance scale, far below the
+   grid-convergence error budget (0.017 V).
+
+   Parity thresholds are tolerance-limited, not machine precision: the two
+   backends order FFTs/reductions differently, so their Newton iterates
+   stop at slightly different points inside the same residual tolerance.
 
 3. TIMING: per-stage wall times, cold vs warm, on the target device.
 
@@ -67,7 +72,7 @@ def main():
     common = dict(config_path=args.config, grid_spacing=args.spacing,
                   fixsol_steps=2, tol=1e-3, coarse_init=True)
     np_backend = PBPlanarSolvent(**common)
-    t_backend = PBTorchBackend(warm_start=True, warm_fixsol_steps=1, **common)
+    t_backend = PBTorchBackend(warm_start=True, **common)
 
     dev = torch.device(args.device)
     pos_t = torch.as_tensor(positions, device=dev, dtype=torch.float64)
@@ -94,9 +99,11 @@ def main():
         "layer_mean": abs(r_t["layer_mean"] - r_np["layer_mean"]),
         "mu_bound": abs(r_t["mu_bound"] - r_np["mu_bound"]),
     }
-    ok1 = all(v < 1e-8 for v in checks.values())
+    lim = {"rho_ion_z": 1e-5, "rho_bound_z": 1e-5, "q_ion": 1e-6,
+           "layer_mean": 1e-4, "mu_bound": 1e-4}
+    ok1 = all(v < lim[k] for k, v in checks.items())
     for k, v in checks.items():
-        print(f"  {k:12s} {v:.2e}  {'OK' if v < 1e-8 else 'FAIL'}")
+        print(f"  {k:12s} {v:.2e} (limit {lim[k]:.0e})  {'OK' if v < lim[k] else 'FAIL'}")
     print(f"  numpy diag: {np_backend.last_diagnostics}")
     print(f"  torch diag: {t_backend.last_diagnostics}")
 
@@ -136,6 +143,21 @@ def main():
     print(f"  warm diag: {d_warm}")
     print(f"  cold diag: {d_cold}")
     ok2 = dpot < 5e-3
+
+    print("\n=== 2b. fixsol convergence probe (informational) ===")
+    probe = {}
+    for nfs in (1, 2, 6):
+        b = PBTorchBackend(config_path=args.config, grid_spacing=args.spacing,
+                           fixsol_steps=nfs, tol=1e-3, coarse_init=True,
+                           warm_start=False)
+        r = b.solve_rho_ion_z(
+            positions=pos_t, cell=cell_t, z_valence=zv_t,
+            total_charge=TOTAL_CHARGE, neutral_sigma=0.5,
+            eval_net_density=net_t, sample_id=None)
+        probe[nfs] = r["q_ion"] * r["layer_mean"] + r["mu_bound"]
+    for nfs in (1, 2):
+        d = scale * abs(probe[nfs] - probe[6]) / area
+        print(f"  fixsol={nfs} vs 6: solvent-term diff {d:.4f} V")
 
     print("\n=== 3. timing (device={}) ===".format(args.device))
     import time
