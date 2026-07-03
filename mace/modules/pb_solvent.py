@@ -225,8 +225,8 @@ class PBPlanarSolvent:
         neutral_values = grid.ifft_real_full(neutral_g)
 
         # Electron density (electron-positive, values units then e/A^3).
-        n_e_values = neutral_values - net * volume
-        n_e_density = np.clip(n_e_values / volume, 0.0, None)
+        n_e_values = np.clip(neutral_values - net * volume, 0.0, None)
+        n_e_density = n_e_values / volume
         t_dens = perf_counter()
 
         s_ion, s_diel, _ = self._create_cavity(n_e_density, grid, self.params)
@@ -620,13 +620,20 @@ class PBTorchBackend:
             nuclei_g = nuclei_g + (-float(v)) * damp_nuclear * sf
         n_e_g = neutral_g - net_g
         n_e_values = grid.ifft_real(n_e_g)
-        n_e_density = torch.clamp(n_e_values / volume, min=0.0)
+        # Physical positivity: the electron density is nonnegative. An
+        # untrained model's net density can push n_e negative (positive
+        # charge blobs in the vacuum), driving enormous spurious dielectric
+        # response (|mu_bound| ~ 45 e*A observed at init). Clip for BOTH the
+        # cavity and the solute potential; at convergence the model density
+        # matches the (positive) reference and the clip is inactive.
+        n_e_values = torch.clamp(n_e_values, min=0.0)
+        n_e_density = n_e_values / volume
         t_dens = perf_counter()
 
         s_ion, s_diel, _ = self._tp.create_cavity_torch(n_e_density, grid, self.params)
         t_cav = perf_counter()
 
-        cvhar = grid.ifft_real(grid.l0_inv_op(n_e_g + nuclei_g))
+        cvhar = grid.ifft_real(grid.l0_inv_op(grid.fft(n_e_values) + nuclei_g))
         q_sol = float(-total_charge)
 
         # valence+ion dipole via the reference routine on the plane profile
