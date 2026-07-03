@@ -50,8 +50,10 @@ from .solvent_charge_layer import (
     compute_oh_structure_crossings,
     compute_ze_crossing_from_mace_multipoles,
     periodic_gaussian_layer_potential_field_nodes,
+    periodic_profile_layer_potential_field_nodes,
     require_explicit_valence_electrons,
     predict_potential_from_dipole_and_solvent_layer,
+    predict_potential_from_dipole_and_solvent_mu,
 )
 from .utils import compute_total_charge_dipole_permuted
 
@@ -250,6 +252,51 @@ def _slab_compensation_gaussian_features(
     return features, phi_ref, field_ref
 
 
+def _slab_compensation_profile_features(
+    external_field_block: torch.nn.Module,
+    profile: torch.Tensor,
+    cell: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    feature_sigmas: List[float],
+    axis: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """PB analogue of _slab_compensation_gaussian_features: SCF field
+    features of an arbitrary laterally uniform rho_ion(z) profile
+    [n_graphs, num_grid] in the periodic G!=0 convention."""
+    matrix = external_field_block.matrix.to(positions.dtype)
+    features = positions.new_zeros((positions.shape[0], matrix.shape[0]))
+    phi_ref = positions.new_zeros(positions.shape[0])
+    field_ref = positions.new_zeros(positions.shape)
+    n_sigmas = len(feature_sigmas)
+    for i_s, receiver_sigma in enumerate(feature_sigmas):
+        phi, field = periodic_profile_layer_potential_field_nodes(
+            profile=profile,
+            cell=cell,
+            pbc=pbc,
+            batch=batch,
+            positions=positions,
+            receiver_sigma=float(receiver_sigma),
+            axis=axis,
+        )
+        if i_s == 0:
+            phi_ref = phi
+            field_ref = field
+        node_fields = positions.new_zeros((positions.shape[0], 4))
+        node_fields[:, 0] = phi
+        node_fields[:, 1:] = field
+        node_fields = node_fields[:, [0, 3, 1, 2]]
+        rows = [i_s]
+        if matrix.shape[0] >= n_sigmas * 4:
+            rows.extend(range(n_sigmas + i_s * 3, n_sigmas + (i_s + 1) * 3))
+        row_index = torch.tensor(rows, dtype=torch.long, device=positions.device)
+        features[:, row_index] = torch.einsum(
+            "rf,nf->nr", torch.index_select(matrix, 0, row_index), node_fields
+        )
+    return features, phi_ref, field_ref
+
+
 def _slab_compensation_slab_correction_features(
     external_field_block: torch.nn.Module,
     total_charge: torch.Tensor,
@@ -261,6 +308,7 @@ def _slab_compensation_slab_correction_features(
     positions: torch.Tensor,
     sigma_g: float,
     axis: int,
+    solvent_mu_override: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if int(axis) != 2:
         raise NotImplementedError("MACEPolar slab correction is defined for z-axis slabs only")
@@ -271,16 +319,19 @@ def _slab_compensation_slab_correction_features(
     slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
     slab[axis] = False
     slab_mask = torch.all(pbc_g == slab, dim=1).to(positions.dtype)
-    l_axis = torch.stack(
-        [_axis_box_length(cells[i], axis) for i in range(cells.shape[0])]
-    ).to(positions.dtype)
-    layer_mean = _truncated_gaussian_mean(
-        center=center.view(-1).to(positions.dtype),
-        sigma=sigma_g,
-        lower=torch.zeros_like(l_axis),
-        upper=l_axis,
-    )
-    solvent_mu = -total_charge.view(-1).to(positions.dtype) * layer_mean
+    if solvent_mu_override is not None:
+        solvent_mu = solvent_mu_override.view(-1).to(positions.dtype)
+    else:
+        l_axis = torch.stack(
+            [_axis_box_length(cells[i], axis) for i in range(cells.shape[0])]
+        ).to(positions.dtype)
+        layer_mean = _truncated_gaussian_mean(
+            center=center.view(-1).to(positions.dtype),
+            sigma=sigma_g,
+            lower=torch.zeros_like(l_axis),
+            upper=l_axis,
+        )
+        solvent_mu = -total_charge.view(-1).to(positions.dtype) * layer_mean
     volume_g = torch.clamp(volume.view(-1).to(positions.dtype), min=1.0e-12)
     field_z = positions.new_tensor(float(FIELD_CONSTANT)) * solvent_mu / volume_g
     field_z = field_z * slab_mask
@@ -308,8 +359,19 @@ def _slab_compensation_periodic_1d_energy_radial(
     sigma_g: float,
     axis: int,
     num_grid: int = 512,
+    comp_profile: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Compensation contribution in the same 1D Poisson convention as profile loss."""
+    """Compensation contribution in the same 1D Poisson convention as profile loss.
+
+    When ``comp_profile`` [num_graphs, num_grid] is given (e/A^3 on the
+    z_j = (j + 0.5) * H / num_grid grid, physics sign), it replaces the
+    truncated-Gaussian compensation profile; the exact 1D periodic cross +
+    self energy is valid for any laterally uniform rho_ion(z)."""
+    if comp_profile is not None and int(comp_profile.shape[1]) != int(num_grid):
+        raise ValueError(
+            "comp_profile second dimension must equal num_grid "
+            f"({int(comp_profile.shape[1])} != {int(num_grid)})"
+        )
     if int(axis) != 2:
         raise NotImplementedError("1D compensation energy is currently defined for z-axis slabs")
     if radial_coefficients.dim() != 3:
@@ -364,20 +426,23 @@ def _slab_compensation_periodic_1d_energy_radial(
                     gaussian_d2 * (((c[:, 6] / 3.0) / area)[None, :])
                 ).sum(dim=1)
 
-        lower = z_grid.new_zeros(())
-        upper = height
-        center_g = center.view(-1).to(positions.dtype)[graph_idx]
-        a = (lower - center_g) / sigma_comp
-        b = (upper - center_g) / sigma_comp
-        norm = 0.5 * (
-            torch.erf(b * inv_sqrt2) - torch.erf(a * inv_sqrt2)
-        )
-        norm = torch.clamp(norm, min=1.0e-12)
-        dz_comp = z_grid - center_g
-        comp_profile = torch.exp(-0.5 * torch.square(dz_comp / sigma_comp))
-        comp_profile = comp_profile / (sqrt_2pi * sigma_comp * norm)
-        solvent_charge = -total_charge.view(-1).to(positions.dtype)[graph_idx]
-        rho_comp = (solvent_charge / area) * comp_profile
+        if comp_profile is not None:
+            rho_comp = comp_profile[graph_idx].to(positions.dtype)
+        else:
+            lower = z_grid.new_zeros(())
+            upper = height
+            center_g = center.view(-1).to(positions.dtype)[graph_idx]
+            a = (lower - center_g) / sigma_comp
+            b = (upper - center_g) / sigma_comp
+            norm = 0.5 * (
+                torch.erf(b * inv_sqrt2) - torch.erf(a * inv_sqrt2)
+            )
+            norm = torch.clamp(norm, min=1.0e-12)
+            dz_comp = z_grid - center_g
+            gauss_profile = torch.exp(-0.5 * torch.square(dz_comp / sigma_comp))
+            gauss_profile = gauss_profile / (sqrt_2pi * sigma_comp * norm)
+            solvent_charge = -total_charge.view(-1).to(positions.dtype)[graph_idx]
+            rho_comp = (solvent_charge / area) * gauss_profile
 
         raw_exp = rho_exp * volume
         raw_comp = rho_comp * volume
@@ -665,6 +730,14 @@ class PolarMACE(ScaleShiftMACE):
         solvent_potential_sign: float = 1.0,
         solvent_center_mean_shift: float = 0.0,
         solvent_plane_feature_convention: str = "periodic",
+        solvent_model: str = "planar",
+        solvent_pb_config: Optional[str] = None,
+        solvent_pb_repo: Optional[str] = None,
+        solvent_pb_grid_spacing: float = 0.25,
+        solvent_pb_fixsol_steps: int = 2,
+        solvent_pb_tol: float = 1.0e-3,
+        solvent_pb_nuclear_sigma: float = 0.4,
+        solvent_pb_coarse_init: bool = True,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -768,6 +841,21 @@ class PolarMACE(ScaleShiftMACE):
                 f"got {solvent_plane_feature_convention!r}"
             )
         self.solvent_plane_feature_convention = str(solvent_plane_feature_convention)
+        if solvent_model not in ("planar", "pb"):
+            raise ValueError(
+                f"solvent_model must be 'planar' or 'pb', got {solvent_model!r}"
+            )
+        if solvent_model == "pb" and not solvent_pb_config:
+            raise ValueError("solvent_model='pb' requires solvent_pb_config")
+        self.solvent_model = str(solvent_model)
+        self.solvent_pb_config = solvent_pb_config
+        self.solvent_pb_repo = solvent_pb_repo
+        self.solvent_pb_grid_spacing = float(solvent_pb_grid_spacing)
+        self.solvent_pb_fixsol_steps = int(solvent_pb_fixsol_steps)
+        self.solvent_pb_tol = float(solvent_pb_tol)
+        self.solvent_pb_nuclear_sigma = float(solvent_pb_nuclear_sigma)
+        self.solvent_pb_coarse_init = bool(solvent_pb_coarse_init)
+        self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
             torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
@@ -1104,6 +1192,118 @@ class PolarMACE(ScaleShiftMACE):
             )
         return z_values, raw_neutral_values
 
+    def _get_pb_solver(self):
+        if self._pb_solver is None:
+            from .pb_solvent import PBPlanarSolvent
+
+            self._pb_solver = PBPlanarSolvent(
+                config_path=self.solvent_pb_config,
+                repo_path=self.solvent_pb_repo,
+                grid_spacing=self.solvent_pb_grid_spacing,
+                fixsol_steps=self.solvent_pb_fixsol_steps,
+                tol=self.solvent_pb_tol,
+                coarse_init=self.solvent_pb_coarse_init,
+                nuclear_sigma=self.solvent_pb_nuclear_sigma,
+                axis=self.solvent_potential_axis,
+            )
+        return self._pb_solver
+
+    def _solve_pb_profiles(
+        self,
+        data: Dict[str, torch.Tensor],
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        radial_blocks: torch.Tensor,
+        node_valence_electrons: torch.Tensor,
+        num_graphs: int,
+    ) -> Dict[str, torch.Tensor]:
+        """Detached per-graph nonlinear PB solve on the current (pre-SCF)
+        density; returns rho_ion(z) resampled onto the feature grid (1024,
+        offset 0) and the 1D-energy grid (512, offset 1/2), plus the layer
+        charge, mean and dipole moment used by the observables.
+
+        The same profile (from the pre-SCF density) is reused post-SCF for
+        the energy and observables — the PB analogue of the planar model's
+        pre/post-SCF center inconsistency, kept deliberately so a single
+        solve per forward suffices.
+        """
+        from .loss import _gto_density_at_points_axis2_pbc
+        from .pb_solvent import profiles_to_tensors
+
+        solver = self._get_pb_solver()
+        axis = self.solvent_potential_axis
+        cells = cell.detach()
+        if cells.dim() == 2 and cells.shape[1] == 3:
+            cells = cells.view(-1, 3, 3)
+        pbc_g = data["pbc"].view(-1, 3).to(torch.bool)
+        slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+        slab[axis] = False
+        slab_mask = torch.all(pbc_g == slab, dim=1)
+        element_index = torch.argmax(data["node_attrs"], dim=-1)
+        atomic_numbers_nodes = self.atomic_numbers[element_index]
+        total_charge_g = data["total_charge"].view(-1)
+
+        profiles: List[Optional[Dict[str, Any]]] = []
+        heights: List[float] = []
+        q_ion = positions.new_zeros(num_graphs)
+        layer_mean = positions.new_zeros(num_graphs)
+        for g in range(num_graphs):
+            cell_g = cells[g]
+            heights.append(float(_axis_box_length(cell_g, axis).item()))
+            atom_mask = data["batch"] == g
+            if not bool(slab_mask[g].item()) or not bool(torch.any(atom_mask).item()):
+                profiles.append(None)
+                continue
+            pos_g = positions[atom_mask].detach()
+            coeffs_g = radial_blocks[atom_mask].detach()
+            numbers_g = atomic_numbers_nodes[atom_mask]
+            zval_g = node_valence_electrons[atom_mask].detach()
+
+            def eval_net_density(points_np):
+                with torch.no_grad():
+                    pts = torch.as_tensor(
+                        points_np, device=positions.device, dtype=positions.dtype
+                    )
+                    chunks = []
+                    for chunk in pts.split(4096):
+                        chunks.append(
+                            _gto_density_at_points_axis2_pbc(
+                                chunk,
+                                coeffs_g,
+                                pos_g,
+                                numbers_g,
+                                cell_g,
+                                self.atomic_density_sigmas,
+                            )
+                        )
+                    return torch.cat(chunks).detach().cpu().numpy()
+
+            result = solver.solve_rho_ion_z(
+                positions=pos_g.cpu().numpy(),
+                cell=cell_g.cpu().numpy(),
+                z_valence=zval_g.cpu().numpy(),
+                total_charge=float(total_charge_g[g].item()),
+                neutral_sigma=float(self.atomic_multipoles_smearing_width),
+                eval_net_density=eval_net_density,
+            )
+            profiles.append(result)
+            q_ion[g] = float(result["q_ion"])
+            layer_mean[g] = float(result["layer_mean"])
+
+        prof_feat = profiles_to_tensors(
+            profiles, heights, 1024, False, positions.device, positions.dtype
+        )
+        prof_energy = profiles_to_tensors(
+            profiles, heights, 512, True, positions.device, positions.dtype
+        )
+        return {
+            "profile_features": prof_feat,
+            "profile_energy": prof_energy,
+            "q_ion": q_ion,
+            "layer_mean": layer_mean,
+            "solvent_mu": q_ion * layer_mean,
+        }
+
     def forward(
         self,
         data: Dict[str, torch.Tensor],
@@ -1396,35 +1596,73 @@ class PolarMACE(ScaleShiftMACE):
                 comp_z_base.shape, float(self.solvent_center_mean_shift)
             )
         ).detach()
-        (
-            compensation_external_features,
-            _compensation_phi_nodes,
-            _compensation_external_field_nodes,
-        ) = _slab_compensation_gaussian_features(
-            external_field_block=self.external_field_contribution,
-            total_charge=data["total_charge"],
-            center=comp_center_init,
-            cell=cell.detach(),
-            pbc=data["pbc"].view(-1, 3),
-            batch=data["batch"],
-            positions=positions,
-            sigma_g=self.solvent_sigma_g,
-            feature_sigmas=self.field_feature_widths,
-            axis=self.solvent_potential_axis,
-            convention=self.solvent_plane_feature_convention,
-        )
-        compensation_slab_features = _slab_compensation_slab_correction_features(
-            external_field_block=self.external_field_contribution,
-            total_charge=data["total_charge"],
-            center=comp_center_init,
-            cell=cell.detach(),
-            volume=data["volume"],
-            pbc=data["pbc"].view(-1, 3),
-            batch=data["batch"],
-            positions=positions,
-            sigma_g=self.solvent_sigma_g,
-            axis=self.solvent_potential_axis,
-        )
+        pb_solvent_data: Optional[Dict[str, torch.Tensor]] = None
+        if self.solvent_model == "pb":
+            pb_solvent_data = self._solve_pb_profiles(
+                data=data,
+                positions=positions,
+                cell=cell,
+                radial_blocks=self._radial_flat_to_blocks(comp_charge_density),
+                node_valence_electrons=node_valence_electrons,
+                num_graphs=num_graphs,
+            )
+            (
+                compensation_external_features,
+                _compensation_phi_nodes,
+                _compensation_external_field_nodes,
+            ) = _slab_compensation_profile_features(
+                external_field_block=self.external_field_contribution,
+                profile=pb_solvent_data["profile_features"],
+                cell=cell.detach(),
+                pbc=data["pbc"].view(-1, 3),
+                batch=data["batch"],
+                positions=positions,
+                feature_sigmas=self.field_feature_widths,
+                axis=self.solvent_potential_axis,
+            )
+            compensation_slab_features = _slab_compensation_slab_correction_features(
+                external_field_block=self.external_field_contribution,
+                total_charge=data["total_charge"],
+                center=comp_center_init,
+                cell=cell.detach(),
+                volume=data["volume"],
+                pbc=data["pbc"].view(-1, 3),
+                batch=data["batch"],
+                positions=positions,
+                sigma_g=self.solvent_sigma_g,
+                axis=self.solvent_potential_axis,
+                solvent_mu_override=pb_solvent_data["solvent_mu"],
+            )
+        else:
+            (
+                compensation_external_features,
+                _compensation_phi_nodes,
+                _compensation_external_field_nodes,
+            ) = _slab_compensation_gaussian_features(
+                external_field_block=self.external_field_contribution,
+                total_charge=data["total_charge"],
+                center=comp_center_init,
+                cell=cell.detach(),
+                pbc=data["pbc"].view(-1, 3),
+                batch=data["batch"],
+                positions=positions,
+                sigma_g=self.solvent_sigma_g,
+                feature_sigmas=self.field_feature_widths,
+                axis=self.solvent_potential_axis,
+                convention=self.solvent_plane_feature_convention,
+            )
+            compensation_slab_features = _slab_compensation_slab_correction_features(
+                external_field_block=self.external_field_contribution,
+                total_charge=data["total_charge"],
+                center=comp_center_init,
+                cell=cell.detach(),
+                volume=data["volume"],
+                pbc=data["pbc"].view(-1, 3),
+                batch=data["batch"],
+                positions=positions,
+                sigma_g=self.solvent_sigma_g,
+                axis=self.solvent_potential_axis,
+            )
         compensation_external_features = (
             compensation_external_features + compensation_slab_features
         )
@@ -1768,29 +2006,48 @@ class PolarMACE(ScaleShiftMACE):
             raise ValueError(
                 f"Unsupported cell shape for solvent axis length: {tuple(cell_for_axis.shape)}"
             )
-        layer_mean = _truncated_gaussian_mean(
-            center=solv_center,
-            sigma=self.solvent_sigma_g,
-            lower=torch.zeros_like(solv_center),
-            upper=l_axis,
-        )
-        solvent_mu = (-input_total_charge.view(-1)) * layer_mean
+        if pb_solvent_data is not None:
+            layer_mean = pb_solvent_data["layer_mean"].to(solv_center.dtype)
+            solvent_mu = pb_solvent_data["solvent_mu"].to(solv_center.dtype)
+            # The physical center is the PB profile mean; the learned
+            # residual head is kept in the graph with zero weight so
+            # distributed training sees all parameters.
+            solv_center = layer_mean + solvent_raw_shift * 0.0
+        else:
+            layer_mean = _truncated_gaussian_mean(
+                center=solv_center,
+                sigma=self.solvent_sigma_g,
+                lower=torch.zeros_like(solv_center),
+                upper=l_axis,
+            )
+            solvent_mu = (-input_total_charge.view(-1)) * layer_mean
         solvent_dipole = torch.zeros_like(explicit_dipole)
         solvent_dipole[:, self.solvent_potential_axis] = solvent_mu.to(
             solvent_dipole.dtype
         )
         total_dipole = explicit_dipole + solvent_dipole
-        _, explicit_potential_base, solvent_potential = (
-            predict_potential_from_dipole_and_solvent_layer(
-                dipole=explicit_dipole,
-                total_charge=input_total_charge,
-                center=solv_center,
-                cell=cell.detach(),
-                sigma_g=self.solvent_sigma_g,
-                axis=self.solvent_potential_axis,
-                potential_sign=self.solvent_potential_sign,
+        if pb_solvent_data is not None:
+            _, explicit_potential_base, solvent_potential = (
+                predict_potential_from_dipole_and_solvent_mu(
+                    dipole=explicit_dipole,
+                    solvent_mu=solvent_mu,
+                    cell=cell.detach(),
+                    axis=self.solvent_potential_axis,
+                    potential_sign=self.solvent_potential_sign,
+                )
             )
-        )
+        else:
+            _, explicit_potential_base, solvent_potential = (
+                predict_potential_from_dipole_and_solvent_layer(
+                    dipole=explicit_dipole,
+                    total_charge=input_total_charge,
+                    center=solv_center,
+                    cell=cell.detach(),
+                    sigma_g=self.solvent_sigma_g,
+                    axis=self.solvent_potential_axis,
+                    potential_sign=self.solvent_potential_sign,
+                )
+            )
         explicit_potential = explicit_potential_base
         total_potential = explicit_potential + solvent_potential
         fermi_level_residual = self.fermi_level_residual(graph_feats_global).view(-1)
@@ -1825,6 +2082,11 @@ class PolarMACE(ScaleShiftMACE):
             num_graphs=num_graphs,
             sigma_g=self.solvent_sigma_g,
             axis=self.solvent_potential_axis,
+            comp_profile=(
+                pb_solvent_data["profile_energy"]
+                if pb_solvent_data is not None
+                else None
+            ),
         )
         compensation_slab_correction_energy = _slab_dipole_correction_delta(
             explicit_dipole=explicit_dipole,

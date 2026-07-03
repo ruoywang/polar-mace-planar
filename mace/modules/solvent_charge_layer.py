@@ -642,6 +642,110 @@ def periodic_gaussian_layer_potential_field_nodes(
     return phi, field
 
 
+def periodic_profile_layer_potential_field_nodes(
+    profile: torch.Tensor,
+    cell: torch.Tensor,
+    pbc: torch.Tensor,
+    batch: torch.Tensor,
+    positions: torch.Tensor,
+    receiver_sigma: float = 0.0,
+    axis: int = 2,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Periodic G!=0 potential/field of an arbitrary laterally uniform
+    charge profile rho(z) at the node positions.
+
+    Same reciprocal-space convention as
+    periodic_gaussian_layer_potential_field_nodes, with the truncated
+    Gaussian replaced by ``profile`` [n_graphs, num_grid]: the charge
+    density (e/A^3, physics sign) sampled at z_j = j * H_g / num_grid.
+    Returns (phi [n_nodes], field [n_nodes, 3]), zeroed for non-slab graphs.
+    """
+    if axis != 2:
+        raise NotImplementedError(
+            "periodic profile-layer features are defined for z-axis slabs"
+        )
+    cells = cell
+    if cells.dim() == 2 and cells.shape[1] == 3:
+        cells = cells.view(-1, 3, 3)
+    pbc_g = pbc.view(-1, 3).to(torch.bool)
+    slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
+    slab[axis] = False
+    slab_mask = torch.all(pbc_g == slab, dim=1)
+
+    num_graphs = int(profile.shape[0])
+    num_grid = int(profile.shape[1])
+    phi = positions.new_zeros(positions.shape[0])
+    field = positions.new_zeros(positions.shape)
+    k_const = float(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
+    for g in range(num_graphs):
+        atom_mask = batch == g
+        if not torch.any(atom_mask) or not bool(slab_mask[g].item()):
+            continue
+        cell_g = cells[g].to(positions.dtype)
+        area = _cell_cross_section_area(cell_g, axis)
+        height = _axis_box_length(cell_g, axis).to(positions.dtype)
+        volume = torch.clamp(area * height, min=1.0e-12)
+        raw = profile[g].to(positions.dtype) * volume
+        mode = torch.fft.fftfreq(num_grid, d=1.0, device=positions.device).to(
+            positions.dtype
+        ) * float(num_grid)
+        g_abs = 2.0 * math.pi * mode / height
+        coeff = torch.fft.fft(raw) / float(num_grid)
+        mask = torch.abs(g_abs) > 1.0e-14
+        damp = torch.exp(
+            -0.5 * torch.square(g_abs * float(max(receiver_sigma, 0.0)))
+        )
+        g_m = g_abs[mask]
+        amp = coeff[mask] * (damp[mask] * k_const / (torch.square(g_m) * volume)).to(
+            coeff.dtype
+        )
+        z_nodes = positions[atom_mask, axis]
+        phase = z_nodes[:, None] * g_m[None, :]
+        cosp = torch.cos(phase)
+        sinp = torch.sin(phase)
+        a_re = torch.real(amp)
+        a_im = torch.imag(amp)
+        phi_g = cosp @ a_re - sinp @ a_im
+        dphi_g = -(sinp * g_m[None, :]) @ a_re - (cosp * g_m[None, :]) @ a_im
+        phi = phi.index_put((atom_mask.nonzero(as_tuple=True)[0],), phi_g)
+        field_rows = positions.new_zeros((int(atom_mask.sum().item()), 3))
+        field_rows[:, axis] = dphi_g
+        field = field.index_put((atom_mask.nonzero(as_tuple=True)[0],), field_rows)
+    return phi, field
+
+
+def predict_potential_from_dipole_and_solvent_mu(
+    dipole: torch.Tensor,
+    solvent_mu: torch.Tensor,
+    cell: torch.Tensor,
+    axis: int = 2,
+    potential_sign: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Same observable as predict_potential_from_dipole_and_solvent_layer,
+    with the solvent dipole moment supplied directly (e.g. the first moment
+    of a PB ionic charge profile) instead of a truncated-Gaussian layer."""
+    cells = cell
+    if cells.dim() == 2 and cells.shape[1] == 3:
+        cells = cells.view(-1, 3, 3)
+    dipoles = dipole.view(-1, 3)
+    if axis == 0:
+        v1, v2 = cells[:, 1, :], cells[:, 2, :]
+    elif axis == 1:
+        v1, v2 = cells[:, 0, :], cells[:, 2, :]
+    else:
+        v1, v2 = cells[:, 0, :], cells[:, 1, :]
+    area = torch.clamp(
+        torch.linalg.norm(torch.cross(v1, v2, dim=-1), dim=-1), min=1.0e-12
+    )
+    explicit_mu = dipoles[:, axis]
+    scale = dipoles.new_tensor(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
+    sign = dipoles.new_tensor(float(potential_sign))
+    explicit_potential = sign * scale * explicit_mu / area
+    solvent_potential = sign * scale * solvent_mu.view(-1).to(dipoles.dtype) / area
+    total_potential = explicit_potential + solvent_potential
+    return total_potential, explicit_potential, solvent_potential
+
+
 def predict_potential_from_dipole_and_solvent_layer(
     dipole: torch.Tensor,
     total_charge: torch.Tensor,

@@ -384,6 +384,22 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_plane_feature_convention"] = getattr(
             model, "solvent_plane_feature_convention", "isolated"
         )
+        config["solvent_model"] = getattr(model, "solvent_model", "planar")
+        config["solvent_pb_config"] = getattr(model, "solvent_pb_config", None)
+        config["solvent_pb_repo"] = getattr(model, "solvent_pb_repo", None)
+        config["solvent_pb_grid_spacing"] = getattr(
+            model, "solvent_pb_grid_spacing", 0.25
+        )
+        config["solvent_pb_fixsol_steps"] = getattr(
+            model, "solvent_pb_fixsol_steps", 2
+        )
+        config["solvent_pb_tol"] = getattr(model, "solvent_pb_tol", 1.0e-3)
+        config["solvent_pb_nuclear_sigma"] = getattr(
+            model, "solvent_pb_nuclear_sigma", 0.4
+        )
+        config["solvent_pb_coarse_init"] = getattr(
+            model, "solvent_pb_coarse_init", True
+        )
         fermi_level_baseline = getattr(model, "fermi_level_baseline", None)
         config["fermi_level_baseline"] = (
             float(fermi_level_baseline.detach().cpu().item())

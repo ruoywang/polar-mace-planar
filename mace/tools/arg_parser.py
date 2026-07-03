@@ -477,6 +477,63 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default="periodic",
     )
     parser.add_argument(
+        "--solvent_model",
+        help=(
+            "implicit-solvent compensation model: 'planar' (truncated-Gaussian "
+            "charge sheet) or 'pb' (laterally averaged rho_ion(z) from a full "
+            "3D nonlinear Poisson-Boltzmann solve per structure; requires "
+            "--solvent_pb_config and the cep-dip-python-pb package)"
+        ),
+        type=str,
+        choices=["planar", "pb"],
+        default="planar",
+    )
+    parser.add_argument(
+        "--solvent_pb_config",
+        help=(
+            "JSON file with the PB 'solvation' parameter block "
+            "(VASPsol/CEP-DIP names: NC_K, SIGMA_K, EB_K, C_MOLAR, ...)"
+        ),
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--solvent_pb_repo",
+        help="path to the cep-dip-python-pb repository (else PYTHONPATH is used)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--solvent_pb_grid_spacing",
+        help="target real-space grid spacing (Angstrom) for the PB solve",
+        type=float,
+        default=0.25,
+    )
+    parser.add_argument(
+        "--solvent_pb_fixsol_steps",
+        help="dipole-correction self-consistency steps per PB solve",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--solvent_pb_tol",
+        help="Newton residual tolerance of the PB solve",
+        type=float,
+        default=1.0e-3,
+    )
+    parser.add_argument(
+        "--solvent_pb_nuclear_sigma",
+        help="Gaussian width (Angstrom) of the surrogate nuclear charges",
+        type=float,
+        default=0.4,
+    )
+    parser.add_argument(
+        "--solvent_pb_coarse_init",
+        help="warm-start each PB solve from a half-resolution Newton solve",
+        type=str2bool,
+        default=True,
+    )
+    parser.add_argument(
         "--scaling",
         help="type of scaling to the output",
         type=str,

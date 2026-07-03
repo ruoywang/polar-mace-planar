@@ -105,6 +105,11 @@ requirements-freeze.txt  pip freeze of the 9-final run venv
 
 ## Roadmap
 
-- Fix issue 1 (periodic-consistent plane features) as the next commit(s).
+- Fix issue 1 (periodic-consistent plane features) — DONE (commit 07b3c32).
 - Replace/augment the planar layer with a real Poisson-Boltzmann solvent
-  charge model (planned; this repo will grow alongside).
+  charge model — branch `pb-solvent`, `--solvent_model pb`; see
+  `docs/changelogs/2026-07-03_pb_solvent.md`. First pass: detached 3D
+  nonlinear PB per structure (cep-dip-python-pb solver), laterally
+  averaged rho_ion(z) through the same three hook points as the planar
+  layer. Next: torch/GPU port of the solver (speed + implicit-function
+  gradients).
