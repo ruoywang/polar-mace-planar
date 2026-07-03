@@ -639,13 +639,14 @@ class PBTorchBackend:
             fields = torch.as_tensor(
                 np.ascontiguousarray(self._bl_arr[bl_row]), device=device
             ).to(dt)
-            neutral_v, dencor_v, phi_base = fields[0], fields[1], fields[2]
+            neutral_v, phi_base = fields[0], fields[2]
+            # NOTE: fields[1] (dencor, POTCAR partial core) is kept in the
+            # cache format but NOT used — user testing showed it does not
+            # affect the results (consistent with its ~4.6 e being localized
+            # deep inside the cavity where density >> the NC_K isovalue).
             net_values = grid.ifft_real(net_g)
-            n_e_values = neutral_v - net_values  # valence only (dipole, Hartree-side shape)
-            # cavity sees valence + partial core (reference convention)
-            n_e_density = torch.clamp(
-                (neutral_v + dencor_v - net_values) / volume, min=0.0
-            )
+            n_e_values = neutral_v - net_values  # valence only
+            n_e_density = torch.clamp(n_e_values / volume, min=0.0)
             # phi_base already contains Hartree(neutral) + exact local PSP
             cvhar = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
         else:
