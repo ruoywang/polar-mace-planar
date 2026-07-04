@@ -1195,16 +1195,45 @@ def run(args) -> None:
 
     # concatenate all the trainsets
     train_set = ConcatDataset([train_sets[head] for head in heads])
+    class _StaticShardShuffleSampler(torch.utils.data.Sampler):
+        """Rank assignment fixed across epochs (strided), shuffled within the
+        shard per epoch. Keeps per-sample caches (PB warm start / profile
+        reuse) rank-local with 100% hit rate; epoch-count semantics exact."""
+
+        def __init__(self, dataset, num_replicas, rank, seed=0):
+            n = len(dataset)
+            m = n // num_replicas  # equal shards so all ranks step in lockstep
+            self.indices = list(range(n))[rank::num_replicas][:m]
+            self.seed = int(seed)
+            self.epoch = 0
+
+        def set_epoch(self, epoch):
+            self.epoch = int(epoch)
+
+        def __iter__(self):
+            g = torch.Generator()
+            g.manual_seed(self.seed * 100003 + self.epoch)
+            order = torch.randperm(len(self.indices), generator=g).tolist()
+            return iter([self.indices[i] for i in order])
+
+        def __len__(self):
+            return len(self.indices)
+
     train_sampler, valid_sampler = None, None
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_set,
-            num_replicas=world_size,
-            rank=rank,
-            shuffle=True,
-            drop_last=(not args.lbfgs),
-            seed=args.seed,
-        )
+        if getattr(args, "static_shard_sampler", False):
+            train_sampler = _StaticShardShuffleSampler(
+                train_set, num_replicas=world_size, rank=rank, seed=args.seed
+            )
+        else:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                train_set,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                drop_last=(not args.lbfgs),
+                seed=args.seed,
+            )
         valid_samplers = {}
         for head, valid_set in valid_sets.items():
             valid_sampler = torch.utils.data.distributed.DistributedSampler(

@@ -407,6 +407,12 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_pb_baseline_cache"] = getattr(
             model, "solvent_pb_baseline_cache", None
         )
+        config["solvent_pb_warmup_encounters"] = getattr(
+            model, "solvent_pb_warmup_encounters", 0
+        )
+        config["solvent_pb_refresh_every"] = getattr(
+            model, "solvent_pb_refresh_every", 1
+        )
         config["solvent_pb_warm_start"] = getattr(
             model, "solvent_pb_warm_start", True
         )

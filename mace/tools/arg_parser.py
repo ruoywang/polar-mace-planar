@@ -534,6 +534,37 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument(
+        "--static_shard_sampler",
+        help=(
+            "distributed sampler with rank assignment fixed across epochs "
+            "(shuffled within each rank's shard); makes per-sample PB caches "
+            "fully effective and epoch-count semantics exact"
+        ),
+        type=str2bool,
+        default=False,
+    )
+    parser.add_argument(
+        "--solvent_pb_warmup_encounters",
+        help=(
+            "per-structure training encounters (== epochs with the static "
+            "sampler) that use the planar layer directly, without a PB solve, "
+            "before PB takes over"
+        ),
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--solvent_pb_refresh_every",
+        help=(
+            "after warmup, refresh the PB solve every K-th training encounter "
+            "per structure and reuse the cached profile in between (the "
+            "profile is detached, so reuse is gradient-safe; identical at "
+            "convergence)"
+        ),
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
         "--solvent_pb_baseline_cache",
         help=(
             "directory with the per-sample DFT baseline cache (neutral / "
