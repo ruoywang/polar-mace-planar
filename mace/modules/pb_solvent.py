@@ -716,7 +716,14 @@ class PBTorchBackend:
         z_mesh = grid.z_mesh  # [nx,ny,nz] cartesian z of grid points
         n_b = n_ion = None
         history = []
+        # per-step timers: wall time + Newton outer-iteration count of each
+        # fixsol step, and the accumulated dipole-correction (Ewald/cdipol)
+        # share — shows where extra fixsol steps spend their time.
+        t_steps: List[float] = []
+        newton_outer: List[int] = []
+        t_dip_acc = 0.0
         for step in range(n_steps):
+            ts0 = perf_counter()
             dip = val_ion_dipole.copy()
             dip[2] += dsol_z - qsol_cache * center_abs_z
             _, ef_direct = mixer.ewald_dipol(dip, cell_np, 3)
@@ -724,6 +731,7 @@ class PBTorchBackend:
                 self._cdipol_potential_1d(nz, length_z, ef_direct[2], indmin_z),
                 device=device, dtype=dt,
             )
+            t_dip_acc += perf_counter() - ts0
             phi_sol = cvhar + cvdip_z[None, None, :]
             if step == 0 and not warm and self.coarse_init and all(
                 n % 2 == 0 for n in shape
@@ -745,8 +753,10 @@ class PBTorchBackend:
                 q_sol, self.tol, self.max_outer, self.cg_max_iter,
             )
             solv = n_b + n_ion
-            qsol_cache = float(solv.mean())
+            qsol_cache = float(solv.mean())  # forces device sync
             dsol_z = float((solv * z_mesh).mean())
+            t_steps.append(perf_counter() - ts0)
+            newton_outer.append(len(history))
         t_solve = perf_counter()
 
         rms_last = float(history[-1][1]) if history else float("nan")
@@ -777,6 +787,9 @@ class PBTorchBackend:
             "t_cavity": t_cav - t_dens,
             "t_solve": t_solve - t_cav,
             "t_total": t_solve - t0,
+            "t_dipole": round(t_dip_acc, 4),
+            "t_steps": [round(t, 3) for t in t_steps],
+            "newton_outer": newton_outer,
             "warm": bool(warm),
             "rms_last": rms_last,
             "q_ion": q_ion,
