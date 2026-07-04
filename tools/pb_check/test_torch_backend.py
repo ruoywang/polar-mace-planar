@@ -131,7 +131,12 @@ def main():
         "layer_mean": abs(r_t["layer_mean"] - r_np["layer_mean"]),
         "mu_bound": abs(r_t["mu_bound"] - r_np["mu_bound"]),
     }
-    lim = {"rho_ion_z": 1e-5, "rho_bound_z": 1e-5, "q_ion": 1e-6,
+    # rho_bound_z is a pointwise max on the sharply-peaked polarization
+    # field at the dielectric boundary; identical code shows 7e-7..1.3e-5
+    # run-to-run spread (GPU reduction order at the Newton stopping point,
+    # tol=1e-3). Gate at 3e-5 rel (~1.2e-7 e/A^3 abs); the integrated bound
+    # observables (q_bound, mu_bound) stay gated 100x tighter below.
+    lim = {"rho_ion_z": 1e-5, "rho_bound_z": 3e-5, "q_ion": 1e-6,
            "layer_mean": 1e-4, "mu_bound": 1e-4}
     ok1 = all(v < lim[k] for k, v in checks.items())
     for k, v in checks.items():
