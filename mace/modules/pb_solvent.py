@@ -374,6 +374,7 @@ class PBTorchBackend:
         warm_start: bool = True,
         warm_fixsol_steps: int = 0,
         baseline_cache: Optional[str] = None,
+        phi_cache_dir: Optional[str] = None,
     ) -> None:
         self._init_kwargs = {
             "config_path": config_path,
@@ -389,6 +390,7 @@ class PBTorchBackend:
             "warm_start": warm_start,
             "warm_fixsol_steps": warm_fixsol_steps,
             "baseline_cache": baseline_cache,
+            "phi_cache_dir": phi_cache_dir,
         }
         if int(axis) != 2:
             raise NotImplementedError("PB solvent model is defined for z-axis slabs")
@@ -432,6 +434,17 @@ class PBTorchBackend:
         self.warm_fixsol_steps = int(warm_fixsol_steps)
         self._grids: Dict = {}
         self._phi_cache: Dict = {}
+        # Optional rank-independent warm-start cache: phi persisted per
+        # sample_id to a shared directory, so warm start survives a data
+        # shuffle that moves a structure across ranks (the in-memory dict is
+        # per-process). When set, disk is authoritative (always the latest
+        # solve); the in-memory dict is a same-rank fast path only.
+        self._phi_cache_dir = (
+            os.path.expandvars(os.path.expanduser(phi_cache_dir))
+            if phi_cache_dir else None
+        )
+        if self._phi_cache_dir:
+            os.makedirs(self._phi_cache_dir, exist_ok=True)
         self.last_diagnostics: Dict[str, float] = {}
         # Optional per-sample DFT baseline cache (neutral / dencor / phi_base
         # fields on the PB grid): replaces the Gaussian-baseline and
@@ -692,9 +705,19 @@ class PBTorchBackend:
 
         # warm start: phi only — the dipole fix-point loop always runs the
         # cold protocol from a zero state so results are protocol-identical.
-        cached = self._phi_cache.get(sample_id) if (
-            self.warm_start and sample_id is not None
-        ) else None
+        cached = None
+        if self.warm_start and sample_id is not None:
+            if self._phi_cache_dir is not None:
+                # disk is authoritative (rank-independent, always latest)
+                p = os.path.join(self._phi_cache_dir, f"phi_{sample_id}.npy")
+                try:
+                    arr = np.load(p)
+                    if tuple(arr.shape) == tuple(shape):
+                        cached = {"phi": torch.from_numpy(arr), "shape": shape}
+                except (OSError, ValueError):
+                    cached = None
+            else:
+                cached = self._phi_cache.get(sample_id)
         warm = cached is not None and cached["shape"] == shape
         if warm:
             phi_total = cached["phi"].to(device=device, dtype=dt)
@@ -765,10 +788,16 @@ class PBTorchBackend:
             and rms_last == rms_last and rms_last < 10.0 * self.tol
         ):
             # never seed future solves from a diverged state
-            self._phi_cache[sample_id] = {
-                "phi": phi_total.detach().to(torch.float32).cpu(),
-                "shape": shape,
-            }
+            phi_cpu = phi_total.detach().to(torch.float32).cpu()
+            if self._phi_cache_dir is not None:
+                # atomic write (temp + replace) so a concurrent reader on
+                # another rank never sees a partial file
+                p = os.path.join(self._phi_cache_dir, f"phi_{sample_id}.npy")
+                tmp = f"{p}.tmp.{os.getpid()}.npy"  # .npy so np.save won't append
+                np.save(tmp, phi_cpu.numpy())
+                os.replace(tmp, p)
+            else:
+                self._phi_cache[sample_id] = {"phi": phi_cpu, "shape": shape}
 
         rho_ion_z = -(n_ion / volume).mean(dim=(0, 1))
         rho_bound_z = -(n_b / volume).mean(dim=(0, 1))

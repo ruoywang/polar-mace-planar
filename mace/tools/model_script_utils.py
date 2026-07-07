@@ -349,6 +349,7 @@ def _build_model(
             solvent_pb_include_bound=getattr(args, "solvent_pb_include_bound", True),
             solvent_pb_backend=getattr(args, "solvent_pb_backend", "torch"),
             solvent_pb_baseline_cache=getattr(args, "solvent_pb_baseline_cache", None),
+            solvent_pb_phi_cache_dir=getattr(args, "solvent_pb_phi_cache_dir", None),
             solvent_pb_warmup_encounters=getattr(args, "solvent_pb_warmup_encounters", 0),
             solvent_pb_refresh_every=getattr(args, "solvent_pb_refresh_every", 1),
             solvent_pb_warm_start=getattr(args, "solvent_pb_warm_start", True),

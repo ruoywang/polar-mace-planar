@@ -565,6 +565,17 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=1,
     )
     parser.add_argument(
+        "--solvent_pb_phi_cache_dir",
+        help=(
+            "shared directory for the rank-independent PB warm-start phi "
+            "cache (phi_<sample_id>.npy). Lets warm start survive a data "
+            "shuffle that moves a structure across ranks, so the ~1.7x "
+            "warm-start speedup works WITHOUT the static_shard_sampler."
+        ),
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
         "--solvent_pb_learn_center_shift",
         help=(
             "PB mode: add a learnable tanh shift to the detached PB solvent "

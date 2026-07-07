@@ -741,6 +741,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_include_bound: bool = True,
         solvent_pb_backend: str = "torch",
         solvent_pb_baseline_cache: Optional[str] = None,
+        solvent_pb_phi_cache_dir: Optional[str] = None,
         solvent_pb_warmup_encounters: int = 0,
         solvent_pb_refresh_every: int = 1,
         solvent_pb_warm_start: bool = True,
@@ -870,6 +871,7 @@ class PolarMACE(ScaleShiftMACE):
             )
         self.solvent_pb_backend = str(solvent_pb_backend)
         self.solvent_pb_baseline_cache = solvent_pb_baseline_cache
+        self.solvent_pb_phi_cache_dir = solvent_pb_phi_cache_dir
         self.solvent_pb_warmup_encounters = int(solvent_pb_warmup_encounters)
         self.solvent_pb_refresh_every = max(1, int(solvent_pb_refresh_every))
         self._pb_encounters: Dict[int, int] = {}
@@ -1238,6 +1240,7 @@ class PolarMACE(ScaleShiftMACE):
                     warm_start=self.solvent_pb_warm_start,
                     warm_fixsol_steps=self.solvent_pb_warm_fixsol_steps,
                     baseline_cache=self.solvent_pb_baseline_cache,
+                    phi_cache_dir=self.solvent_pb_phi_cache_dir,
                     **common,
                 )
             else:
