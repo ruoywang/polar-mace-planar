@@ -745,6 +745,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_refresh_every: int = 1,
         solvent_pb_warm_start: bool = True,
         solvent_pb_warm_fixsol_steps: int = 0,
+        solvent_pb_learn_center_shift: bool = False,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -875,6 +876,12 @@ class PolarMACE(ScaleShiftMACE):
         self._pb_profile_cache: Dict[int, Dict[str, Any]] = {}
         self.solvent_pb_warm_start = bool(solvent_pb_warm_start)
         self.solvent_pb_warm_fixsol_steps = int(solvent_pb_warm_fixsol_steps)
+        # When True (PB mode), add a learnable tanh shift to the otherwise
+        # detached, physics-fixed PB solvent-layer center, giving the
+        # potential/Phi1D loss a gradient lever on the layer position (the
+        # degree of freedom the planar model has via its learnable center).
+        # Diagnostic for the PB-vs-planar 1D-potential gap; default off.
+        self.solvent_pb_learn_center_shift = bool(solvent_pb_learn_center_shift)
         self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
@@ -2273,10 +2280,22 @@ class PolarMACE(ScaleShiftMACE):
         if pb_solvent_data is not None:
             layer_mean = pb_solvent_data["layer_mean"].to(solv_center.dtype)
             solvent_mu = pb_solvent_data["solvent_mu"].to(solv_center.dtype)
-            # The physical center is the PB profile mean; the learned
-            # residual head is kept in the graph with zero weight so
-            # distributed training sees all parameters.
-            solv_center = layer_mean + solvent_raw_shift * 0.0
+            if self.solvent_pb_learn_center_shift:
+                # learnable tanh shift (A) of the PB layer center -> gradient
+                # lever for the potential/Phi1D loss on the detached PB layer.
+                delta = self.solvent_residual_max_abs_shift * torch.tanh(
+                    solvent_raw_shift
+                )
+                layer_mean = layer_mean + delta
+                solvent_mu = solvent_mu + (
+                    -input_total_charge.view(-1).to(solv_center.dtype)
+                ) * delta
+                solv_center = layer_mean
+            else:
+                # The physical center is the PB profile mean; the learned
+                # residual head is kept in the graph with zero weight so
+                # distributed training sees all parameters.
+                solv_center = layer_mean + solvent_raw_shift * 0.0
         else:
             layer_mean = _truncated_gaussian_mean(
                 center=solv_center,

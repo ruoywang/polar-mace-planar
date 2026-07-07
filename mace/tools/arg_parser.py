@@ -565,6 +565,16 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=1,
     )
     parser.add_argument(
+        "--solvent_pb_learn_center_shift",
+        help=(
+            "PB mode: add a learnable tanh shift to the detached PB solvent "
+            "layer center, giving the potential/Phi1D loss a gradient lever "
+            "on the layer position (diagnostic for the PB-vs-planar 1D gap)."
+        ),
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--solvent_pb_baseline_cache",
         help=(
             "directory with the per-sample DFT baseline cache (neutral / "
