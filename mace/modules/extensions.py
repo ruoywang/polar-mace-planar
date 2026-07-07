@@ -2395,6 +2395,16 @@ class PolarMACE(ScaleShiftMACE):
                 cell=cell,
             )
 
+        # Expose the actual PB solvent charge profile (rho_ion+rho_bound,
+        # e/A^3, on z_j = j*H/1024) so the 1D-potential loss can score the
+        # true profile instead of a gaussian reconstructed from solv_center.
+        # Zeros when not in PB mode (the gaussian path is exact there).
+        solvent_profile_features_out = (
+            pb_solvent_data["profile_features"]
+            if pb_solvent_data is not None
+            else positions.new_zeros((num_graphs, 1024))
+        )
+
         return {
             "energy": total_energy,
             "node_energy": node_e0.clone().double() + node_inter_es.clone().double(),
@@ -2442,6 +2452,7 @@ class PolarMACE(ScaleShiftMACE):
             "qsum_h": qsum_h,
             "msum_o": msum_o,
             "msum_h": msum_h,
+            "solvent_profile_features": solvent_profile_features_out,
             "solv_center_physical_shift": torch.zeros_like(solv_center),
             "solv_center": solv_center,
             "solv_center_residual": solvent_center_residual,

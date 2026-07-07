@@ -1153,6 +1153,17 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default="mean",
     )
     parser.add_argument(
+        "--potential_1d_profile_use_solvent_profile",
+        help=(
+            "score the 1D potential against the model's actual PB solvent "
+            "charge profile (ion+bound) instead of a gaussian reconstructed "
+            "from the scalar solvent center. Only affects solvent_model=pb; "
+            "default off reproduces the gaussian reconstruction."
+        ),
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--solvent_center_weight",
         help=(
             "weight of the compensating-layer mean loss. With density_3d_file "

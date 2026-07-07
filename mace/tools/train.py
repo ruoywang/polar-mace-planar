@@ -832,6 +832,9 @@ class MACELoss(Metric):
                 axis=int(getattr(self.loss_fn, "potential_axis", 2)),
                 solvent_sigma_g=float(getattr(self.loss_fn, "solvent_sigma_g", 0.85)),
                 align=str(getattr(self.loss_fn, "potential_1d_profile_align", "mean")),
+                use_solvent_profile=bool(
+                    getattr(self.loss_fn, "potential_1d_profile_use_solvent_profile", False)
+                ),
             )
             if potential_1d_res is not None:
                 self.delta_potential_1d_profile.append(potential_1d_res.detach())

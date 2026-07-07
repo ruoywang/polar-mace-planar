@@ -824,6 +824,9 @@ def get_loss_fn(
             potential_1d_profile_weight=getattr(args, "potential_1d_profile_weight", 0.0),
             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
             potential_1d_profile_align=getattr(args, "potential_1d_profile_align", "mean"),
+            potential_1d_profile_use_solvent_profile=getattr(
+                args, "potential_1d_profile_use_solvent_profile", False
+            ),
             solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),
@@ -917,6 +920,9 @@ def get_swa(
             potential_1d_profile_weight=getattr(args, "potential_1d_profile_weight", 0.0),
             potential_1d_profile_file=getattr(args, "potential_1d_profile_file", None),
             potential_1d_profile_align=getattr(args, "potential_1d_profile_align", "mean"),
+            potential_1d_profile_use_solvent_profile=getattr(
+                args, "potential_1d_profile_use_solvent_profile", False
+            ),
             solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),

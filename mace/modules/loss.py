@@ -956,6 +956,19 @@ def _apply_cdipol_correction_torch(
     return phi + dipfac * ii_f * cutoff + quadfac * torch.square(ii_f) * torch.square(cutoff)
 
 
+def _resample_profile_to_zref(
+    profile_src: torch.Tensor, height: torch.Tensor, z_ref: torch.Tensor
+) -> torch.Tensor:
+    """Periodic linear resampling of a uniform-grid profile [nsrc] (sampled at
+    z_j = j*H/nsrc) onto arbitrary z_ref points (mod H)."""
+    nsrc = int(profile_src.shape[0])
+    u = torch.remainder(z_ref.to(profile_src.dtype) / height.to(profile_src.dtype), 1.0) * nsrc
+    i0 = torch.floor(u).to(torch.long) % nsrc
+    i1 = (i0 + 1) % nsrc
+    w = (u - torch.floor(u)).to(profile_src.dtype)
+    return profile_src[i0] * (1.0 - w) + profile_src[i1] * w
+
+
 def potential_1d_profile_residuals(
     ref: Batch,
     pred: TensorDict,
@@ -964,6 +977,7 @@ def potential_1d_profile_residuals(
     axis: int = 2,
     solvent_sigma_g: float = 0.85,
     align: str = "mean",
+    use_solvent_profile: bool = False,
 ) -> Optional[torch.Tensor]:
     density_coefficients = pred.get("charge_density_radial_coefficients")
     if density_coefficients is None:
@@ -1020,6 +1034,22 @@ def potential_1d_profile_residuals(
         )
         raw_residual = rho_residual * volume.to(dtype=z_ref.dtype)
         raw_solvent = -rho_solvent * volume.to(dtype=z_ref.dtype)
+        # In PB mode the actual solvent charge is the solved profile
+        # (ion + bound polarization), not a gaussian at solv_center. When
+        # enabled and available, score the real profile: resample it onto
+        # z_ref and rescale to the same net charge as the gaussian layer
+        # (robust to sign/unit conventions; the gaussian carries the correct
+        # q_sol). Falls back to the gaussian for planar graphs / when off.
+        if use_solvent_profile:
+            sp = pred.get("solvent_profile_features")
+            if sp is not None:
+                prof_g = sp.view(sp.shape[0], -1)[graph_idx].to(dtype=z_ref.dtype)
+                if float(torch.sum(torch.abs(prof_g))) > 1.0e-8:
+                    raw_prof = _resample_profile_to_zref(prof_g, height, z_ref) * volume.to(dtype=z_ref.dtype)
+                    s_prof = torch.sum(raw_prof)
+                    s_gauss = torch.sum(raw_solvent)
+                    if float(torch.abs(s_prof)) > 1.0e-8:
+                        raw_solvent = raw_prof * (s_gauss / s_prof)
         raw_total = raw_neutral - raw_residual + raw_ion + raw_solvent
         phi_pred = _solve_potential_1d_from_raw_profile(
             raw_profile_e=raw_total,
@@ -1373,6 +1403,7 @@ def mean_squared_error_potential_1d_profile(
     solvent_sigma_g: float = 0.85,
     align: str = "mean",
     ddp: Optional[bool] = None,
+    use_solvent_profile: bool = False,
 ) -> Optional[torch.Tensor]:
     residuals = potential_1d_profile_residuals(
         ref=ref,
@@ -1382,6 +1413,7 @@ def mean_squared_error_potential_1d_profile(
         axis=axis,
         solvent_sigma_g=solvent_sigma_g,
         align=align,
+        use_solvent_profile=use_solvent_profile,
     )
     if residuals is None:
         return None
@@ -1933,6 +1965,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         potential_1d_profile_weight=0.0,
         potential_1d_profile_file=None,
         potential_1d_profile_align="mean",
+        potential_1d_profile_use_solvent_profile=False,
         solvent_center_weight=0.0,
         potential_axis=2,
         potential_sign=1.0,
@@ -2023,6 +2056,9 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             else {}
         )
         self.potential_1d_profile_align = str(potential_1d_profile_align)
+        self.potential_1d_profile_use_solvent_profile = bool(
+            potential_1d_profile_use_solvent_profile
+        )
         self.potential_axis = int(potential_axis)
         self.potential_sign = float(potential_sign)
         self.solvent_sigma_g = float(solvent_sigma_g)
@@ -2103,6 +2139,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 solvent_sigma_g=self.solvent_sigma_g,
                 align=self.potential_1d_profile_align,
                 ddp=ddp,
+                use_solvent_profile=self.potential_1d_profile_use_solvent_profile,
             )
             if loss_potential_1d_profile is not None:
                 loss = loss + self.potential_1d_profile_weight * loss_potential_1d_profile
