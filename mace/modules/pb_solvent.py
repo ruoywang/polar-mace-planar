@@ -38,6 +38,49 @@ import torch
 _FFT_FRIENDLY_CACHE: Dict[int, int] = {}
 
 
+class _PBSolveFn(torch.autograd.Function):
+    """Differentiable wrapper around a converged nonlinear-PB solve via the
+    implicit function theorem (IFT). The forward RETURNS the already-converged
+    phi_solv_g* (no re-solve -> forward is byte-identical to the detached path);
+    the backward solves the adjoint linear system with the solver's own Newton
+    operator (_minimize_l, which handles the G=0 charge-neutrality mode and
+    preconditioning) and gets the input sensitivities via autograd VJPs of the
+    residual in the solver's dprod_rc inner product. FD-verified (ratio ~1.0)
+    against central differences on phi_sol and the cavity fields.
+    """
+
+    @staticmethod
+    def forward(ctx, phi_sol, s_ion, s_diel, phi_solv_g_star, meta):
+        tp, grid, params, w_b = meta["tp"], meta["grid"], meta["params"], meta["w_b"]
+        with torch.no_grad():
+            phi_total = grid.ifft_real(phi_solv_g_star) + phi_sol
+            fields = tp._field_quantities(phi_total, s_ion, s_diel, grid, params, w_b)
+            response, ekappa2 = tp._response_from_fields(fields, s_ion, s_diel, grid, params)
+        ctx.save_for_backward(phi_solv_g_star, phi_sol, s_ion, s_diel)
+        ctx.meta, ctx._response, ctx._ekappa2 = meta, response, ekappa2
+        return phi_solv_g_star
+
+    @staticmethod
+    def backward(ctx, grad_phisolv_g):
+        phi_solv_g, phi_sol, s_ion, s_diel = ctx.saved_tensors
+        m = ctx.meta
+        tp, grid, params, w_b = m["tp"], m["grid"], m["params"], m["w_b"]
+        q_sol, tol, cg_max = m["q_sol"], m["tol"], m["cg_max"]
+        wgt = grid.spectral_weight
+        rhs = grad_phisolv_g / wgt if wgt is not None else grad_phisolv_g
+        lam, _, _ = tp._minimize_l(rhs, ctx._response, ctx._ekappa2, w_b, grid, tol, cg_max)
+        with torch.enable_grad():
+            ps = phi_sol.detach().requires_grad_(True)
+            si = s_ion.detach().requires_grad_(True)
+            sd = s_diel.detach().requires_grad_(True)
+            phi_total = grid.ifft_real(phi_solv_g.detach()) + ps
+            f = tp._field_quantities(phi_total, si, sd, grid, params, w_b)
+            resid, _ = tp._residual_g(phi_solv_g.detach(), f["n_b"], f["n_ion"], q_sol, grid)
+            s = grid.dprod_rc(lam.detach(), resid)
+            gps, gsi, gsd = torch.autograd.grad(s, [ps, si, sd])
+        return -gps, -gsi, -gsd, None, None
+
+
 def _fft_friendly_even(n: int) -> int:
     """Smallest even integer >= n whose prime factors are all in {2,3,5,7}."""
     if n in _FFT_FRIENDLY_CACHE:
@@ -798,6 +841,43 @@ class PBTorchBackend:
                 os.replace(tmp, p)
             else:
                 self._phi_cache[sample_id] = {"phi": phi_cpu, "shape": shape}
+
+        # Differentiable recompute (opt-in via requires_grad + baseline cache):
+        # the forward loop above ran detached, so phi*/n_b/n_ion are unchanged
+        # (forward byte-identical). Here we rebuild cvhar+cavity from the
+        # grad-carrying net density, wrap the converged solve in the IFT
+        # Function, and re-derive n_ion/n_b by autograd -> same VALUES, now with
+        # gradient into radial_coeffs. The dipole self-consistency cvdip is held
+        # at its converged value (detached; a small secondary term also detached
+        # in the non-diff path).
+        if (radial_coeffs is not None and radial_coeffs.requires_grad
+                and bl_row is not None and history):
+            net_g_d = self._gto_net_density_g(
+                grid, pos_frac, radial_coeffs.to(dt), sigmas
+            )
+            net_values_d = grid.ifft_real(net_g_d)
+            n_e_density_d = torch.clamp((neutral_v - net_values_d) / volume, min=0.0)
+            cvhar_d = phi_base - grid.ifft_real(grid.l0_inv_op(net_g_d))
+            s_ion_d, s_diel_d, _ = self._tp.create_cavity_torch(
+                n_e_density_d, grid, self.params
+            )
+            r_b = (float(self.params["R_B"]) if float(self.params["R_B"]) > 0.0
+                   else float(self.params["A_K"]))
+            w_b_d = self._tp._normalized_gaussian_kernel_g(grid, r_b)
+            phi_sol_d = cvhar_d + cvdip_z[None, None, :].detach()
+            phi_solv_g_star = grid.fft(phi_total.detach() - phi_sol_d.detach())
+            meta = {
+                "tp": self._tp, "grid": grid, "params": self.params, "w_b": w_b_d,
+                "q_sol": q_sol, "tol": self.tol, "cg_max": self.cg_max_iter,
+            }
+            phi_solv_g_d = _PBSolveFn.apply(
+                phi_sol_d, s_ion_d, s_diel_d, phi_solv_g_star, meta
+            )
+            phi_total_d = grid.ifft_real(phi_solv_g_d) + phi_sol_d
+            f_d = self._tp._field_quantities(
+                phi_total_d, s_ion_d, s_diel_d, grid, self.params, w_b_d
+            )
+            n_ion, n_b = f_d["n_ion"], f_d["n_b"]
 
         rho_ion_z = -(n_ion / volume).mean(dim=(0, 1))
         rho_bound_z = -(n_b / volume).mean(dim=(0, 1))
