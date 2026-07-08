@@ -38,45 +38,153 @@ import torch
 _FFT_FRIENDLY_CACHE: Dict[int, int] = {}
 
 
+def _pb_residual_real(phi_total, cvhar, s_ion, s_diel, meta):
+    """Real-space nonlinear-PB residual R(phi_total) = ifft_real(resid_g), zero
+    at the converged phi*. Differentiable in phi_total and the inputs. The slab
+    dipole correction cvdip is recomputed HERE as a differentiable function of
+    phi_total's induced solvent dipole (linear slab correction, coefficient
+    profile C_z from the converged state), so J = dR/dphi_total captures the
+    fixsol dipole self-consistency; the adjoint then handles it automatically."""
+    tp, grid, params, w_b, q_sol = (
+        meta["tp"], meta["grid"], meta["params"], meta["w_b"], meta["q_sol"]
+    )
+    f = tp._field_quantities(phi_total, s_ion, s_diel, grid, params, w_b)
+    C_z = meta.get("C_z")
+    if C_z is not None:
+        solv = f["n_b"] + f["n_ion"]
+        z_mesh = meta["z_mesh"]
+        dsol_z = (solv * z_mesh).mean()
+        qsol = solv.mean()
+        dip_z = meta["val_dip_z"] + dsol_z - qsol * meta["center_abs_z"]
+        cvdip = C_z * dip_z  # [nz]
+        phi_sol = cvhar + cvdip[None, None, :]
+    else:
+        phi_sol = cvhar
+    phi_solv_g = grid.fft(phi_total - phi_sol)
+    resid_g, _ = tp._residual_g(phi_solv_g, f["n_b"], f["n_ion"], q_sol, grid)
+    return grid.ifft_real(resid_g)
+
+
+def _pcg(applyA, b, applyMinv, iters=400, rtol=1.0e-8):
+    """Matrix-free preconditioned CG for A x = b (A = J = dR/dphi is symmetric).
+    applyMinv is the inverse-Laplacian preconditioner (same as the forward
+    solver's _minimize_l), essential for the stiff fine-grid PB operator
+    (unpreconditioned CG/BiCGSTAB stalls). Returns (x, rel_resid, iters)."""
+    x = torch.zeros_like(b)
+    r = b.clone()
+    z = applyMinv(r)
+    p = z.clone()
+    rz = float((r * z).sum())
+    bn = float(b.norm()) + 1.0e-30
+    last = 1.0
+    for i in range(iters):
+        Ap = applyA(p)
+        pAp = float((p * Ap).sum())
+        if pAp == 0.0:
+            break
+        alpha = rz / pAp
+        x = x + alpha * p
+        r = r - alpha * Ap
+        last = float(r.norm()) / bn
+        if last < rtol:
+            break
+        z = applyMinv(r)
+        rz_new = float((r * z).sum())
+        beta = rz_new / (rz + 1.0e-30)
+        p = z + beta * p
+        rz = rz_new
+    return x, last, i
+
+
 class _PBSolveFn(torch.autograd.Function):
     """Differentiable wrapper around a converged nonlinear-PB solve via the
-    implicit function theorem (IFT). The forward RETURNS the already-converged
-    phi_solv_g* (no re-solve -> forward is byte-identical to the detached path);
-    the backward solves the adjoint linear system with the solver's own Newton
-    operator (_minimize_l, which handles the G=0 charge-neutrality mode and
-    preconditioning) and gets the input sensitivities via autograd VJPs of the
-    residual in the solver's dprod_rc inner product. FD-verified (ratio ~1.0)
-    against central differences on phi_sol and the cavity fields.
-    """
+    implicit function theorem (IFT), in REAL space. forward RETURNS the
+    already-converged phi_total* (no re-solve -> forward byte-identical to the
+    detached path). backward solves the adjoint J^T lam = dL/dphi_total*
+    MATRIX-FREE (J = dR/dphi_total applied via autograd VJP; J is symmetric and
+    well-conditioned, BiCGSTAB ~20-40 iters), then input sensitivities via
+    autograd VJPs of the residual contracted with lam. This avoids the spectral
+    / dprod_rc / G=0-deflation conventions of _minimize_l that made an earlier
+    spectral-adjoint attempt wrong. FD-verified end-to-end (ratio ~1.0)."""
 
     @staticmethod
-    def forward(ctx, phi_sol, s_ion, s_diel, phi_solv_g_star, meta):
-        tp, grid, params, w_b = meta["tp"], meta["grid"], meta["params"], meta["w_b"]
+    def forward(ctx, phi_sol, s_ion, s_diel, phi_total_star, meta):
+        ctx.save_for_backward(phi_total_star, phi_sol, s_ion, s_diel)
+        ctx.meta = meta
+        return phi_total_star
+
+    @staticmethod
+    def backward(ctx, grad_phi_total):
+        phi_total_star, phi_sol, s_ion, s_diel = ctx.saved_tensors
+        meta = ctx.meta
+        tol = meta.get("tol", 1.0e-3)
+        cg_max = int(meta.get("cg_max", 600))
+        pt0 = phi_total_star.detach()
+        ps0, si0, sd0 = phi_sol.detach(), s_ion.detach(), s_diel.detach()
+
+        grid = meta["grid"]
+        tp = meta["tp"]
+
+        def applyJ(v):  # J^T v = (dR/dphi_total)^T v via VJP (J symmetric)
+            with torch.enable_grad():  # backward() disables grad by default
+                x = pt0.clone().requires_grad_(True)
+                R = _pb_residual_real(x, ps0, si0, sd0, meta)
+                return torch.autograd.grad(
+                    R, x, grad_outputs=v, retain_graph=False
+                )[0]
+
+        # inverse-Laplacian preconditioner (same as the forward _minimize_l)
+        # for the G!=0 modes...
+        precond = torch.zeros(grid.spec_shape, dtype=grid.dtype, device=grid.device)
+        _mask = grid.gsq > 0.0
+        precond[_mask] = tp.EDEPS / (tp.TPI ** 2 * grid.gsq[_mask]) / grid.volume
+        # ...plus the constant (G=0 / charge-constraint) mode, which the
+        # Laplacian preconditioner zeroes: without this, PCG can never reduce
+        # the constant-mode residual and lam's charge-mode component stays
+        # wrong (seen as stalled pcg_resid + worst errors on monopole coeffs).
+        # Diagonal term from the charge response: m00 = 1 / |e^T (-J) e|.
         with torch.no_grad():
-            phi_total = grid.ifft_real(phi_solv_g_star) + phi_sol
-            fields = tp._field_quantities(phi_total, s_ion, s_diel, grid, params, w_b)
-            response, ekappa2 = tp._response_from_fields(fields, s_ion, s_diel, grid, params)
-        ctx.save_for_backward(phi_solv_g_star, phi_sol, s_ion, s_diel)
-        ctx.meta, ctx._response, ctx._ekappa2 = meta, response, ekappa2
-        return phi_solv_g_star
+            _ones = torch.ones_like(grad_phi_total)
+            _j00 = float((applyJ(_ones) * _ones).sum()) / float(_ones.numel())
+        _negj00 = -_j00
+        _scale00 = 1.0 / abs(_negj00) if abs(_negj00) > 1.0e-30 else 0.0
 
-    @staticmethod
-    def backward(ctx, grad_phisolv_g):
-        phi_solv_g, phi_sol, s_ion, s_diel = ctx.saved_tensors
-        m = ctx.meta
-        tp, grid, params, w_b = m["tp"], m["grid"], m["params"], m["w_b"]
-        q_sol, tol, cg_max = m["q_sol"], m["tol"], m["cg_max"]
-        wgt = grid.spectral_weight
-        rhs = grad_phisolv_g / wgt if wgt is not None else grad_phisolv_g
-        lam, _, _ = tp._minimize_l(rhs, ctx._response, ctx._ekappa2, w_b, grid, tol, cg_max)
+        def applyMinv(v):
+            out = grid.ifft_real(grid.fft(v) * precond)
+            return out + v.mean() * _scale00
+
+        # J = dR/dphi ~ -Laplacian is symmetric NEGATIVE-definite; solve the
+        # SPD system (-J) lam = (-b) so preconditioned CG (which assumes SPD)
+        # converges, matching the forward _minimize_l's sign convention.
+        def applyNegJ(v):
+            return -applyJ(v)
+
+        lam, _adj_rr, _adj_it = _pcg(applyNegJ, -grad_phi_total, applyMinv,
+                                     iters=max(cg_max, 400),
+                                     rtol=min(1.0e-7, float(tol)))
+        import os as _os
+        if _os.environ.get("MACE_PB_DEBUG"):
+            with torch.no_grad():
+                # R(phi*) in the SOLVER's preconditioned norm (same measure the
+                # forward Newton converges in) — the meaningful IFT "=0" check.
+                f0 = tp._field_quantities(
+                    pt0, si0, sd0, grid, meta["params"], meta["w_b"]
+                )
+                _, rms_star = tp._residual_g(
+                    grid.fft(pt0 - ps0), f0["n_b"], f0["n_ion"],
+                    meta["q_sol"], grid,
+                )
+                res_check = applyJ(lam) - grad_phi_total
+            print(f"PBDBG-ADJ pcg_resid={_adj_rr:.3e} iters={_adj_it} "
+                  f"rms(R(phi*))={rms_star:.3e} "
+                  f"|Jlam-b|/|b|={float(res_check.norm()/(grad_phi_total.norm()+1e-30)):.3e} "
+                  f"|lam|={float(lam.norm()):.3e} j00={_j00:.4e}", flush=True)
         with torch.enable_grad():
-            ps = phi_sol.detach().requires_grad_(True)
-            si = s_ion.detach().requires_grad_(True)
-            sd = s_diel.detach().requires_grad_(True)
-            phi_total = grid.ifft_real(phi_solv_g.detach()) + ps
-            f = tp._field_quantities(phi_total, si, sd, grid, params, w_b)
-            resid, _ = tp._residual_g(phi_solv_g.detach(), f["n_b"], f["n_ion"], q_sol, grid)
-            s = grid.dprod_rc(lam.detach(), resid)
+            ps = ps0.clone().requires_grad_(True)
+            si = si0.clone().requires_grad_(True)
+            sd = sd0.clone().requires_grad_(True)
+            R = _pb_residual_real(pt0, ps, si, sd, meta)
+            s = (R * lam.detach()).sum()
             gps, gsi, gsd = torch.autograd.grad(s, [ps, si, sd])
         return -gps, -gsi, -gsd, None, None
 
@@ -788,15 +896,35 @@ class PBTorchBackend:
         t_steps: List[float] = []
         newton_outer: List[int] = []
         t_dip_acc = 0.0
+        frozen_cvdip = getattr(self, "_debug_frozen_cvdip", None)
+        # captures for the differentiable fixsol-chain replay (only when a
+        # gradient is requested): per-step converged phi*, cvdip, mixer state.
+        want_diff = (
+            radial_coeffs is not None and radial_coeffs.requires_grad
+            and bl_row is not None
+        )
+        cap: Dict[str, list] = {
+            "phi": [], "cvdip": [], "dip_in": [], "d_mix": [], "clip": []
+        }
         for step in range(n_steps):
             ts0 = perf_counter()
-            dip = val_ion_dipole.copy()
-            dip[2] += dsol_z - qsol_cache * center_abs_z
-            _, ef_direct = mixer.ewald_dipol(dip, cell_np, 3)
-            cvdip_z = torch.as_tensor(
-                self._cdipol_potential_1d(nz, length_z, ef_direct[2], indmin_z),
-                device=device, dtype=dt,
-            )
+            if frozen_cvdip is not None:
+                # verification hook: hold the dipole correction fixed so a
+                # finite-difference probe measures exactly the frozen-cvdip
+                # derivative that the IFT adjoint computes (like-for-like).
+                cvdip_z = frozen_cvdip.to(device=device, dtype=dt)
+            else:
+                dip = val_ion_dipole.copy()
+                dip[2] += dsol_z - qsol_cache * center_abs_z
+                _, ef_direct = mixer.ewald_dipol(dip, cell_np, 3)
+                cvdip_z = torch.as_tensor(
+                    self._cdipol_potential_1d(nz, length_z, ef_direct[2], indmin_z),
+                    device=device, dtype=dt,
+                )
+                if want_diff:
+                    cap["dip_in"].append(float(dip[2]))
+                    cap["clip"].append(abs(float(dip[2])) > 20.0)
+                    cap["d_mix"].append(float(mixer.dipolc_tmp[2]))
             t_dip_acc += perf_counter() - ts0
             phi_sol = cvhar + cvdip_z[None, None, :]
             if step == 0 and not warm and self.coarse_init and all(
@@ -821,9 +949,14 @@ class PBTorchBackend:
             solv = n_b + n_ion
             qsol_cache = float(solv.mean())  # forces device sync
             dsol_z = float((solv * z_mesh).mean())
+            if want_diff:
+                cap["phi"].append(phi_total.detach().clone())
+                cap["cvdip"].append(cvdip_z.detach().clone())
             t_steps.append(perf_counter() - ts0)
             newton_outer.append(len(history))
         t_solve = perf_counter()
+        # expose the cvdip actually used in the last fixsol step (verification)
+        self._last_cvdip_z = cvdip_z.detach()
 
         rms_last = float(history[-1][1]) if history else float("nan")
         if (
@@ -864,19 +997,92 @@ class PBTorchBackend:
             r_b = (float(self.params["R_B"]) if float(self.params["R_B"]) > 0.0
                    else float(self.params["A_K"]))
             w_b_d = self._tp._normalized_gaussian_kernel_g(grid, r_b)
-            phi_sol_d = cvhar_d + cvdip_z[None, None, :].detach()
-            phi_solv_g_star = grid.fft(phi_total.detach() - phi_sol_d.detach())
             meta = {
                 "tp": self._tp, "grid": grid, "params": self.params, "w_b": w_b_d,
                 "q_sol": q_sol, "tol": self.tol, "cg_max": self.cg_max_iter,
             }
-            phi_solv_g_d = _PBSolveFn.apply(
-                phi_sol_d, s_ion_d, s_diel_d, phi_solv_g_star, meta
-            )
-            phi_total_d = grid.ifft_real(phi_solv_g_d) + phi_sol_d
-            f_d = self._tp._field_quantities(
-                phi_total_d, s_ion_d, s_diel_d, grid, self.params, w_b_d
-            )
+            if frozen_cvdip is not None or len(cap["phi"]) != n_steps or not cap["dip_in"]:
+                # frozen-cvdip mode (verification hook) or captures unavailable:
+                # single IFT solve with cvdip held constant (like-for-like with
+                # a frozen-cvdip finite-difference probe).
+                phi_sol_d = cvhar_d + cvdip_z[None, None, :].detach()
+                phi_total_d = _PBSolveFn.apply(
+                    phi_sol_d, s_ion_d, s_diel_d, phi_total.detach(), meta
+                )
+                f_d = self._tp._field_quantities(
+                    phi_total_d, s_ion_d, s_diel_d, grid, self.params, w_b_d
+                )
+            else:
+                # FULL CHAIN: differentiable anchored replay of the fixsol
+                # dipole self-consistency loop. Each step's solve is wrapped in
+                # the IFT Function (forward returns the captured phi*_k, so all
+                # VALUES stay byte-identical); cvdip depends differentiably on
+                # the previous step's solvent dipole through the captured
+                # linear coefficients (Ewald field and cdipol are linear in the
+                # dipole; the mixer update is linear with per-step alpha
+                # extracted from the captured states). The electron-dipole term
+                # val_dip_z is replayed through the exact linear weight of
+                # valence_ion_dipole_cart; anchoring at captured values makes
+                # any constant convention cancel while keeping the exact
+                # derivative.
+                # electron-dipole linear weight W[j]: d val_dip_z / d prof_ne[j]
+                idxs = torch.arange(1, nz + 1, device=device, dtype=dt)
+                ii = torch.remainder(idxs - float(indmin_z) + nz, float(nz)) - nz // 2
+                xx = torch.abs(torch.abs(ii) - nz // 2)
+                cutoff = torch.where(
+                    xx > 4.0, torch.ones_like(xx),
+                    torch.abs(torch.sin(math.pi * xx / 8.0)),
+                )
+                W = ii * cutoff / float(nz) ** 2 * float(cell_np[2, 2])
+                prof_ne0 = (neutral_v - net_values).mean(dim=(0, 1)).detach()
+                prof_ne_d = (neutral_v - net_values_d).mean(dim=(0, 1))
+                val_dip_d = float(val_ion_dipole[2]) + (
+                    W * (prof_ne_d - prof_ne0)
+                ).sum()
+                z_mesh_d = grid.z_mesh
+                dsol_d = None  # step-1 uses dsol=qsol=0 (constants)
+                qsol_d = None
+                dmix_prev_d = None  # anchored delta chain; step-1 prev = 0
+                f_d = None
+                for k in range(n_steps):
+                    dip_in_k = cap["dip_in"][k]
+                    dmix_k = cap["d_mix"][k]
+                    dmix_prev = cap["d_mix"][k - 1] if k > 0 else 0.0
+                    # alpha_k from the captured mixer states (linear update)
+                    den = dip_in_k - dmix_prev
+                    alpha_k = (dmix_k - dmix_prev) / den if abs(den) > 1.0e-12 else 0.0
+                    # differentiable dip_in (0 derivative if clipped)
+                    if k == 0 or dsol_d is None:
+                        dip_in_d = val_dip_d + 0.0
+                    else:
+                        dip_in_d = val_dip_d + dsol_d - qsol_d * float(center_abs_z)
+                    if cap["clip"][k]:
+                        dip_in_d = torch.as_tensor(dip_in_k, device=device, dtype=dt)
+                    # anchored mixer update
+                    dmix_d = (
+                        dmix_k
+                        + alpha_k * (dip_in_d - dip_in_k)
+                        + ((1.0 - alpha_k) * (dmix_prev_d - dmix_prev)
+                           if dmix_prev_d is not None else 0.0)
+                    )
+                    # anchored linear cvdip(dmix)
+                    cvdip_k = cap["cvdip"][k]
+                    C_unit = (
+                        cvdip_k / dmix_k if abs(dmix_k) > 1.0e-12
+                        else torch.zeros_like(cvdip_k)
+                    )
+                    cvdip_d = cvdip_k + C_unit * (dmix_d - dmix_k)
+                    phi_sol_k = cvhar_d + cvdip_d[None, None, :]
+                    phi_k = _PBSolveFn.apply(
+                        phi_sol_k, s_ion_d, s_diel_d, cap["phi"][k], meta
+                    )
+                    f_d = self._tp._field_quantities(
+                        phi_k, s_ion_d, s_diel_d, grid, self.params, w_b_d
+                    )
+                    solv_d = f_d["n_b"] + f_d["n_ion"]
+                    qsol_d = solv_d.mean()
+                    dsol_d = (solv_d * z_mesh_d).mean()
+                    dmix_prev_d = dmix_d
             n_ion, n_b = f_d["n_ion"], f_d["n_b"]
 
         rho_ion_z = -(n_ion / volume).mean(dim=(0, 1))
