@@ -65,13 +65,17 @@ def _pb_residual_real(phi_total, cvhar, s_ion, s_diel, meta):
     return grid.ifft_real(resid_g)
 
 
-def _pcg(applyA, b, applyMinv, iters=400, rtol=1.0e-8):
+def _pcg(applyA, b, applyMinv, iters=400, rtol=1.0e-8, x0=None):
     """Matrix-free preconditioned CG for A x = b (A = J = dR/dphi is symmetric).
     applyMinv is the inverse-Laplacian preconditioner (same as the forward
     solver's _minimize_l), essential for the stiff fine-grid PB operator
     (unpreconditioned CG/BiCGSTAB stalls). Returns (x, rel_resid, iters)."""
-    x = torch.zeros_like(b)
-    r = b.clone()
+    if x0 is not None:
+        x = x0.clone()
+        r = b - applyA(x)
+    else:
+        x = torch.zeros_like(b)
+        r = b.clone()
     z = applyMinv(r)
     p = z.clone()
     rz = float((r * z).sum())
@@ -124,14 +128,47 @@ class _PBSolveFn(torch.autograd.Function):
 
         grid = meta["grid"]
         tp = meta["tp"]
+        params, w_b, q_sol = meta["params"], meta["w_b"], meta["q_sol"]
 
-        def applyJ(v):  # J^T v = (dR/dphi_total)^T v via VJP (J symmetric)
+        def applyJ_vjp(v):  # exact J v via autograd VJP (J symmetric) — slow
             with torch.enable_grad():  # backward() disables grad by default
                 x = pt0.clone().requires_grad_(True)
                 R = _pb_residual_real(x, ps0, si0, sd0, meta)
                 return torch.autograd.grad(
                     R, x, grad_outputs=v, retain_graph=False
                 )[0]
+
+        # ANALYTIC Jacobian apply: the forward Newton's linear operator _l_op
+        # (tangent response + ion response + Laplacian) IS the exact Jacobian
+        # of the residual; probed vs the autograd VJP it matches to machine
+        # precision with J v = -ifft_real(_l_op(fft(v))). ~100x cheaper than
+        # rebuilding the residual graph per CG iteration.
+        with torch.no_grad():
+            f0 = tp._field_quantities(pt0, si0, sd0, grid, params, w_b)
+            response, ekappa2 = tp._response_from_fields(
+                f0, si0, sd0, grid, params
+            )
+
+        def applyJ_ana(v):
+            return -grid.ifft_real(
+                tp._l_op(grid.fft(v), response, ekappa2, w_b, grid)
+            )
+
+        # one-time self-check per solver+shape (guards against future solver
+        # changes making _l_op an approximate Jacobian): random probe vs VJP.
+        jac_ok = meta.setdefault("jac_ok", {})
+        key = tuple(pt0.shape)
+        if key not in jac_ok:
+            with torch.no_grad():
+                vp = torch.randn_like(pt0)
+                a = applyJ_vjp(vp)
+                bx = applyJ_ana(vp)
+                rel = float((a - bx).norm() / (a.norm() + 1.0e-30))
+            jac_ok[key] = rel < 1.0e-9
+            if not jac_ok[key]:
+                print(f"PBDBG-ADJ WARNING analytic Jacobian mismatch rel={rel:.3e}"
+                      " — falling back to VJP operator", flush=True)
+        applyJ = applyJ_ana if jac_ok[key] else applyJ_vjp
 
         # inverse-Laplacian preconditioner (same as the forward _minimize_l)
         # for the G!=0 modes...
@@ -159,20 +196,29 @@ class _PBSolveFn(torch.autograd.Function):
         def applyNegJ(v):
             return -applyJ(v)
 
+        # warm-start lambda from the previous refresh of the same structure
+        # (loss geometry changes slowly across refreshes) — big iteration cuts.
+        lam_cache = meta.get("lam_cache")
+        lam_key = meta.get("lam_key")
+        x0 = None
+        if lam_cache is not None and lam_key is not None:
+            c0 = lam_cache.get(lam_key)
+            if c0 is not None and tuple(c0.shape) == key:
+                x0 = c0.to(device=pt0.device, dtype=pt0.dtype)
         lam, _adj_rr, _adj_it = _pcg(applyNegJ, -grad_phi_total, applyMinv,
                                      iters=max(cg_max, 400),
-                                     rtol=min(1.0e-7, float(tol)))
+                                     rtol=float(meta.get("adj_rtol", 1.0e-6)),
+                                     x0=x0)
+        if lam_cache is not None and lam_key is not None:
+            lam_cache[lam_key] = lam.detach().to(torch.float32).cpu()
         import os as _os
         if _os.environ.get("MACE_PB_DEBUG"):
             with torch.no_grad():
                 # R(phi*) in the SOLVER's preconditioned norm (same measure the
                 # forward Newton converges in) — the meaningful IFT "=0" check.
-                f0 = tp._field_quantities(
-                    pt0, si0, sd0, grid, meta["params"], meta["w_b"]
-                )
                 _, rms_star = tp._residual_g(
                     grid.fft(pt0 - ps0), f0["n_b"], f0["n_ion"],
-                    meta["q_sol"], grid,
+                    q_sol, grid,
                 )
                 res_check = applyJ(lam) - grad_phi_total
             print(f"PBDBG-ADJ pcg_resid={_adj_rr:.3e} iters={_adj_it} "
@@ -585,6 +631,11 @@ class PBTorchBackend:
         self.warm_fixsol_steps = int(warm_fixsol_steps)
         self._grids: Dict = {}
         self._phi_cache: Dict = {}
+        # adjoint (lambda) warm-start cache for the differentiable path,
+        # keyed by (sample_id, fixsol step); float32 CPU like the phi cache
+        self._lam_cache: Dict = {}
+        # one-time analytic-Jacobian self-check results, keyed by grid shape
+        self._jac_ok: Dict = {}
         # Optional rank-independent warm-start cache: phi persisted per
         # sample_id to a shared directory, so warm start survives a data
         # shuffle that moves a structure across ranks (the in-memory dict is
@@ -1011,6 +1062,7 @@ class PBTorchBackend:
             meta = {
                 "tp": self._tp, "grid": grid, "params": self.params, "w_b": w_b_d,
                 "q_sol": q_sol, "tol": self.tol, "cg_max": self.cg_max_iter,
+                "lam_cache": self._lam_cache, "jac_ok": self._jac_ok,
             }
 
             def _fields_nb_nion(p, si, sd):
@@ -1025,7 +1077,8 @@ class PBTorchBackend:
                 # a frozen-cvdip finite-difference probe).
                 phi_sol_d = cvhar_d + cvdip_z[None, None, :].detach()
                 phi_total_d = _PBSolveFn.apply(
-                    phi_sol_d, s_ion_d, s_diel_d, phi_total.detach(), meta
+                    phi_sol_d, s_ion_d, s_diel_d, phi_total.detach(),
+                    dict(meta, lam_key=(sample_id, -1)),
                 )
                 n_b_d, n_ion_d = _ckpt(
                     _fields_nb_nion, phi_total_d, s_ion_d, s_diel_d,
@@ -1099,7 +1152,8 @@ class PBTorchBackend:
                     cvdip_d = cvdip_k + C_unit * (dmix_d - dmix_k)
                     phi_sol_k = cvhar_d + cvdip_d[None, None, :]
                     phi_k = _PBSolveFn.apply(
-                        phi_sol_k, s_ion_d, s_diel_d, cap["phi"][k], meta
+                        phi_sol_k, s_ion_d, s_diel_d, cap["phi"][k],
+                        dict(meta, lam_key=(sample_id, k)),
                     )
                     n_b_d, n_ion_d = _ckpt(
                         _fields_nb_nion, phi_k, s_ion_d, s_diel_d,
