@@ -921,10 +921,9 @@ class PBTorchBackend:
                     self._cdipol_potential_1d(nz, length_z, ef_direct[2], indmin_z),
                     device=device, dtype=dt,
                 )
-                if want_diff:
-                    cap["dip_in"].append(float(dip[2]))
-                    cap["clip"].append(abs(float(dip[2])) > 20.0)
-                    cap["d_mix"].append(float(mixer.dipolc_tmp[2]))
+                cap["dip_in"].append(float(dip[2]))
+                cap["clip"].append(abs(float(dip[2])) > 20.0)
+                cap["d_mix"].append(float(mixer.dipolc_tmp[2]))
             t_dip_acc += perf_counter() - ts0
             phi_sol = cvhar + cvdip_z[None, None, :]
             if step == 0 and not warm and self.coarse_init and all(
@@ -957,6 +956,10 @@ class PBTorchBackend:
         t_solve = perf_counter()
         # expose the cvdip actually used in the last fixsol step (verification)
         self._last_cvdip_z = cvdip_z.detach()
+        self._dbg_cap = {
+            "dip_in": list(cap["dip_in"]), "d_mix": list(cap["d_mix"]),
+            "val_dip": float(val_ion_dipole[2]),
+        }
 
         rms_last = float(history[-1][1]) if history else float("nan")
         if (
@@ -985,14 +988,22 @@ class PBTorchBackend:
         # in the non-diff path).
         if (radial_coeffs is not None and radial_coeffs.requires_grad
                 and bl_row is not None and history):
-            net_g_d = self._gto_net_density_g(
-                grid, pos_frac, radial_coeffs.to(dt), sigmas
+            from torch.utils.checkpoint import checkpoint as _ckpt
+            # Gradient checkpointing on the three big graph builders (spectral
+            # net assembly, cavity, per-step field quantities): the forward
+            # graph would otherwise retain multi-GB einsum/FFT intermediates
+            # (OOM on 40GB for the chain); recompute-on-backward keeps values
+            # bit-identical and the peak memory bounded.
+            net_g_d = _ckpt(
+                lambda c: self._gto_net_density_g(grid, pos_frac, c.to(dt), sigmas),
+                radial_coeffs, use_reentrant=False,
             )
             net_values_d = grid.ifft_real(net_g_d)
             n_e_density_d = torch.clamp((neutral_v - net_values_d) / volume, min=0.0)
             cvhar_d = phi_base - grid.ifft_real(grid.l0_inv_op(net_g_d))
-            s_ion_d, s_diel_d, _ = self._tp.create_cavity_torch(
-                n_e_density_d, grid, self.params
+            s_ion_d, s_diel_d = _ckpt(
+                lambda ne: self._tp.create_cavity_torch(ne, grid, self.params)[:2],
+                n_e_density_d, use_reentrant=False,
             )
             r_b = (float(self.params["R_B"]) if float(self.params["R_B"]) > 0.0
                    else float(self.params["A_K"]))
@@ -1001,6 +1012,13 @@ class PBTorchBackend:
                 "tp": self._tp, "grid": grid, "params": self.params, "w_b": w_b_d,
                 "q_sol": q_sol, "tol": self.tol, "cg_max": self.cg_max_iter,
             }
+
+            def _fields_nb_nion(p, si, sd):
+                f = self._tp._field_quantities(
+                    p, si, sd, grid, self.params, w_b_d
+                )
+                return f["n_b"], f["n_ion"]
+
             if frozen_cvdip is not None or len(cap["phi"]) != n_steps or not cap["dip_in"]:
                 # frozen-cvdip mode (verification hook) or captures unavailable:
                 # single IFT solve with cvdip held constant (like-for-like with
@@ -1009,8 +1027,9 @@ class PBTorchBackend:
                 phi_total_d = _PBSolveFn.apply(
                     phi_sol_d, s_ion_d, s_diel_d, phi_total.detach(), meta
                 )
-                f_d = self._tp._field_quantities(
-                    phi_total_d, s_ion_d, s_diel_d, grid, self.params, w_b_d
+                n_b_d, n_ion_d = _ckpt(
+                    _fields_nb_nion, phi_total_d, s_ion_d, s_diel_d,
+                    use_reentrant=False,
                 )
             else:
                 # FULL CHAIN: differentiable anchored replay of the fixsol
@@ -1048,9 +1067,14 @@ class PBTorchBackend:
                     dip_in_k = cap["dip_in"][k]
                     dmix_k = cap["d_mix"][k]
                     dmix_prev = cap["d_mix"][k - 1] if k > 0 else 0.0
-                    # alpha_k from the captured mixer states (linear update)
-                    den = dip_in_k - dmix_prev
-                    alpha_k = (dmix_k - dmix_prev) / den if abs(den) > 1.0e-12 else 0.0
+                    # mixer update: dmix = dmix_prev + alpha(res)*res with
+                    # res = clip(dip_in) - dmix_prev. alpha itself DEPENDS on
+                    # res when |res| > 1 (alpha = base/res^2), so the true
+                    # local derivative is d(dmix)/d(res) = alpha + res*alpha'
+                    # = -alpha there (sign flip!), and +alpha for |res| <= 1.
+                    res_k = dip_in_k - dmix_prev
+                    alpha_k = (dmix_k - dmix_prev) / res_k if abs(res_k) > 1.0e-12 else 0.0
+                    g_k = alpha_k if abs(res_k) <= 1.0 else -alpha_k
                     # differentiable dip_in (0 derivative if clipped)
                     if k == 0 or dsol_d is None:
                         dip_in_d = val_dip_d + 0.0
@@ -1058,11 +1082,12 @@ class PBTorchBackend:
                         dip_in_d = val_dip_d + dsol_d - qsol_d * float(center_abs_z)
                     if cap["clip"][k]:
                         dip_in_d = torch.as_tensor(dip_in_k, device=device, dtype=dt)
-                    # anchored mixer update
+                    # anchored mixer update with the exact local derivative:
+                    # d(dmix)/d(dip_in) = g_k, d(dmix)/d(dmix_prev) = 1 - g_k
                     dmix_d = (
                         dmix_k
-                        + alpha_k * (dip_in_d - dip_in_k)
-                        + ((1.0 - alpha_k) * (dmix_prev_d - dmix_prev)
+                        + g_k * (dip_in_d - dip_in_k)
+                        + ((1.0 - g_k) * (dmix_prev_d - dmix_prev)
                            if dmix_prev_d is not None else 0.0)
                     )
                     # anchored linear cvdip(dmix)
@@ -1076,14 +1101,27 @@ class PBTorchBackend:
                     phi_k = _PBSolveFn.apply(
                         phi_sol_k, s_ion_d, s_diel_d, cap["phi"][k], meta
                     )
-                    f_d = self._tp._field_quantities(
-                        phi_k, s_ion_d, s_diel_d, grid, self.params, w_b_d
+                    n_b_d, n_ion_d = _ckpt(
+                        _fields_nb_nion, phi_k, s_ion_d, s_diel_d,
+                        use_reentrant=False,
                     )
-                    solv_d = f_d["n_b"] + f_d["n_ion"]
+                    solv_d = n_b_d + n_ion_d
                     qsol_d = solv_d.mean()
                     dsol_d = (solv_d * z_mesh_d).mean()
                     dmix_prev_d = dmix_d
-            n_ion, n_b = f_d["n_ion"], f_d["n_b"]
+                    if os.environ.get("MACE_PB_DEBUG"):
+                        dbg = getattr(self, "_dbg_chain", None)
+                        if dbg is None or k == 0:
+                            dbg = {"dip_in_d": [], "dmix_d": [], "dsol_d": [],
+                                   "qsol_d": [], "cvdip_d": [],
+                                   "val_dip_d": val_dip_d}
+                            self._dbg_chain = dbg
+                        dbg["dip_in_d"].append(dip_in_d)
+                        dbg["dmix_d"].append(dmix_d)
+                        dbg["dsol_d"].append(dsol_d)
+                        dbg["qsol_d"].append(qsol_d)
+                        dbg["cvdip_d"].append(cvdip_d)
+            n_ion, n_b = n_ion_d, n_b_d
 
         rho_ion_z = -(n_ion / volume).mean(dim=(0, 1))
         rho_bound_z = -(n_b / volume).mean(dim=(0, 1))
