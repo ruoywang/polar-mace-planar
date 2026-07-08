@@ -747,6 +747,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_warm_start: bool = True,
         solvent_pb_warm_fixsol_steps: int = 0,
         solvent_pb_learn_center_shift: bool = False,
+        solvent_pb_differentiable: bool = False,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -884,6 +885,12 @@ class PolarMACE(ScaleShiftMACE):
         # degree of freedom the planar model has via its learnable center).
         # Diagnostic for the PB-vs-planar 1D-potential gap; default off.
         self.solvent_pb_learn_center_shift = bool(solvent_pb_learn_center_shift)
+        # When True, the PB solve is DIFFERENTIABLE in the model's density
+        # coefficients (IFT adjoint, FD-verified): coeffs are passed to the
+        # solver without detach and the layer profile / q / mu keep their
+        # autograd graph, so potential/fermi/Phi1D losses train the density
+        # through the PB physics. Default False = detached (byte-identical).
+        self.solvent_pb_differentiable = bool(solvent_pb_differentiable)
         self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
@@ -1334,6 +1341,14 @@ class PolarMACE(ScaleShiftMACE):
         solvent_mu = positions.new_zeros(num_graphs)
         prof_feat = positions.new_zeros(num_graphs, 1024)
         prof_energy = positions.new_zeros(num_graphs, 512)
+        # grad-carrying profile copy for the observable path (Phi1D loss);
+        # rows are grad only for freshly-solved graphs, detached (same values)
+        # for reuse/planar rows.
+        prof_feat_grad: Optional[torch.Tensor] = (
+            positions.new_zeros(num_graphs, 1024)
+            if (self.solvent_pb_differentiable and self.training)
+            else None
+        )
         for g in range(num_graphs):
             cell_g = cells[g]
             heights.append(float(_axis_box_length(cell_g, axis).item()))
@@ -1342,7 +1357,11 @@ class PolarMACE(ScaleShiftMACE):
                 profiles.append(None)
                 continue
             pos_g = positions[atom_mask].detach()
-            coeffs_g = radial_blocks[atom_mask].detach()
+            coeffs_g = (
+                radial_blocks[atom_mask]
+                if (self.solvent_pb_differentiable and self.training)
+                else radial_blocks[atom_mask].detach()
+            )
             numbers_g = atomic_numbers_nodes[atom_mask]
             zval_g = node_valence_electrons[atom_mask].detach()
             sid = (
@@ -1398,6 +1417,8 @@ class PolarMACE(ScaleShiftMACE):
                     )
                     q_ion[g] = cached_prof["q"]
                     solvent_mu[g] = cached_prof["mu"]
+                    if prof_feat_grad is not None:
+                        prof_feat_grad[g] = prof_feat[g]
                     profiles.append(None)
                     continue
                 mode = "solve"
@@ -1463,6 +1484,8 @@ class PolarMACE(ScaleShiftMACE):
                 )
                 q_ion[g] = cached_prof["q"]
                 solvent_mu[g] = cached_prof["mu"]
+                if prof_feat_grad is not None:
+                    prof_feat_grad[g] = prof_feat[g]
                 profiles.append(None)
                 continue
             if not healthy and planar_center is not None:
@@ -1515,20 +1538,27 @@ class PolarMACE(ScaleShiftMACE):
             # (polarization) charge integrates to ~0 but carries the
             # dielectric screening dipole of the implicit region.
             result = dict(result)
+            # differentiable path: the solver returns tensor moments (values
+            # identical to the floats, carrying the autograd graph)
+            diff_grad = "q_ion_t" in result
+            _q = result["q_ion_t"] if diff_grad else result["q_ion"]
+            _lm = result["layer_mean_t"] if diff_grad else result["layer_mean"]
+            _mb = result["mu_bound_t"] if diff_grad else result["mu_bound"]
             if self.solvent_pb_include_bound:
                 result["rho_layer_z"] = (
                     result["rho_ion_z"] + result["rho_bound_z"]
                 )
-                mu_g = (
-                    result["q_ion"] * result["layer_mean"]
-                    + result["mu_bound"]
-                )
+                mu_g = _q * _lm + _mb
             else:
                 result["rho_layer_z"] = result["rho_ion_z"]
-                mu_g = result["q_ion"] * result["layer_mean"]
+                mu_g = _q * _lm
             profiles.append(result)
-            q_ion[g] = float(result["q_ion"])
-            solvent_mu[g] = float(mu_g)
+            if diff_grad:
+                q_ion[g] = _q.to(positions.dtype)
+                solvent_mu[g] = mu_g.to(positions.dtype)
+            else:
+                q_ion[g] = float(result["q_ion"])
+                solvent_mu[g] = float(mu_g)
             import os as _os
             if _os.environ.get("MACE_PB_DEBUG"):
                 print(
@@ -1541,12 +1571,21 @@ class PolarMACE(ScaleShiftMACE):
             if use_torch:
                 layer = result["rho_layer_z"].to(positions.dtype)
                 height_g = float(result["height"])
+                # features/energy always consume the DETACHED profile: the
+                # energy graph feeds the force computation (autograd w.r.t.
+                # positions with create_graph), which must not traverse the
+                # PB adjoint. Observables get the grad-carrying copies below.
                 prof_feat[g] = resample_profile_periodic_torch(
                     layer, height_g, 1024, False
-                )
+                ).detach()
                 prof_energy[g] = resample_profile_periodic_torch(
                     layer, height_g, 512, True
-                )
+                ).detach()
+                if prof_feat_grad is not None:
+                    prof_feat_grad[g] = (
+                        resample_profile_periodic_torch(layer, height_g, 1024, False)
+                        if diff_grad else prof_feat[g]
+                    )
                 if solved_ok and sid is not None:
                     self._pb_profile_cache[sid] = {
                         "feat": prof_feat[g].detach().to(torch.float32).cpu(),
@@ -1569,13 +1608,16 @@ class PolarMACE(ScaleShiftMACE):
         layer_mean = solvent_mu / torch.where(
             torch.abs(q_ion) > 1.0e-12, q_ion, torch.full_like(q_ion, 1.0e-12)
         )
-        return {
+        out = {
             "profile_features": prof_feat,
             "profile_energy": prof_energy,
             "q_ion": q_ion,
             "layer_mean": layer_mean,
             "solvent_mu": solvent_mu,
         }
+        if prof_feat_grad is not None:
+            out["profile_features_grad"] = prof_feat_grad
+        return out
 
     def forward(
         self,
@@ -1905,7 +1947,7 @@ class PolarMACE(ScaleShiftMACE):
                 positions=positions,
                 sigma_g=self.solvent_sigma_g,
                 axis=self.solvent_potential_axis,
-                solvent_mu_override=pb_solvent_data["solvent_mu"],
+                solvent_mu_override=pb_solvent_data["solvent_mu"].detach(),
             )
         else:
             (
@@ -2374,9 +2416,12 @@ class PolarMACE(ScaleShiftMACE):
                 else None
             ),
         )
+        # ENERGY path: the solvent dipole enters detached (the PB adjoint must
+        # not sit in the force graph; energy/forces keep the lagged-SCF
+        # treatment). Observables below use the grad-carrying total_dipole.
         compensation_slab_correction_energy = _slab_dipole_correction_delta(
             explicit_dipole=explicit_dipole,
-            total_dipole=total_dipole,
+            total_dipole=explicit_dipole + solvent_dipole.detach(),
             volume=data["volume"],
             pbc=data["pbc"].view(-1, 3),
             axis=self.solvent_potential_axis,
@@ -2422,7 +2467,8 @@ class PolarMACE(ScaleShiftMACE):
         # true profile instead of a gaussian reconstructed from solv_center.
         # Zeros when not in PB mode (the gaussian path is exact there).
         solvent_profile_features_out = (
-            pb_solvent_data["profile_features"]
+            pb_solvent_data.get("profile_features_grad",
+                                pb_solvent_data["profile_features"])
             if pb_solvent_data is not None
             else positions.new_zeros((num_graphs, 1024))
         )

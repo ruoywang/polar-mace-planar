@@ -1150,7 +1150,7 @@ class PBTorchBackend:
             "layer_mean": layer_mean,
             "mu_bound": mu_bound,
         }
-        return {
+        out = {
             "z": z,
             "rho_ion_z": rho_ion_z,
             "rho_bound_z": rho_bound_z,
@@ -1161,6 +1161,16 @@ class PBTorchBackend:
             "mu_bound": mu_bound,
             "rms_last": rms_last,
         }
+        if rho_ion_z.requires_grad:
+            # tensor moments for the differentiable path (values identical to
+            # the float versions above; these carry the gradient)
+            q_ion_t = rho_ion_z.sum() * dz * area
+            out["q_ion_t"] = q_ion_t
+            out["layer_mean_t"] = (rho_ion_z * z).sum() * dz * area / (
+                q_ion_t if abs(q_ion) > 1.0e-12 else 1.0e-12
+            )
+            out["mu_bound_t"] = (rho_bound_z * z).sum() * dz * area
+        return out
 
 
 def resample_profile_periodic_torch(

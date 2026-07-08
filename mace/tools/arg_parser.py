@@ -576,6 +576,17 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=None,
     )
     parser.add_argument(
+        "--solvent_pb_differentiable",
+        help=(
+            "make the PB solve differentiable in the model density (IFT "
+            "adjoint, FD-verified): potential/fermi/Phi1D losses then train "
+            "the density through the PB physics. Adds ~n_fixsol adjoint "
+            "solves per PB backward. Default off = detached (unchanged)."
+        ),
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--solvent_pb_learn_center_shift",
         help=(
             "PB mode: add a learnable tanh shift to the detached PB solvent "

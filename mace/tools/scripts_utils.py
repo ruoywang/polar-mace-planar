@@ -422,6 +422,9 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["solvent_pb_learn_center_shift"] = getattr(
             model, "solvent_pb_learn_center_shift", False
         )
+        config["solvent_pb_differentiable"] = getattr(
+            model, "solvent_pb_differentiable", False
+        )
         config["solvent_pb_phi_cache_dir"] = getattr(
             model, "solvent_pb_phi_cache_dir", None
         )
