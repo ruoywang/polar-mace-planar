@@ -1,0 +1,430 @@
+<title>Differentiable nonlinear PB — method note — PolarMACE reports</title>
+<style>
+:root{
+  --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6; --good:#0a7a33;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+    --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72;
+    --s1:#3987e5; --s2:#199e70; --s3:#c98500; }
+}
+:root[data-theme="dark"]{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+  --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72;
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; }
+:root[data-theme="light"]{ --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6; --good:#0a7a33;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:17px/1.65 Charter,"Bitstream Charter",Georgia,Cambria,serif;}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+.topbar{display:flex;align-items:baseline;gap:12px;padding:18px 0;border-bottom:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:var(--ink2)}
+.topbar .series{letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.badge{margin-left:auto;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--hair);border-radius:3px;padding:2px 8px;color:var(--muted)}
+h1{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:34px;line-height:1.2;font-weight:650;
+  letter-spacing:-.01em;margin:40px 0 10px;text-wrap:balance}
+.dek{font-size:19px;color:var(--ink2);max-width:68ch;margin:0 0 26px}
+h2{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:21px;font-weight:650;margin:52px 0 12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+p{max-width:68ch;margin:0 0 14px}
+code{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;font-size:.86em;
+  background:var(--code-bg);border-radius:3px;padding:1px 5px}
+var{font-style:italic;font-family:Charter,Georgia,serif}
+.eq{background:var(--card);border:1px solid var(--hair);border-radius:6px;
+  padding:14px 20px;margin:16px 0;font-size:17.5px;line-height:2.0;max-width:640px;overflow-x:auto}
+.eq .lbl{float:right;color:var(--muted);font-size:13px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+.eq sub,.eq sup{font-size:.68em}
+.fig{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:20px;margin:20px 0;position:relative}
+.fig .cap{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--ink2);margin-top:10px;max-width:78ch}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--hair);
+  border-radius:5px;padding:8px 10px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;
+  box-shadow:0 2px 10px rgba(0,0,0,.12);display:none;z-index:2;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:12.5px;color:var(--ink2);margin:0 0 8px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.note{border-left:3px solid var(--accent);padding:2px 0 2px 16px;color:var(--ink2);margin:18px 0;max-width:66ch}
+ol,ul{max-width:68ch;padding-left:22px} li{margin-bottom:8px}
+.d-lab{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12.5px;fill:var(--ink)}
+.d-sub{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:10.5px;fill:var(--ink2)}
+.d-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px;fill:var(--ink2)}
+.footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--muted)}
+a{color:var(--accent-ink)} a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+<div class="wrap">
+  <div class="topbar"><span class="series">PolarMACE · PB solvent reports · 3/3</span>
+    <a class="badge" href="./index.html" style="text-decoration:none;color:var(--muted)">← Reports index</a></div>
+
+  <h1>Exact gradients through the nonlinear PB solve</h1>
+  <p class="dek">An implicit-function adjoint for the converged Poisson–Boltzmann solve,
+  including the dipole self-consistency loop, verified against finite differences on the
+  production grid — with the forward solution bit-identical. Status: infrastructure behind a
+  flag; training benefit not yet established.</p>
+
+  <h2><span class="no">1</span>What has to be differentiated</h2>
+  <p>The model's density coefficients <var>c</var> reach the solvent observables through a
+  pipeline whose middle is an iterative solver. Everything outside the solve is ordinary
+  autograd; the solve itself gets an implicit derivative:</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 880 235" width="100%" role="img" aria-label="Forward pipeline and backward paths">
+      <defs>
+        <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink2)"/></marker>
+        <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+      </defs>
+      <g>
+        <rect x="8"  y="60" width="92"  height="46" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="54" y="80" text-anchor="middle" class="d-lab">coeffs <tspan font-style="italic">c</tspan></text>
+        <text x="54" y="96" text-anchor="middle" class="d-sub">model output</text>
+
+        <rect x="132" y="60" width="118" height="46" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="191" y="80" text-anchor="middle" class="d-lab">density ρ(c)</text>
+        <text x="191" y="96" text-anchor="middle" class="d-sub">spectral assembly</text>
+
+        <rect x="282" y="18" width="150" height="42" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="357" y="36" text-anchor="middle" class="d-lab">cavity s(nₑ)</text>
+        <text x="357" y="51" text-anchor="middle" class="d-sub">nₑ = neutral − ρ</text>
+
+        <rect x="282" y="106" width="150" height="42" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="357" y="124" text-anchor="middle" class="d-lab">source φ_sol(ρ)</text>
+        <text x="357" y="139" text-anchor="middle" class="d-sub">φ_base − Hartree(ρ) + cvdip</text>
+
+        <rect x="474" y="55" width="150" height="56" rx="6" fill="var(--code-bg)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="549" y="78" text-anchor="middle" class="d-lab" font-weight="700">PB solve  R(φ)=0</text>
+        <text x="549" y="95" text-anchor="middle" class="d-sub">Newton–PCG → φ*</text>
+
+        <rect x="662" y="60" width="100" height="46" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="712" y="80" text-anchor="middle" class="d-lab">n_ion, n_b</text>
+        <text x="712" y="96" text-anchor="middle" class="d-sub">fields(φ*)</text>
+
+        <rect x="792" y="60" width="80" height="46" rx="6" fill="none" stroke="var(--hair)"/>
+        <text x="832" y="80" text-anchor="middle" class="d-lab">ρ_ion(z)</text>
+        <text x="832" y="96" text-anchor="middle" class="d-sub">observables</text>
+
+        <line x1="100" y1="83" x2="128" y2="83" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="250" y1="72" x2="278" y2="44" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="250" y1="94" x2="278" y2="122" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="432" y1="39" x2="470" y2="68" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="432" y1="127" x2="470" y2="98" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="624" y1="83" x2="658" y2="83" stroke="var(--ink2)" marker-end="url(#af)"/>
+        <line x1="762" y1="83" x2="788" y2="83" stroke="var(--ink2)" marker-end="url(#af)"/>
+
+        <path d="M712,110 C712,180 560,196 552,196" fill="none" stroke="var(--accent)"
+              stroke-dasharray="5,4" marker-end="url(#ab)" transform="translate(0,-8)"/>
+        <text x="646" y="196" class="d-mono" fill="var(--accent)">fixsol loop: dipole(φ*ₖ) → cvdipₖ₊₁</text>
+
+        <path d="M549,115 C549,160 380,168 300,168 C240,168 200,140 194,112" fill="none"
+              stroke="var(--accent)" stroke-dasharray="5,4" marker-end="url(#ab)"/>
+        <text x="300" y="186" class="d-mono" fill="var(--accent)">backward: one adjoint solve Jλ = ∂L/∂φ*, then VJPs</text>
+      </g>
+    </svg>
+    <div class="cap">Forward pipeline (solid) and the two loops that make it non-trivial:
+    the fixsol dipole self-consistency (the solvent's own dipole feeds back into the source)
+    and the backward path (dashed), which never re-enters the solver iterations — it solves
+    one linear adjoint system at the converged solution.</div>
+  </div>
+
+  <h2><span class="no">2</span>Why not backpropagate through the iterations</h2>
+  <p>The gradient of a converged solution depends only on the solution and the operator —
+  not on the path the solver took. Unrolling the Newton–PCG iterations is also numerically
+  unstable: each CG step divides by residual inner products,</p>
+  <div class="eq"><span class="lbl">CG recurrences</span>
+    α<sub>k</sub> = ⟨<var>r</var><sub>k</sub>, <var>z</var><sub>k</sub>⟩ / ⟨<var>p</var><sub>k</sub>, <var>A p</var><sub>k</sub>⟩ ,&emsp;
+    β<sub>k</sub> = ⟨<var>r</var><sub>k+1</sub>, <var>z</var><sub>k+1</sub>⟩ / ⟨<var>r</var><sub>k</sub>, <var>z</var><sub>k</sub>⟩
+  </div>
+  <p>whose denominators vanish as CG converges; differentiating them multiplies the backward
+  pass by their inverse squares. Measured: unrolled gradients reach 10<sup>56</sup> once the
+  iteration count grows (small, quickly-converging problems can appear to work — a trap).</p>
+
+  <h2><span class="no">3</span>The implicit-function adjoint</h2>
+  <p>Let <var>p</var> stand for the solver inputs (φ_sol, s_ion, s_diel), all differentiable
+  functions of <var>c</var>. At the converged solution the residual vanishes identically in
+  <var>p</var>, so its total derivative is zero:</p>
+  <div class="eq"><span class="lbl">implicit function theorem</span>
+    R(φ*(<var>p</var>), <var>p</var>) = 0 &emsp;⇒&emsp;
+    <var>J</var>&hairsp;·&hairsp;dφ*/d<var>p</var> = − ∂R/∂<var>p</var> ,
+    &emsp; <var>J</var> ≡ ∂R/∂φ&hairsp;|<sub>φ*</sub>
+  </div>
+  <p>For a scalar loss <var>L</var>(φ*, <var>p</var>) one never forms dφ*/d<var>p</var>;
+  a single <em>adjoint</em> solve suffices:</p>
+  <div class="eq"><span class="lbl">adjoint form</span>
+    <var>J</var><sup>T</sup>λ = ∂L/∂φ* &emsp;⇒&emsp;
+    dL/d<var>p</var> = ∂L/∂<var>p</var> − (∂R/∂<var>p</var>)<sup>T</sup>λ
+  </div>
+  <p>Everything on the right is one linear solve plus vector–Jacobian products of the residual
+  — evaluated in real space, which sidesteps the solver's half-spectrum and G=0 bookkeeping
+  entirely. Measured properties of <var>J</var> (dense oracle on a small grid):
+  symmetric to 10<sup>−16</sup>, negative definite, condition number ≈ 4.6×10².
+  So the SPD system (−<var>J</var>)λ = −∂L/∂φ* is solved by preconditioned CG.</p>
+
+  <h2><span class="no">4</span>Preconditioning — the charge mode is the trap</h2>
+  <p>The residual's G=0 row is not a gauge freedom: it carries the charge-neutrality
+  constraint, R<sub>G=0</sub> = ⟨n_b+n_ion⟩ − q_sol, and couples to every charge-like input
+  direction. The forward solver's inverse-Laplacian preconditioner vanishes exactly there,
+  so plain PCG can never reduce the constant-mode residual — λ converges everywhere
+  <em>except</em> in the one mode that charge-type gradients need. The fix is a one-number
+  augmentation, computed with a single extra operator application:</p>
+  <div class="eq"><span class="lbl">preconditioner</span>
+    M<sup>−1</sup> = &nbsp;EDEPS / (4π²G²V)&nbsp; ⊕ &nbsp;m₀₀ ,
+    &emsp; m₀₀ = 1 / |⟨e, (−J)e⟩| , &nbsp; e = const.
+  </div>
+  <div class="fig">
+    <svg viewBox="0 0 880 210" width="100%" role="img" aria-label="Adjoint solver residual by configuration">
+      <g id="pcgbars"></g>
+    </svg>
+    <div class="cap">Final adjoint relative residual (log scale) for four solver
+    configurations on the production grid, with iteration counts. Without the constant-mode
+    term the solve stalls — and the stalled component is exactly the charge mode, which is why
+    monopole-coefficient gradients were the ones that came out wrong.</div>
+  </div>
+
+  <h2><span class="no">5</span>The Jacobian is already in the solver</h2>
+  <p>The Newton iteration linearizes the same residual, so its tangent operator
+  <var>L</var><sub>op</sub> (dielectric tensor response + Boltzmann ion response + Laplacian)
+  <em>is</em> the exact Jacobian, up to the FFT change of basis:</p>
+  <div class="eq"><span class="lbl">analytic Jacobian</span>
+    <var>J v</var> = − F<sup>−1</sup>&hairsp;<var>L</var><sub>op</sub>&hairsp;F&hairsp;<var>v</var>
+  </div>
+  <p>Probed against the autograd vector–Jacobian product on random vectors: relative
+  difference 3×10<sup>−16</sup>. Applying it costs a few FFTs — about 100× less than
+  rebuilding an autograd graph per CG iteration — and a one-time runtime self-check per grid
+  guards the identity, falling back to the autograd operator on mismatch.</p>
+
+  <h2><span class="no">6</span>Differentiating the dipole loop exactly</h2>
+  <p>The solver runs a short fixed-point loop for the slab dipole correction: each step feeds
+  the solvent dipole of the previous solution back into the source,</p>
+  <div class="eq"><span class="lbl">fixsol step k</span>
+    dip<sub>k</sub> = d<sub>val</sub>(ρ) + d<sub>sol</sub>(φ*<sub>k−1</sub>) − q<sub>sol</sub>&hairsp;z<sub>c</sub> ,&emsp;
+    d̄<sub>k</sub> = d̄<sub>k−1</sub> + α(r<sub>k</sub>)&hairsp;r<sub>k</sub> ,&emsp;
+    cvdip<sub>k</sub> = Ĉ(z)&hairsp;d̄<sub>k</sub>
+  </div>
+  <p>with r<sub>k</sub> = dip<sub>k</sub> − d̄<sub>k−1</sub>. The loop is finite (5 steps), so
+  its exact derivative is the chain over the steps — replayed with linearizations anchored at
+  the captured forward values, which are exact because every link (Ewald field, cdipol ramp,
+  mixer update) is linear <em>given</em> the captured state. The one subtlety is the adaptive
+  mixing gain: α is itself a function of the residual, and for |r| &gt; 1 (α = α₀/r²) the
+  true local derivative flips sign,</p>
+  <div class="eq"><span class="lbl">mixer gain — the last bug</span>
+    g ≡ ∂d̄<sub>k</sub>/∂dip<sub>k</sub> = ∂[α(r)r]/∂r =
+    &#123; +α &nbsp;(|r| ≤ 1) ;&emsp; −α &nbsp;(|r| &gt; 1) &#125;
+  </div>
+  <div class="fig">
+    <svg viewBox="0 0 880 200" width="100%" role="img" aria-label="Mixer gain function"><g id="mixplot"></g></svg>
+    <div class="cap">The mixer's local gain g(r) (blue) versus the naive assumption g = α
+    (yellow, dashed). For |r| &gt; 1 the true derivative is <em>negative</em>; using +α there
+    flipped the sign of the whole dipole-feedback gradient — reproducing exactly the observed
+    symmetric error (+0.058 computed vs −0.064 true). Freezing the loop instead is not
+    acceptable: the feedback flips the sign of charge-mode gradients.</div>
+  </div>
+
+  <h2><span class="no">7</span>Verification</h2>
+  <p>Central finite differences on the production setup (100×100×300 grid, real DFT baseline
+  cache, real structure, forward tolerance 10<sup>−8</sup>). A like-for-like harness freezes
+  the dipole correction in <em>both</em> the gradient and the FD probe to test the adjoint
+  core in isolation; the full chain is then tested against unfrozen FD. Two figures carry the
+  result:</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 880 250" width="100%" role="img" aria-label="Gradient error by debugging stage"><g id="journey"></g></svg>
+    <div class="cap">Monopole-coefficient gradient error |ratio − 1| (log scale) at each stage
+    of the campaign. Two structural fixes carry almost all of it: the constant-mode
+    preconditioner term (adjoint core → exact) and the mixer's local derivative
+    (full chain → exact).</div>
+  </div>
+
+  <div class="fig" id="parityfig">
+    <div class="legend" id="parlegend"></div>
+    <svg id="parity" viewBox="0 0 880 420" width="100%" role="img" aria-label="Parity plot gradient vs finite difference"></svg>
+    <div class="tip" id="ptip"></div>
+    <div class="cap">Parity: every verified gradient against its finite-difference value
+    (log–log, magnitudes spanning seven orders). All points sit on the diagonal; worst
+    deviation 2%. Forward output stayed bit-identical to the detached path
+    (max |Δρ_ion| = 0.000×10⁰) at every stage. Hover for values.</div>
+  </div>
+
+  <h2><span class="no">8</span>Cost and status</h2>
+  <div class="fig">
+    <svg viewBox="0 0 880 150" width="100%" role="img" aria-label="Solve epoch cost with and without gradients"><g id="costbars"></g></svg>
+    <div class="cap">Measured training cost (3×A100, fixsol=5): the backward adds five adjoint
+    solves per structure (~100 PCG iterations each). Unused reduction levers: a single coupled
+    adjoint at fixsol=5, looser adjoint tolerance, gradients on alternate refreshes only.</div>
+  </div>
+  <div class="note">Scope by design: the gradient feeds the electrostatic observables
+  (potential, Fermi, Φ<sub>1D</sub>). Energy and forces stay on the detached path — the
+  adjoint must not enter the force graph (second-order autograd) — so E/F keep the lagged
+  self-consistent treatment.</div>
+  <p>Available behind <code>--solvent_pb_differentiable</code> (default off, byte-identical).
+  A training smoke ran 2,843 adjoint solves through DDP backward without incident. Whether the
+  gradient improves the potential-family observables is an open A/B — deprioritized after the
+  attribution study (report 2/3) showed the scalar potential converges equally well without
+  it; the candidate benefit is confined to the Φ<sub>1D</sub>/Fermi gap (effect A).</p>
+
+  <div class="footer">PolarMACE PB solvent reports · <a href="./pb-training-engineering.html">1 Training engineering</a> · <a href="./phi1d-attribution.html">2 &Phi;<sub>1D</sub> attribution</a> · <a href="./differentiable-pb.html">3 Differentiable PB note</a> · <a href="./index.html">index</a></div>
+</div>
+<script>
+(function(){
+  const NS="http://www.w3.org/2000/svg";
+  function el(t,a){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;}
+  function txt(g,x,y,s,attrs){const t=el("text",Object.assign({x:x,y:y},attrs||{}));t.textContent=s;g.appendChild(t);return t;}
+  const MONO='ui-monospace,Menlo,monospace', SANS='-apple-system,Segoe UI,Roboto,sans-serif';
+
+  /* ---- PCG residual bars (log scale) ---- */
+  (function(){
+    const g=document.getElementById("pcgbars");
+    const data=[
+      {n:"unpreconditioned BiCGSTAB",v:4.0e-3,it:"199 iters, stalled"},
+      {n:"inverse-Laplacian only",v:1.1e-2,it:"399 iters, stalled"},
+      {n:"+ constant-mode m₀₀",v:9.9e-9,it:"127 iters"},
+      {n:"warm-started λ (state unchanged)",v:8.4e-7,it:"9 iters"}
+    ];
+    const X0=300,X1=830,T=1e-9,B=1;   // log range 1e-9 .. 1
+    const px=v=>X0+(Math.log10(v)-Math.log10(T))/(Math.log10(B)-Math.log10(T))*(X1-X0);
+    [1e-9,1e-6,1e-3,1].forEach(v=>{
+      g.appendChild(el("line",{x1:px(v),x2:px(v),y1:14,y2:172,stroke:"var(--hair)"}));
+      txt(g,px(v),190,v.toExponential(0).replace("e+0","").replace("e-","e−"),
+        {"text-anchor":"middle",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    });
+    data.forEach((d,i)=>{
+      const y=22+i*40;
+      txt(g,290,y+13,d.n,{"text-anchor":"end",fill:"var(--ink2)","font-size":"12.5","font-family":SANS});
+      g.appendChild(el("rect",{x:px(d.v),y:y,width:Math.max(2,px(1)-px(d.v)),height:18,rx:3,
+        fill: d.v<1e-6 ? "var(--accent)" : "var(--muted)", opacity: d.v<1e-6?1:.55}));
+      txt(g,px(d.v)-6,y+13,d.v.toExponential(1).replace("e-","e−")+"  ·  "+d.it,
+        {"text-anchor":"end",fill:"var(--ink)","font-size":"11.5","font-family":MONO});
+    });
+  })();
+
+  /* ---- mixer gain plot ---- */
+  (function(){
+    const g=document.getElementById("mixplot");
+    const X0=70,X1=830,Y0=160,Y1=20,R0=-4,R1=4,G0=-0.8,G1=0.8;
+    const sx=r=>X0+(r-R0)/(R1-R0)*(X1-X0), sy=v=>Y0+(v-G0)/(G1-G0)*(Y1-Y0);
+    g.appendChild(el("line",{x1:X0,x2:X1,y1:sy(0),y2:sy(0),stroke:"var(--hair)"}));
+    [-0.6,0,0.6].forEach(v=>txt(g,X0-8,sy(v)+4,v.toFixed(1),
+      {"text-anchor":"end",fill:"var(--muted)","font-size":"11","font-family":MONO}));
+    [-4,-2,-1,0,1,2,4].forEach(r=>{
+      g.appendChild(el("line",{x1:sx(r),x2:sx(r),y1:sy(0)-3,y2:sy(0)+3,stroke:"var(--muted)"}));
+      txt(g,sx(r),sy(0)+18,r,{"text-anchor":"middle",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    });
+    txt(g,X1,sy(0)+34,"residual r",{"text-anchor":"end",fill:"var(--ink2)","font-size":"12","font-family":SANS});
+    // naive g = alpha
+    let dn="";
+    for(let r=R0;r<=R1+1e-9;r+=0.05){const a=Math.abs(r)<=1?0.6:0.6/(r*r);
+      dn+=(dn?"L":"M")+sx(r).toFixed(1)+","+sy(a).toFixed(1);}
+    g.appendChild(el("path",{d:dn,fill:"none",stroke:"var(--s3)","stroke-width":2,"stroke-dasharray":"5,4"}));
+    // true gain
+    let dt="";
+    for(let r=R0;r<=R1+1e-9;r+=0.05){const gv=Math.abs(r)<=1?0.6:-0.6/(r*r);
+      dt+=(dt?"L":"M")+sx(r).toFixed(1)+","+sy(gv).toFixed(1);}
+    g.appendChild(el("path",{d:dt,fill:"none",stroke:"var(--s1)","stroke-width":2.5}));
+    txt(g,sx(2.1),sy(0.24),"naive: g = α",{fill:"var(--s3)","font-size":"12","font-family":SANS,"font-weight":"600"});
+    txt(g,sx(2.1),sy(-0.30),"true: g = −α for |r|>1",{fill:"var(--s1)","font-size":"12","font-family":SANS,"font-weight":"600"});
+  })();
+
+  /* ---- debugging journey (log |ratio-1|) ---- */
+  (function(){
+    const g=document.getElementById("journey");
+    const data=[
+      {n:"spectral adjoint (reused forward G=0 logic)",v:3.5e4},
+      {n:"real-space matrix-free VJP, no preconditioner",v:4.8e1},
+      {n:"+ inverse-Laplacian PCG (charge mode stalled)",v:8.3e1},
+      {n:"+ constant-mode m₀₀  →  adjoint core exact",v:1e-4},
+      {n:"full chain, naive mixer gain (+α)",v:3.2},
+      {n:"+ true mixer gain (±α)  →  full chain exact",v:1e-4}
+    ];
+    const X0=330,X1=830,T=1e-4,B=1e5;
+    const px=v=>X0+(Math.log10(v)-Math.log10(T))/(Math.log10(B)-Math.log10(T))*(X1-X0);
+    [1e-4,1e-2,1,1e2,1e4].forEach(v=>{
+      g.appendChild(el("line",{x1:px(v),x2:px(v),y1:12,y2:222,stroke:"var(--hair)"}));
+      txt(g,px(v),238,v.toExponential(0).replace("e+","e").replace("e-","e−"),
+        {"text-anchor":"middle",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    });
+    data.forEach((d,i)=>{
+      const y=18+i*34, exact=d.v<1e-3;
+      txt(g,320,y+12,d.n,{"text-anchor":"end",fill:"var(--ink2)","font-size":"12","font-family":SANS});
+      g.appendChild(el("rect",{x:X0,y:y,width:Math.max(2,px(d.v)-X0),height:16,rx:3,
+        fill: exact?"var(--accent)":"var(--muted)",opacity:exact?1:.55}));
+      txt(g,px(d.v)+6,y+12,exact?"≤1e−4 (FD floor)":d.v.toExponential(1).replace("e+","e"),
+        {fill:"var(--ink)","font-size":"11.5","font-family":MONO});
+    });
+  })();
+
+  /* ---- parity plot ---- */
+  (function(){
+    const svg=document.getElementById("parity"), fig=document.getElementById("parityfig"),
+          tip=document.getElementById("ptip");
+    const PTS=[
+      {g:"full chain dL/dc", c:"var(--s1)", pts:[
+        {n:"monopole c[0,0,0]", fd:3.85291e-2, ag:3.85292e-2},
+        {n:"multipole c[0,0,4]", fd:2.33588e-5, ag:2.34291e-5},
+        {n:"multipole c[5,2,6]", fd:9.14401e-4, ag:9.14330e-4}]},
+      {g:"adjoint core (frozen loop)", c:"var(--s2)", pts:[
+        {n:"monopole", fd:2.58537e-2, ag:2.58531e-2},
+        {n:"multipole", fd:1.63835e-5, ag:1.67421e-5},
+        {n:"multipole", fd:6.20284e-4, ag:6.20845e-4}]},
+      {g:"scalar sub-chain", c:"var(--s3)", pts:[
+        {n:"electron dipole ∂d_val/∂c", fd:1.51906e1, ag:1.51906e1},
+        {n:"loop input ∂dip₂/∂c", fd:1.37426e1, ag:1.37426e1},
+        {n:"feedback ∂d_sol/∂c", fd:1.44801, ag:1.44802}]}
+    ];
+    const W=880,H=420,M={l:80,r:30,t:16,b:56},LT=-5.2,LB=1.6;
+    const sx=v=>M.l+(Math.log10(v)-LT)/(LB-LT)*(W-M.l-M.r);
+    const sy=v=>H-M.b-(Math.log10(v)-LT)/(LB-LT)*(H-M.t-M.b);
+    for(let e=-5;e<=1;e++){
+      const v=Math.pow(10,e);
+      svg.appendChild(el("line",{x1:sx(v),x2:sx(v),y1:M.t,y2:H-M.b,stroke:"var(--hair)"}));
+      svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:sy(v),y2:sy(v),stroke:"var(--hair)"}));
+      txt(svg,sx(v),H-M.b+18,"1e"+e,{"text-anchor":"middle",fill:"var(--muted)","font-size":"11","font-family":MONO});
+      txt(svg,M.l-8,sy(v)+4,"1e"+e,{"text-anchor":"end",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    }
+    txt(svg,(M.l+W-M.r)/2,H-10,"|finite difference|  (eV per unit coefficient)",
+      {"text-anchor":"middle",fill:"var(--ink2)","font-size":"12.5","font-family":SANS});
+    const yl=txt(svg,0,0,"|implicit-function gradient|",
+      {fill:"var(--ink2)","font-size":"12.5","font-family":SANS,"text-anchor":"middle"});
+    yl.setAttribute("transform","translate(20,"+((M.t+H-M.b)/2)+") rotate(-90)");
+    svg.appendChild(el("line",{x1:sx(Math.pow(10,LT)),y1:sy(Math.pow(10,LT)),
+      x2:sx(Math.pow(10,LB)),y2:sy(Math.pow(10,LB)),stroke:"var(--muted)","stroke-width":1,"stroke-dasharray":"4,4"}));
+    const lg=document.getElementById("parlegend");
+    PTS.forEach(G=>{
+      const sp=document.createElement("span");
+      sp.innerHTML='<i style="background:'+G.c+'"></i>'+G.g; lg.appendChild(sp);
+      G.pts.forEach(p=>{
+        const c=el("circle",{cx:sx(p.fd),cy:sy(p.ag),r:6,fill:G.c,stroke:"var(--card)","stroke-width":2,tabindex:0});
+        c.addEventListener("mousemove",ev=>{
+          tip.innerHTML="<b>"+G.g+"</b><br>"+p.n+"<br>FD "+p.fd.toExponential(3)+
+            "<br>IFT "+p.ag.toExponential(3)+"<br>ratio "+(p.ag/p.fd).toFixed(4);
+          tip.style.display="block";
+          const fr=fig.getBoundingClientRect();
+          let tx=ev.clientX-fr.left+14, ty=ev.clientY-fr.top+6;
+          if(tx+190>fr.width) tx-=210; tip.style.left=tx+"px"; tip.style.top=ty+"px";
+        });
+        c.addEventListener("mouseleave",()=>tip.style.display="none");
+        svg.appendChild(c);
+      });
+    });
+  })();
+
+  /* ---- cost bars ---- */
+  (function(){
+    const g=document.getElementById("costbars");
+    const X0=210,X1=800,MAX=30;
+    const px=m=>X0+m/MAX*(X1-X0);
+    txt(g,200,36,"detached (forward only)",{"text-anchor":"end",fill:"var(--ink2)","font-size":"12.5","font-family":SANS});
+    g.appendChild(el("rect",{x:X0,y:22,width:px(7.5)-X0,height:20,rx:3,fill:"var(--accent)"}));
+    txt(g,px(7.5)+8,36,"7.5 min / solve epoch",{fill:"var(--ink)","font-size":"11.5","font-family":MONO});
+    txt(g,200,86,"differentiable (fwd + adjoints)",{"text-anchor":"end",fill:"var(--ink2)","font-size":"12.5","font-family":SANS});
+    g.appendChild(el("rect",{x:X0,y:72,width:px(7.5)-X0,height:20,rx:3,fill:"var(--accent)"}));
+    g.appendChild(el("rect",{x:px(7.5)+2,y:72,width:px(29)-px(7.5)-2,height:20,rx:3,fill:"var(--accent)",opacity:.45}));
+    txt(g,px(29)+8,86,"29 min  (backward ≈ 3× forward)",{fill:"var(--ink)","font-size":"11.5","font-family":MONO});
+    txt(g,X0,124,"reuse epochs unaffected (~1 min); amortized over the refresh schedule: ×2.8 per epoch",
+      {fill:"var(--ink2)","font-size":"12","font-family":SANS});
+  })();
+})();
+</script>

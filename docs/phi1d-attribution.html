@@ -1,0 +1,237 @@
+<title>Where the 1-D potential error comes from — PolarMACE reports</title>
+<style>
+:root{
+  --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; --s5:#4a3aa7;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+    --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35;
+    --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; --s5:#9085e9; }
+}
+:root[data-theme="dark"]{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+  --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35;
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; --s5:#9085e9; }
+:root[data-theme="light"]{ --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; --s5:#4a3aa7; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:17px/1.65 Charter,"Bitstream Charter",Georgia,Cambria,serif;}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+.topbar{display:flex;align-items:baseline;gap:12px;padding:18px 0;border-bottom:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:var(--ink2)}
+.topbar .series{letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.badge{margin-left:auto;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--hair);border-radius:3px;padding:2px 8px;color:var(--muted)}
+h1{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:34px;line-height:1.2;font-weight:650;
+  letter-spacing:-.01em;margin:40px 0 10px;text-wrap:balance}
+.dek{font-size:19px;color:var(--ink2);max-width:68ch;margin:0 0 26px}
+h2{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:21px;font-weight:650;margin:52px 0 12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+p{max-width:68ch;margin:0 0 14px}
+code{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;font-size:.86em;
+  background:var(--code-bg);border-radius:3px;padding:1px 5px}
+.tblwrap{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;min-width:620px}
+th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;
+  text-align:left;padding:8px 14px 6px 0;border-bottom:1px solid var(--hair)}
+td{padding:8px 14px 8px 0;border-bottom:1px solid var(--hair)}
+td.num,th.num{text-align:right;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums;font-size:13.5px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:baseline}
+.fig{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:20px;margin:20px 0;position:relative}
+.fig .cap{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--ink2);margin-top:10px;max-width:78ch}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:12.5px;color:var(--ink2);margin:0 0 10px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--hair);
+  border-radius:5px;padding:8px 10px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;
+  box-shadow:0 2px 10px rgba(0,0,0,.12);display:none;z-index:2;white-space:nowrap}
+.tip b{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:11px;color:var(--muted);font-weight:600}
+.note{border-left:3px solid var(--accent);padding:2px 0 2px 16px;color:var(--ink2);margin:18px 0;max-width:66ch}
+ul{max-width:68ch;padding-left:22px} li{margin-bottom:7px}
+.eff{display:flex;gap:10px;align-items:baseline;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+.eff .amt{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:15px;font-weight:600;color:var(--accent-ink)}
+.footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--muted)}
+a{color:var(--accent-ink)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+<div class="wrap">
+  <div class="topbar"><span class="series">PolarMACE · PB solvent reports · 2/3</span>
+    <a class="badge" href="./index.html" style="text-decoration:none;color:var(--muted)">← Reports index</a></div>
+
+  <h1>Where the 1-D potential error comes from</h1>
+  <p class="dek">The PB run's 1-D potential profile error (Φ<sub>1D</sub>) plateaus about
+  0.05 eV above the old planar baseline. Five single-variable runs split that gap into three
+  separate effects — none of them a bug in the PB integration.</p>
+
+  <h2><span class="no">1</span>Five controlled runs</h2>
+  <p>All runs: 120 epochs, identical data, loss weights, learning rate and seed;
+  one variable changes at a time. Φ<sub>1D</sub> is scored against the model's actual solvent
+  charge profile (an earlier gaussian-based reconstruction added a small ~0.006 eV metric
+  artifact; planar layers are unaffected by construction).</p>
+
+  <div class="tblwrap"><table>
+    <tr><th>Run</th><th>Solvent</th><th>Sampler</th><th>Feature convention</th><th>Code</th>
+        <th class="num">Φ1D @100</th><th class="num">Fermi @100</th></tr>
+    <tr><td><span class="dot" style="background:var(--s1)"></span>PB</td><td>PB (detached)</td><td>static-shard</td><td>periodic</td><td>current</td>
+        <td class="num">0.115</td><td class="num">0.120</td></tr>
+    <tr><td><span class="dot" style="background:var(--s2)"></span>planar / sampler</td><td>planar</td><td>static-shard</td><td>periodic</td><td>current</td>
+        <td class="num">0.086</td><td class="num">0.074</td></tr>
+    <tr><td><span class="dot" style="background:var(--s3)"></span>planar / shuffle</td><td>planar</td><td>global shuffle</td><td>periodic</td><td>current</td>
+        <td class="num">0.075</td><td class="num">0.063</td></tr>
+    <tr><td><span class="dot" style="background:var(--s4)"></span>isolated conv.</td><td>planar</td><td>global shuffle</td><td>isolated (pre-fix)</td><td>current</td>
+        <td class="num">0.062</td><td class="num">0.052</td></tr>
+    <tr><td><span class="dot" style="background:var(--s5)"></span>legacy baseline</td><td>planar</td><td>global shuffle</td><td>isolated (pre-fix)</td><td>legacy</td>
+        <td class="num">0.060</td><td class="num">0.055</td></tr>
+  </table></div>
+
+  <div class="fig" id="figtraj">
+    <div class="legend" id="legend"></div>
+    <svg id="chart" width="100%" viewBox="0 0 880 380" role="img"
+         aria-label="Phi1D validation error versus epoch for five controlled runs"></svg>
+    <div class="tip" id="tip"></div>
+    <div class="cap">Validation Φ<sub>1D</sub> (eV) vs epoch. The PB spike at epoch 50 is the
+    planar→PB hand-over. Epoch-10 values (0.29–0.54) are cropped for scale. Hover for values;
+    the full data is in the table below.</div>
+  </div>
+
+  <details><summary style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;font-size:13.5px;color:var(--ink2);cursor:pointer">
+  Data table (Φ<sub>1D</sub>, eV)</summary>
+  <div class="tblwrap"><table id="datatable"></table></div></details>
+
+  <h2><span class="no">2</span>Effect A — the PB representation itself</h2>
+  <p class="eff"><span class="amt">≈ 0.029 eV</span><span>PB vs planar, everything else identical</span></p>
+  <p>With code, sampler and supervision identical, PB sits above planar. Numerical probes rule
+  out the integration machinery: for the same layer, the PB-path SCF features match the
+  analytic planar path to ~10⁻⁵ V (against a 2.4 V atom-to-atom span), the 1-D compensation
+  energy to 3×10⁻⁴, and the potential observable exactly.</p>
+  <p>The scalar potential is <em>not</em> the problem. A legacy run with a completely static
+  solvent layer reaches potential RMSE 0.066 eV — the same as PB — showing that lagged
+  self-consistency (layer recomputed from the current density, no gradient) is sufficient for
+  scalar observables. The PB deficit is concentrated in the <em>profile-shaped</em> observable
+  Φ<sub>1D</sub> and in the Fermi level.</p>
+  <div class="note">Mechanism, current picture: the PB profile responds to the evolving density
+  (electrostatic screening), so the residual density fits against a per-structure reference
+  that keeps moving during training; a planar layer's geometry barely moves. Partially open —
+  the differentiable-PB A/B (report 3/3) is the designed test.</div>
+
+  <h2><span class="no">3</span>Effect B — the static-shard sampler</h2>
+  <p class="eff"><span class="amt">≈ 0.011 eV</span><span>sampler on vs global shuffle, planar pair</span></p>
+  <p>Pinning each structure to one rank keeps the φ warm-start cache local (98.6% hit rate,
+  ≈1.7× faster solve epochs, estimated) but reduces gradient diversity — each rank sees ⅓ of
+  the data. The planar pair differing only in the sampler shows a consistent gap at every
+  checkpoint from epoch 30 on.</p>
+  <div class="note">Evidence level: a single-seed pair; not yet replicated, and not yet measured
+  on PB directly. A rank-independent shared φ cache (designed to keep the speed without the
+  sampler) is implemented and under validation.</div>
+
+  <h2><span class="no">4</span>Effect C — the jellium feature convention</h2>
+  <p class="eff"><span class="amt">≈ 0.013 eV</span><span>periodic (corrected) vs isolated (pre-fix)</span></p>
+  <p>Switching the compensation-layer features back to the pre-fix “isolated” convention
+  recovers Φ<sub>1D</sub> to the legacy level (0.062 vs 0.060) — but energy degrades from
+  2.9 to 5.3 meV/atom, and the convention reintroduces the spurious charged-cell parabola
+  that the jellium fix removed, which breaks charge extrapolation. This is a
+  physical-correctness vs training-set-fit trade-off, not a defect: production keeps
+  <code>periodic</code> and accepts the Φ<sub>1D</sub> share.</p>
+
+  <h2><span class="no">5</span>Fermi tracks Φ<sub>1D</sub></h2>
+  <p>The Fermi-level error orders the runs identically (0.120 / 0.074 / 0.063 / 0.052 eV at
+  epoch 100) — one mechanism, not two. Anything that closes the Φ<sub>1D</sub> gap is expected
+  to close the Fermi gap with it.</p>
+
+  <h2><span class="no">6</span>Open items</h2>
+  <ul>
+    <li>Sampler effect measured on PB directly, and shared-cache validation (run in progress).</li>
+    <li>Whether effect A is reducible at all — the differentiable-PB A/B (infrastructure ready,
+        report 3/3) is the designed experiment.</li>
+    <li>Single-seed caveat on effects B and C: magnitudes are ~2–5× the plausible run-to-run
+        noise but have not been replicated.</li>
+  </ul>
+
+  <div class="footer">PolarMACE PB solvent reports · <a href="./pb-training-engineering.html">1 Training engineering</a> · <a href="./phi1d-attribution.html">2 &Phi;<sub>1D</sub> attribution</a> · <a href="./differentiable-pb.html">3 Differentiable PB note</a> · <a href="./index.html">index</a></div>
+</div>
+<script>
+(function(){
+  const SERIES=[
+    {name:"PB", c:"var(--s1)", pts:[[20,.15063],[30,.13651],[40,.11774],[50,.19197],[60,.11503],[70,.12084],[80,.11473],[90,.12516],[100,.11491]]},
+    {name:"planar / sampler", c:"var(--s2)", pts:[[20,.15580],[30,.11524],[40,.11147],[50,.10115],[60,.09959],[70,.09797],[80,.09289],[90,.08824],[100,.08611],[110,.08584],[119,.08442]]},
+    {name:"planar / shuffle", c:"var(--s3)", pts:[[20,.11594],[30,.10175],[40,.09526],[50,.09154],[60,.08744],[70,.08412],[80,.08196],[90,.07904],[100,.07536],[110,.07563],[119,.07231]]},
+    {name:"isolated conv.", c:"var(--s4)", pts:[[20,.17433],[30,.08879],[40,.07942],[50,.07530],[60,.07042],[70,.06698],[80,.06365],[90,.06140],[100,.06152],[110,.06065],[119,.05690]]},
+    {name:"legacy baseline", c:"var(--s5)", pts:[[20,.10867],[30,.10239],[40,.09232],[50,.08555],[60,.07792],[70,.07151],[80,.06512],[90,.06349],[100,.05962]]}
+  ];
+  const W=880,H=380,M={l:56,r:150,t:16,b:40};
+  const X0=20,X1=119,Y0=.05,Y1=.20;
+  const sx=e=>M.l+(e-X0)/(X1-X0)*(W-M.l-M.r);
+  const sy=v=>M.t+(Y1-v)/(Y1-Y0)*(H-M.t-M.b);
+  const svg=document.getElementById("chart");
+  const NS="http://www.w3.org/2000/svg";
+  function el(t,a){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;}
+  // grid + axes
+  for(let v=.05;v<=.201;v+=.025){
+    svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:sy(v),y2:sy(v),stroke:"var(--hair)","stroke-width":1}));
+    const t=el("text",{x:M.l-8,y:sy(v)+4,"text-anchor":"end",fill:"var(--muted)",
+      "font-size":"11.5","font-family":"ui-monospace,Menlo,monospace"});
+    t.textContent=v.toFixed(3); svg.appendChild(t);
+  }
+  for(const e of [20,40,60,80,100,119]){
+    const t=el("text",{x:sx(e),y:H-M.b+18,"text-anchor":"middle",fill:"var(--muted)",
+      "font-size":"11.5","font-family":"ui-monospace,Menlo,monospace"});
+    t.textContent=e; svg.appendChild(t);
+  }
+  const xl=el("text",{x:(M.l+W-M.r)/2,y:H-4,"text-anchor":"middle",fill:"var(--ink2)",
+    "font-size":"12","font-family":"-apple-system,Segoe UI,Roboto,sans-serif"});
+  xl.textContent="epoch"; svg.appendChild(xl);
+  // series
+  SERIES.forEach(s=>{
+    const d=s.pts.map((p,i)=>(i?"L":"M")+sx(p[0]).toFixed(1)+","+sy(p[1]).toFixed(1)).join(" ");
+    svg.appendChild(el("path",{d,fill:"none",stroke:s.c,"stroke-width":2,"stroke-linejoin":"round","stroke-linecap":"round"}));
+    const last=s.pts[s.pts.length-1];
+    svg.appendChild(el("circle",{cx:sx(last[0]),cy:sy(last[1]),r:3.5,fill:s.c,stroke:"var(--card)","stroke-width":2}));
+  });
+  // direct end labels with collision nudge
+  const labels=SERIES.map(s=>{const l=s.pts[s.pts.length-1];return {name:s.name,c:s.c,x:sx(l[0]),y:sy(l[1]),v:l[1]};})
+    .sort((a,b)=>a.y-b.y);
+  for(let i=1;i<labels.length;i++) if(labels[i].y-labels[i-1].y<15) labels[i].y=labels[i-1].y+15;
+  labels.forEach(L=>{
+    const t=el("text",{x:L.x+10,y:L.y+4,fill:L.c,"font-size":"12",
+      "font-family":"-apple-system,Segoe UI,Roboto,sans-serif","font-weight":"600"});
+    t.textContent=L.name+" "+L.v.toFixed(3); svg.appendChild(t);
+  });
+  // legend
+  const lg=document.getElementById("legend");
+  SERIES.forEach(s=>{const sp=document.createElement("span");
+    sp.innerHTML='<i style="background:'+s.c+'"></i>'+s.name; lg.appendChild(sp);});
+  // crosshair + tooltip
+  const cross=el("line",{y1:M.t,y2:H-M.b,stroke:"var(--muted)","stroke-width":1,
+    "stroke-dasharray":"3,3",visibility:"hidden"});
+  svg.appendChild(cross);
+  const tip=document.getElementById("tip"), fig=document.getElementById("figtraj");
+  const EPOCHS=[20,30,40,50,60,70,80,90,100,110,119];
+  svg.addEventListener("mousemove",ev=>{
+    const r=svg.getBoundingClientRect(), fx=(ev.clientX-r.left)*(W/r.width);
+    if(fx<M.l||fx>W-M.r){cross.setAttribute("visibility","hidden");tip.style.display="none";return;}
+    const eRaw=X0+(fx-M.l)/(W-M.l-M.r)*(X1-X0);
+    let e=EPOCHS[0]; for(const c of EPOCHS) if(Math.abs(c-eRaw)<Math.abs(e-eRaw)) e=c;
+    cross.setAttribute("x1",sx(e)); cross.setAttribute("x2",sx(e)); cross.setAttribute("visibility","visible");
+    let html="<b>EPOCH "+e+"</b><br>";
+    SERIES.forEach(s=>{const p=s.pts.find(q=>q[0]===e);
+      if(p) html+='<span style="color:'+s.c+'">●</span> '+p[1].toFixed(3)+"  "+s.name+"<br>";});
+    tip.innerHTML=html; tip.style.display="block";
+    const fr=fig.getBoundingClientRect();
+    let tx=ev.clientX-fr.left+16, ty=ev.clientY-fr.top+8;
+    if(tx+190>fr.width) tx-=210; tip.style.left=tx+"px"; tip.style.top=ty+"px";
+  });
+  svg.addEventListener("mouseleave",()=>{cross.setAttribute("visibility","hidden");tip.style.display="none";});
+  // data table
+  const tb=document.getElementById("datatable");
+  let hd="<tr><th>epoch</th>"; SERIES.forEach(s=>hd+='<th class="num">'+s.name+"</th>"); tb.innerHTML=hd+"</tr>";
+  EPOCHS.forEach(e=>{let row="<tr><td class=\"num\">"+e+"</td>";
+    SERIES.forEach(s=>{const p=s.pts.find(q=>q[0]===e);row+='<td class="num">'+(p?p[1].toFixed(4):"—")+"</td>";});
+    tb.innerHTML+=row+"</tr>";});
+})();
+</script>

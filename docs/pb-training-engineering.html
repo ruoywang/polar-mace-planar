@@ -1,0 +1,282 @@
+<title>Training with a nonlinear PB solvent — PolarMACE reports</title>
+<style>
+:root{
+  --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6;
+  --good:#0a7a33; --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+    --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72;
+    --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; }
+}
+:root[data-theme="dark"]{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+  --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72;
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; }
+:root[data-theme="light"]{ --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6; --good:#0a7a33;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:17px/1.65 Charter,"Bitstream Charter",Georgia,Cambria,serif;}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+.topbar{display:flex;align-items:baseline;gap:12px;padding:18px 0;border-bottom:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:var(--ink2)}
+.topbar .series{letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.badge{margin-left:auto;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--hair);border-radius:3px;padding:2px 8px;color:var(--muted)}
+h1{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:34px;line-height:1.2;font-weight:650;letter-spacing:-.01em;margin:40px 0 10px;text-wrap:balance}
+.dek{font-size:19px;color:var(--ink2);max-width:68ch;margin:0 0 26px}
+h2{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:21px;font-weight:650;
+  letter-spacing:-.005em;margin:52px 0 12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+p{max-width:68ch;margin:0 0 14px}
+p+p{margin-top:2px}
+code,.mono{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;font-size:.86em;
+  background:var(--code-bg);border-radius:3px;padding:1px 5px}
+.statrow{display:flex;flex-wrap:wrap;gap:12px;margin:26px 0 8px}
+.stat{flex:1 1 150px;background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:14px 16px}
+.stat .v{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:22px;font-weight:600;
+  color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.stat .k{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12px;color:var(--muted);
+  letter-spacing:.05em;text-transform:uppercase;margin-top:4px}
+.tblwrap{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;min-width:560px}
+th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;
+  text-align:left;padding:8px 14px 6px 0;border-bottom:1px solid var(--hair)}
+td{padding:8px 14px 8px 0;border-bottom:1px solid var(--hair);color:var(--ink)}
+td.num,th.num{text-align:right;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums;font-size:13.5px}
+.fig{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:20px 20px 14px;margin:20px 0}
+.fig .cap{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--ink2);margin-top:10px;max-width:75ch}
+.note{border-left:3px solid var(--accent);padding:2px 0 2px 16px;color:var(--ink2);margin:18px 0;max-width:66ch}
+ul{max-width:68ch;padding-left:22px}
+li{margin-bottom:7px}
+a{color:var(--accent-ink)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar-label{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;fill:var(--ink2)}
+.bar-val{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12.5px;fill:var(--ink);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:12.5px;color:var(--ink2);margin:0 0 8px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--hair);
+  border-radius:5px;padding:8px 10px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;
+  box-shadow:0 2px 10px rgba(0,0,0,.12);display:none;z-index:2;white-space:nowrap}
+.tip b{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:11px;color:var(--muted);font-weight:600}
+.panel-title{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:600;
+  color:var(--ink2);margin:14px 0 2px}
+.footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--muted)}
+</style>
+<div class="wrap">
+  <div class="topbar"><span class="series">PolarMACE · PB solvent reports · 1/3</span>
+    <a class="badge" href="./index.html" style="text-decoration:none;color:var(--muted)">← Reports index</a></div>
+
+  <h1>Training with a real nonlinear Poisson–Boltzmann solvent</h1>
+  <p class="dek">The engineering that turns a full 3-D nonlinear PB solve — once an 81-second offline
+  calculation — into a routine ingredient of a 400-epoch production training run.</p>
+
+  <div class="statrow">
+    <div class="stat"><div class="v">12 h 05 m</div><div class="k">400 epochs, 3×A100</div></div>
+    <div class="stat"><div class="v">43,961</div><div class="k">PB solves in training</div></div>
+    <div class="stat"><div class="v">0</div><div class="k">Fallbacks / unhealthy solves</div></div>
+    <div class="stat"><div class="v">98.6%</div><div class="k">Warm-start hit rate</div></div>
+  </div>
+
+  <h2><span class="no">1</span>Architecture</h2>
+  <p>The planar Gaussian compensation layer is replaced by a per-structure nonlinear PB solve
+  (<code>--solvent_model pb</code>). The laterally averaged solvent charge — ionic plus bound
+  polarization — enters the model through the same three hook points the planar layer used:
+  SCF field features, the periodic 1-D compensation energy, and the potential observable.
+  The profile is detached (lagged self-consistency); at convergence of training this coincides
+  with the self-consistent solution.</p>
+  <p>The solver is fully device-resident (float64, half-spectrum FFTs). The model's net density
+  is assembled spectrally — structure factors × GTO form factors — replacing pointwise
+  evaluation: <strong>16 s → ~1 ms per structure</strong>, exact to the Nyquist floor.
+  The grid is 0.15 Å (100×100×300) with the bound charge included in the layer, fixed by a
+  cell-dependent convergence study on real training cells. <code>fixsol=5</code> dipole
+  self-consistency steps are used after measuring a ~0.14 V protocol offset of
+  <code>fixsol=2</code> on real structures.</p>
+
+  <h2><span class="no">2</span>Exact DFT baseline cache</h2>
+  <p>The PB cavity and the solute potential need the total electron density and the solute
+  electrostatic potential — not just the model's residual density. Instead of Gaussian
+  surrogates, a one-time cache stores per-structure exact fields from the training DFT:
+  the neutral valence density and <code>phi_base</code> = Hartree(neutral) + exact local
+  pseudopotential. At runtime the solute potential is
+  <code>phi_base − Hartree(net_model)</code>, exact by Poisson linearity.</p>
+  <ul>
+    <li>Memory-mapped <code>[400, 3, 100, 100, 300]</code> float32, 14.4 GB — ranks share pages.</li>
+    <li>Five per-structure verifications (positions, electron count, positivity, cross-checks): 400/400 pass.</li>
+    <li>End-to-end spot check reproduces the grid-convergence anchor to <strong>0.003 V</strong>.</li>
+    <li>The Gaussian surrogates it replaces differed by 0.25–0.4 V in the solvent potential term.</li>
+  </ul>
+
+  <h2><span class="no">3</span>Schedule and guards</h2>
+  <p>Solving PB for every structure at every step is unnecessary. The schedule:
+  <strong>50 planar warm-up encounters</strong> per structure, then a fresh PB solve every
+  <strong>5th</strong> encounter with the cached profile reused in between (detached, so reuse
+  is gradient-safe). A static-shard sampler pins each structure to one rank, aligning
+  encounters with epochs and keeping the warm-start cache local
+  (see the attribution report for a measured accuracy trade-off of this choice).</p>
+  <p>A per-structure health guard falls back to the planar layer if a solve is unhealthy
+  (residual &gt; 10×tol, layer outside the cell, runaway bound dipole) — self-deactivating as
+  the model converges. A φ warm-start cache (healthy solves only) makes refresh solves ~2×
+  cheaper than cold ones. The warm-up matters: at 50 encounters the planar→PB transition is
+  seamless (validation loss 0.334 → 0.430, forces still improving); at 10 encounters the loss
+  jumped 4×; with no warm-up at all, early training diverged.</p>
+
+  <h2><span class="no">4</span>What it costs</h2>
+  <div class="fig">
+    <svg viewBox="0 0 640 150" width="100%" role="img" aria-label="Wall time per epoch type">
+      <g>
+        <text x="0" y="26" class="bar-label">planar warm-up</text>
+        <rect x="150" y="14" width="63" height="16" rx="3" fill="var(--accent)"></rect>
+        <text x="221" y="27" class="bar-val">56 s</text>
+        <text x="0" y="72" class="bar-label">PB solve epoch</text>
+        <rect x="150" y="60" width="358" height="16" rx="3" fill="var(--accent)"></rect>
+        <text x="516" y="73" class="bar-val">5.3 min (first cold: 10.4)</text>
+        <text x="0" y="118" class="bar-label">reuse epoch</text>
+        <rect x="150" y="106" width="68" height="16" rx="3" fill="var(--accent)"></rect>
+        <text x="226" y="119" class="bar-val">60 s</text>
+      </g>
+    </svg>
+    <div class="cap">Wall time per epoch type, 400-epoch production run (fixsol=5, 3 ranks,
+    320 structures). Only every 5th post-warm-up epoch pays for solves; the amortized cost is
+    ≈ 2 min/epoch.</div>
+  </div>
+  <div class="tblwrap"><table>
+    <tr><th>Quantity</th><th class="num">Value</th><th>Note</th></tr>
+    <tr><td>Warm solve, per structure</td><td class="num">2.36 s</td><td>φ warm-start hit (98.6% of solves)</td></tr>
+    <tr><td>Cold solve, per structure</td><td class="num">4.92 s</td><td>first encounter / cache miss</td></tr>
+    <tr><td>First fixsol step</td><td class="num">0.68 s</td><td>8–9 Newton iterations</td></tr>
+    <tr><td>Each tail fixsol step</td><td class="num">0.42 s</td><td>2–3 iterations from the converged φ</td></tr>
+    <tr><td>fixsol 2 → 5</td><td class="num">+53%</td><td>of a warm solve — tail steps are cheap</td></tr>
+    <tr><td>Dipole correction share</td><td class="num">5.6%</td><td>Ewald + cdipol, per solve</td></tr>
+  </table></div>
+
+  <h2><span class="no">5</span>Outcome</h2>
+  <p>The production run finished with <strong>zero</strong> unhealthy solves in 43,961 —
+  the guard never fired. End-of-run validation:
+  E <strong>2.8 meV/atom</strong>, F <strong>21.7 meV/Å</strong>,
+  potential <strong>0.067 eV</strong>, Φ<sub>1D</sub> <strong>0.067 eV</strong>.</p>
+
+  <p>Against the 9-final baselines (same data, 400 epochs each): the PB run's Fermi-level
+  error ends well <em>below</em> the original CP-MACE baseline (0.066 vs 0.109 eV) and above
+  the fully-supervised planar run (0.034 eV) — the attribution report (2/3) accounts for
+  that remaining gap.</p>
+
+  <div class="fig" id="figconv">
+    <div class="legend" id="legend"></div>
+    <div class="panel-title">Fermi level RMSE (eV)</div>
+    <svg id="ch-fer" width="100%" viewBox="0 0 880 260" role="img" aria-label="Fermi RMSE vs epoch"></svg>
+    <div class="panel-title">1-D potential profile RMSE, Φ<sub>1D</sub> (eV)</div>
+    <svg id="ch-phi" width="100%" viewBox="0 0 880 260" role="img" aria-label="Phi1D RMSE vs epoch"></svg>
+    <div class="tip" id="tip"></div>
+    <div class="cap">Validation errors vs epoch, PB production run against the 9-final
+    baselines (same data, 400 epochs). The CP-MACE baseline's logged potential <em>is</em> its
+    Fermi-level observable and is plotted in the Fermi panel; it does not log Φ<sub>1D</sub>.
+    Epochs &lt; 20 cropped for scale. Φ<sub>1D</sub> for the PB run uses the metric of its era
+    (gaussian reconstruction, ≈0.006 eV above the corrected profile metric; planar runs
+    unaffected by construction). Hover for values.</div>
+  </div>
+  <details><summary style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;font-size:13.5px;color:var(--ink2);cursor:pointer">
+  Data table (eV)</summary><div class="tblwrap"><table id="datatable"></table></div></details>
+  <div class="note">One selection lesson: best-loss checkpointing was skewed by an auxiliary
+  loss term that is not trainable in PB mode — the “best” checkpoint froze at epoch 83 while
+  forces kept improving to the end. Later runs disable that term (weight 0).</div>
+  <p>How these errors compare to the planar predecessor — and why the 1-D potential is the
+  one observable that lags — is the subject of the attribution report (2/3).</p>
+
+  <div class="footer">PolarMACE PB solvent reports · <a href="./pb-training-engineering.html">1 Training engineering</a> · <a href="./phi1d-attribution.html">2 &Phi;<sub>1D</sub> attribution</a> · <a href="./differentiable-pb.html">3 Differentiable PB note</a> · <a href="./index.html">index</a></div>
+</div>
+<script>
+(function(){
+  const E=[20,40,60,80,100,120,140,160,180,200,220,240,260,280,300,320,340,360,380,399];
+  const RUNS=[
+   {name:"PB production",c:"var(--s1)",
+    fer:[.283,.1714,.2067,.1247,.1319,.1187,.1125,.1107,.1038,.1055,.0954,.0963,.1131,.0926,.1166,.0801,.0804,.074,.0714,.0655],
+    phi:[.20902,.13144,.17407,.12146,.12126,.11415,.10852,.10809,.10009,.09486,.08707,.08968,.09849,.08082,.09914,.07109,.07213,.07043,.06738,.06668]},
+   {name:"planar 4-grid (legacy)",c:"var(--s2)",
+    fer:[.0971,.0757,.0673,.0614,.0548,.0537,.0452,.0529,.0464,.0441,.0421,.0428,.035,.0378,.037,.0364,.0336,.0374,.0359,.0336],
+    phi:[.10867,.09232,.07792,.06512,.05962,.05627,.05208,.05148,.04767,.04604,.04575,.04469,.04284,.04301,.04147,.04277,.03997,.03846,.03827,.03836]},
+   {name:"CP-MACE baseline (legacy)",c:"var(--s4)",
+    fer:[.3511,.3465,.3429,.337,.3077,.2287,.1618,.1374,.1232,.1131,.115,.1127,.1094,.1128,.113,.1106,.1112,.114,.109,.109],
+    phi:null}
+  ];
+  const PANELS=[
+    {svg:"ch-fer",key:"fer",ymax:.37},
+    {svg:"ch-phi",key:"phi",ymax:.22}
+  ];
+  const W=880,H=260,M={l:56,r:200,t:12,b:30},X0=20,X1=399;
+  const NS="http://www.w3.org/2000/svg";
+  function el(t,a){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;}
+  const sx=e=>M.l+(e-X0)/(X1-X0)*(W-M.l-M.r);
+  const tip=document.getElementById("tip"), fig=document.getElementById("figconv");
+  PANELS.forEach(P=>{
+    const svg=document.getElementById(P.svg);
+    const sy=v=>M.t+(P.ymax-v)/P.ymax*(H-M.t-M.b);
+    const step=P.ymax>0.3?0.1:0.05;
+    for(let v=0;v<=P.ymax+1e-9;v+=step){
+      svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:sy(v),y2:sy(v),stroke:"var(--hair)","stroke-width":1}));
+      const t=el("text",{x:M.l-8,y:sy(v)+4,"text-anchor":"end",fill:"var(--muted)",
+        "font-size":"11","font-family":"ui-monospace,Menlo,monospace"});
+      t.textContent=v.toFixed(2); svg.appendChild(t);
+    }
+    for(const e of [20,100,200,300,399]){
+      const t=el("text",{x:sx(e),y:H-M.b+16,"text-anchor":"middle",fill:"var(--muted)",
+        "font-size":"11","font-family":"ui-monospace,Menlo,monospace"});
+      t.textContent=e; svg.appendChild(t);
+    }
+    const labels=[];
+    RUNS.forEach(r=>{
+      const d=r[P.key]; if(!d) return;
+      const path=d.map((v,i)=>(i?"L":"M")+sx(E[i]).toFixed(1)+","+sy(Math.min(v,P.ymax)).toFixed(1)).join(" ");
+      svg.appendChild(el("path",{d:path,fill:"none",stroke:r.c,"stroke-width":2,
+        "stroke-linejoin":"round","stroke-linecap":"round"}));
+      const lv=d[d.length-1];
+      svg.appendChild(el("circle",{cx:sx(399),cy:sy(lv),r:3.5,fill:r.c,stroke:"var(--card)","stroke-width":2}));
+      labels.push({name:r.name,c:r.c,y:sy(lv),v:lv});
+    });
+    labels.sort((a,b)=>a.y-b.y);
+    for(let i=1;i<labels.length;i++) if(labels[i].y-labels[i-1].y<14) labels[i].y=labels[i-1].y+14;
+    labels.forEach(L=>{
+      const t=el("text",{x:sx(399)+10,y:L.y+4,fill:L.c,"font-size":"11.5",
+        "font-family":"-apple-system,Segoe UI,Roboto,sans-serif","font-weight":"600"});
+      t.textContent=L.v.toFixed(3)+"  "+L.name; svg.appendChild(t);
+    });
+    const cross=el("line",{y1:M.t,y2:H-M.b,stroke:"var(--muted)","stroke-width":1,
+      "stroke-dasharray":"3,3",visibility:"hidden"});
+    svg.appendChild(cross);
+    svg.addEventListener("mousemove",ev=>{
+      const r=svg.getBoundingClientRect(), fx=(ev.clientX-r.left)*(W/r.width);
+      if(fx<M.l||fx>W-M.r){cross.setAttribute("visibility","hidden");tip.style.display="none";return;}
+      const eRaw=X0+(fx-M.l)/(W-M.l-M.r)*(X1-X0);
+      let ei=0; for(let i=0;i<E.length;i++) if(Math.abs(E[i]-eRaw)<Math.abs(E[ei]-eRaw)) ei=i;
+      cross.setAttribute("x1",sx(E[ei])); cross.setAttribute("x2",sx(E[ei]));
+      cross.setAttribute("visibility","visible");
+      let html="<b>EPOCH "+E[ei]+"</b><br>";
+      RUNS.forEach(rr=>{const d=rr[P.key];
+        if(d) html+='<span style="color:'+rr.c+'">●</span> '+d[ei].toFixed(3)+"  "+rr.name+"<br>";});
+      tip.innerHTML=html; tip.style.display="block";
+      const fr=fig.getBoundingClientRect();
+      let tx=ev.clientX-fr.left+16, ty=ev.clientY-fr.top+8;
+      if(tx+230>fr.width) tx-=250; tip.style.left=tx+"px"; tip.style.top=ty+"px";
+    });
+    svg.addEventListener("mouseleave",()=>{cross.setAttribute("visibility","hidden");tip.style.display="none";});
+  });
+  const lg=document.getElementById("legend");
+  RUNS.forEach(r=>{const sp=document.createElement("span");
+    sp.innerHTML='<i style="background:'+r.c+'"></i>'+r.name; lg.appendChild(sp);});
+  const tb=document.getElementById("datatable");
+  let hd="<tr><th>epoch</th>";
+  RUNS.forEach(r=>{["fer","phi"].forEach(k=>{if(r[k])hd+='<th class="num">'+r.name.split(" ")[0]+" "+
+    (k==="fer"?"fermi":"Φ1D")+"</th>";});});
+  tb.innerHTML=hd+"</tr>";
+  E.forEach((e,i)=>{let row='<tr><td class="num">'+e+"</td>";
+    RUNS.forEach(r=>{["fer","phi"].forEach(k=>{if(r[k])row+='<td class="num">'+r[k][i].toFixed(4)+"</td>";});});
+    tb.innerHTML+=row+"</tr>";});
+})();
+</script>

@@ -49,23 +49,29 @@
   <a href="https://ruoywang.github.io/cep-dip-python-pb/"
      style="color:var(--accent)">cep-dip-python-pb site</a>.</p>
 
-  <div class="report pending">
-    <div class="date">upcoming<span class="tag">training</span></div>
-    <h2>PB vs Planar Solvent — Training A/B on 2-NiN</h2>
-    <p>Real s/step of the two complete training paths (NumPy-CPU vs
-    device-resident torch-GPU PB backend), grid-convergence study for the
-    training grid spacing, and accuracy of the PB-driven observables against
-    the 4-grid planar baseline.</p>
-  </div>
+  <a class="report" href="./pb-training-engineering.html">
+    <div class="date">2026-07-08<span class="tag">training</span></div>
+    <h2>Training with a Real Nonlinear PB Solvent</h2>
+    <p>Exact DFT baseline cache, warm-up/refresh schedule, health guard, and the
+    measured cost: 400 epochs in 12&thinsp;h&thinsp;05&thinsp;m with 43,961 PB solves and zero
+    fallbacks. Fermi/&Phi;<sub>1D</sub> convergence against the 9-final baselines.</p>
+  </a>
 
-  <div class="report pending">
-    <div class="date">2026-07-03 · in changelog form<span class="tag">method</span></div>
-    <h2>Nonlinear PB Solvent Model (--solvent_model pb)</h2>
-    <p>Detached 3D nonlinear PB solve per structure through the three planar
-    hook points (SCF features, 1D periodic energy, potential observable).
-    See <span style="font-family:var(--mono)">docs/changelogs/2026-07-03_pb_solvent.md</span>
-    on the pb-solvent branch; an HTML report follows with the training A/B.</p>
-  </div>
+  <a class="report" href="./phi1d-attribution.html">
+    <div class="date">2026-07-08<span class="tag">analysis</span></div>
+    <h2>Where the 1-D Potential Error Comes From</h2>
+    <p>Five single-variable runs split the PB&ndash;planar &Phi;<sub>1D</sub> gap into three
+    effects &mdash; the PB representation itself, the static-shard sampler, and the
+    jellium feature convention &mdash; none of them a bug.</p>
+  </a>
+
+  <a class="report" href="./differentiable-pb.html">
+    <div class="date">2026-07-08<span class="tag">method</span></div>
+    <h2>Exact Gradients Through the Nonlinear PB Solve</h2>
+    <p>Implicit-function adjoint with charge-mode preconditioning and an exact
+    dipole-loop derivative, verified against finite differences to ratio 1.000
+    with the forward solution bit-identical. Infrastructure note.</p>
+  </a>
 
   <footer>
     Repository: <a href="https://github.com/ruoywang/polar-mace-planar">ruoywang/polar-mace-planar</a>
