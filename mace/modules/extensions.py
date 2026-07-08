@@ -1,4 +1,5 @@
 import math
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1256,6 +1257,62 @@ class PolarMACE(ScaleShiftMACE):
                 self._pb_solver = PBPlanarSolvent(**common)
         return self._pb_solver
 
+    # -- rank-independent PB schedule state (shared dir = phi cache dir) ----
+    # The warmup/refresh schedule is defined PER STRUCTURE ("this structure's
+    # N-th training encounter"), and reuse means "the latest solved profile".
+    # With a global-shuffle sampler a structure visits different ranks, so the
+    # in-memory per-process counter/cache would undercount encounters ~3x and
+    # serve ~3x-staler profiles. When solvent_pb_phi_cache_dir is set, the
+    # counter and the reuse profile live there instead (atomic writes; each
+    # structure is touched by exactly one rank per epoch, so no races).
+    def _pb_get_encounter(self, sid: int) -> int:
+        d = self.solvent_pb_phi_cache_dir
+        if not d:
+            return self._pb_encounters.get(sid, 0)
+        try:
+            with open(os.path.join(d, f"enc_{sid}.txt")) as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return 0
+
+    def _pb_set_encounter(self, sid: int, value: int) -> None:
+        d = self.solvent_pb_phi_cache_dir
+        if not d:
+            self._pb_encounters[sid] = value
+            return
+        p = os.path.join(d, f"enc_{sid}.txt")
+        tmp = f"{p}.tmp.{os.getpid()}"
+        with open(tmp, "w") as f:
+            f.write(str(int(value)))
+        os.replace(tmp, p)
+
+    def _pb_cached_profile(self, sid: int):
+        d = self.solvent_pb_phi_cache_dir
+        if not d:
+            return self._pb_profile_cache.get(sid)
+        try:
+            z = np.load(os.path.join(d, f"prof_{sid}.npz"))
+            return {
+                "feat": torch.from_numpy(z["feat"]),
+                "energy": torch.from_numpy(z["energy"]),
+                "q": float(z["q"]), "mu": float(z["mu"]),
+            }
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def _pb_store_profile(self, sid: int, entry) -> None:
+        d = self.solvent_pb_phi_cache_dir
+        if not d:
+            self._pb_profile_cache[sid] = entry
+            return
+        p = os.path.join(d, f"prof_{sid}.npz")
+        tmp = f"{p}.tmp.{os.getpid()}.npz"
+        np.savez(
+            tmp[:-4], feat=entry["feat"].numpy(), energy=entry["energy"].numpy(),
+            q=entry["q"], mu=entry["mu"],
+        )
+        os.replace(tmp, p)
+
     def _solve_pb_profiles(
         self,
         data: Dict[str, torch.Tensor],
@@ -1394,12 +1451,12 @@ class PolarMACE(ScaleShiftMACE):
             solved_ok = False
             mode = "solve"
             cached_prof = (
-                self._pb_profile_cache.get(sid) if sid is not None else None
+                self._pb_cached_profile(sid) if sid is not None else None
             )
             if use_torch and sid is not None and planar_center is not None:
-                enc = self._pb_encounters.get(sid, 0)
+                enc = self._pb_get_encounter(sid)
                 if self.training:
-                    self._pb_encounters[sid] = enc + 1
+                    self._pb_set_encounter(sid, enc + 1)
                     warmup = self.solvent_pb_warmup_encounters
                     if enc < warmup:
                         mode = "planar"
@@ -1587,12 +1644,12 @@ class PolarMACE(ScaleShiftMACE):
                         if diff_grad else prof_feat[g]
                     )
                 if solved_ok and sid is not None:
-                    self._pb_profile_cache[sid] = {
+                    self._pb_store_profile(sid, {
                         "feat": prof_feat[g].detach().to(torch.float32).cpu(),
                         "energy": prof_energy[g].detach().to(torch.float32).cpu(),
                         "q": float(result["q_ion"]),
                         "mu": float(mu_g),
-                    }
+                    })
 
         if not use_torch:
             prof_feat = profiles_to_tensors(
