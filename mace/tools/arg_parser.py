@@ -480,12 +480,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--solvent_model",
         help=(
             "implicit-solvent compensation model: 'planar' (truncated-Gaussian "
-            "charge sheet) or 'pb' (laterally averaged rho_ion(z) from a full "
-            "3D nonlinear Poisson-Boltzmann solve per structure; requires "
-            "--solvent_pb_config and the cep-dip-python-pb package)"
+            "charge sheet) or 'pb1d' (1-D closure nonlinear Poisson-Boltzmann "
+            "solve per structure; requires --solvent_pb_config and the "
+            "cep-dip-python-pb package)"
         ),
         type=str,
-        choices=["planar", "pb", "pb1d"],
+        choices=["planar", "pb1d"],
         default="planar",
     )
     parser.add_argument(
@@ -542,18 +542,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=1.0e-3,
     )
     parser.add_argument(
-        "--solvent_pb_nuclear_sigma",
-        help="Gaussian width (Angstrom) of the surrogate nuclear charges",
-        type=float,
-        default=0.4,
-    )
-    parser.add_argument(
-        "--solvent_pb_coarse_init",
-        help="warm-start each PB solve from a half-resolution Newton solve",
-        type=str2bool,
-        default=True,
-    )
-    parser.add_argument(
         "--static_shard_sampler",
         help=(
             "distributed sampler with rank assignment fixed across epochs "
@@ -562,27 +550,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         ),
         type=str2bool,
         default=False,
-    )
-    parser.add_argument(
-        "--solvent_pb_warmup_encounters",
-        help=(
-            "per-structure training encounters (== epochs with the static "
-            "sampler) that use the planar layer directly, without a PB solve, "
-            "before PB takes over"
-        ),
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "--solvent_pb_refresh_every",
-        help=(
-            "after warmup, refresh the PB solve every K-th training encounter "
-            "per structure and reuse the cached profile in between (the "
-            "profile is detached, so reuse is gradient-safe; identical at "
-            "convergence)"
-        ),
-        type=int,
-        default=1,
     )
     parser.add_argument(
         "--solvent_pb_phi_cache_dir",
@@ -594,17 +561,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         ),
         type=str,
         default=None,
-    )
-    parser.add_argument(
-        "--solvent_pb_differentiable",
-        help=(
-            "make the PB solve differentiable in the model density (IFT "
-            "adjoint, FD-verified): potential/fermi/Phi1D losses then train "
-            "the density through the PB physics. Adds ~n_fixsol adjoint "
-            "solves per PB backward. Default off = detached (unchanged)."
-        ),
-        action="store_true",
-        default=False,
     )
     parser.add_argument(
         "--solvent_pb_learn_center_shift",
@@ -628,45 +584,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         ),
         type=str,
         default=None,
-    )
-    parser.add_argument(
-        "--solvent_pb_backend",
-        help=(
-            "PB solve backend: 'torch' (device-resident, GPU) or 'numpy' "
-            "(reference CPU path)"
-        ),
-        type=str,
-        choices=["numpy", "torch"],
-        default="torch",
-    )
-    parser.add_argument(
-        "--solvent_pb_warm_start",
-        help=(
-            "cache each sample's converged PB potential (and dipole fix-point "
-            "state) and reuse it as the next epoch's initial guess; the solve "
-            "still converges to the same residual tolerance (torch backend)"
-        ),
-        type=str2bool,
-        default=True,
-    )
-    parser.add_argument(
-        "--solvent_pb_warm_fixsol_steps",
-        help=(
-            "dipole fix-steps on a warm-started solve; 0 (default) = same as "
-            "--solvent_pb_fixsol_steps (protocol-identical warm start)"
-        ),
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "--solvent_pb_include_bound",
-        help=(
-            "include the bound (dielectric polarization) charge profile in "
-            "the solvent layer in addition to the ionic charge; it carries "
-            "the implicit-region screening dipole"
-        ),
-        type=str2bool,
-        default=True,
     )
     parser.add_argument(
         "--scaling",

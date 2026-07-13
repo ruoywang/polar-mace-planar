@@ -394,36 +394,11 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
             model, "solvent_pb_fixsol_steps", 2
         )
         config["solvent_pb_tol"] = getattr(model, "solvent_pb_tol", 1.0e-3)
-        config["solvent_pb_nuclear_sigma"] = getattr(
-            model, "solvent_pb_nuclear_sigma", 0.4
-        )
-        config["solvent_pb_coarse_init"] = getattr(
-            model, "solvent_pb_coarse_init", True
-        )
-        config["solvent_pb_include_bound"] = getattr(
-            model, "solvent_pb_include_bound", True
-        )
-        config["solvent_pb_backend"] = getattr(model, "solvent_pb_backend", "torch")
         config["solvent_pb_baseline_cache"] = getattr(
             model, "solvent_pb_baseline_cache", None
         )
-        config["solvent_pb_warmup_encounters"] = getattr(
-            model, "solvent_pb_warmup_encounters", 0
-        )
-        config["solvent_pb_refresh_every"] = getattr(
-            model, "solvent_pb_refresh_every", 1
-        )
-        config["solvent_pb_warm_start"] = getattr(
-            model, "solvent_pb_warm_start", True
-        )
-        config["solvent_pb_warm_fixsol_steps"] = getattr(
-            model, "solvent_pb_warm_fixsol_steps", 0
-        )
         config["solvent_pb_learn_center_shift"] = getattr(
             model, "solvent_pb_learn_center_shift", False
-        )
-        config["solvent_pb_differentiable"] = getattr(
-            model, "solvent_pb_differentiable", False
         )
         config["solvent_pb_phi_cache_dir"] = getattr(
             model, "solvent_pb_phi_cache_dir", None

@@ -103,6 +103,9 @@ class PB1DBackend:
         self._solvers: Dict = {}
         self._c_units: Dict = {}
         self.last_diagnostics: Dict[str, float] = {}
+        self._timing_on = bool(os.environ.get("MACE_PB1D_TIMING"))
+        self.timings: Dict[str, float] = {}
+        self.timing_calls = 0
         self._bl_arr = None
         self._bl_index: Dict[int, int] = {}
         self._bl_shape = None
@@ -218,6 +221,40 @@ class PB1DBackend:
             self._solvers[key] = s
         return s
 
+    class _Phase:
+        """Synced wall-clock timer accumulating into backend.timings.
+        Gated by MACE_PB1D_TIMING; a no-op otherwise (zero overhead)."""
+        def __init__(self, backend, name, device):
+            self.backend, self.name, self.device = backend, name, device
+
+        def __enter__(self):
+            if self.backend._timing_on:
+                import time
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize()
+                self.t0 = time.perf_counter()
+            return self
+
+        def __exit__(self, *exc):
+            if self.backend._timing_on:
+                import time
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize()
+                dt = time.perf_counter() - self.t0
+                self.backend.timings[self.name] = (
+                    self.backend.timings.get(self.name, 0.0) + dt)
+            return False
+
+    def timing_report(self, reset=True):
+        """Return {phase: total_ms} averaged per call; optionally reset."""
+        n = max(1, self.timing_calls)
+        rep = {k: 1e3 * v / n for k, v in sorted(self.timings.items())}
+        rep["_calls"] = self.timing_calls
+        if reset:
+            self.timings = {}
+            self.timing_calls = 0
+        return rep
+
     # -- the per-graph forward ----------------------------------------------
     def solve_graph(
         self,
@@ -232,7 +269,6 @@ class PB1DBackend:
         head=None,
         q_tot: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
-        from torch.utils.checkpoint import checkpoint as _ckpt
 
         device = positions.device
         dt = torch.float64
@@ -255,43 +291,27 @@ class PB1DBackend:
                 f"(shape {shape}); no Gaussian-surrogate fallback in v1"
             )
 
+        self.timing_calls += 1
         cell64 = torch.as_tensor(cell_np, device=device, dtype=dt)
         pos64 = positions.to(dt)
         pos_frac = torch.remainder(pos64 @ torch.linalg.inv(cell64), 1.0)
-        want_grad = bool(radial_coeffs.requires_grad or (
-            node_feats is not None and node_feats.requires_grad))
 
-        fields = torch.as_tensor(
-            np.ascontiguousarray(self._bl_arr[bl_row]), device=device
-        ).to(dt)
-        neutral_v, phi_base = fields[0], fields[2]
+        with self._Phase(self, "1_baseline", device):
+            fields = torch.as_tensor(
+                np.ascontiguousarray(self._bl_arr[bl_row]), device=device
+            ).to(dt)
+            neutral_v, phi_base = fields[0], fields[2]
 
-        def _assemble(coeffs):
-            return self._gto_net_density_g(grid, pos_frac.detach(), coeffs.to(dt), sigmas)
+        with self._Phase(self, "2_assembly", device):
+            net_g = self._gto_net_density_g(grid, pos_frac.detach(), radial_coeffs.to(dt), sigmas)
+        with self._Phase(self, "3_poisson", device):
+            net_values = grid.ifft_real(net_g)
+            n_e_values = neutral_v - net_values
+            n_e_density = torch.clamp(n_e_values / volume, min=0.0)
+            cvhar3 = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
 
-        net_g = (
-            _ckpt(_assemble, radial_coeffs, use_reentrant=False)
-            if want_grad else _assemble(radial_coeffs)
-        )
-        net_values = grid.ifft_real(net_g)
-        n_e_values = neutral_v - net_values
-        n_e_density = torch.clamp(n_e_values / volume, min=0.0)
-        cvhar3 = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
-
-        def _closure(ne, cv):
-            return closure_from_fields(ne, cv, grid, self.params, self._tp)
-
-        if want_grad:
-            keys = ("A_scr", "S_ion_z", "prior", "w_env", "u")
-
-            def _closure_tuple(ne, cv):
-                out = _closure(ne, cv)
-                return tuple(out[k] for k in keys)
-
-            vals = _ckpt(_closure_tuple, n_e_density, cvhar3, use_reentrant=False)
-            clo = dict(zip(keys, vals))
-        else:
-            clo = _closure(n_e_density, cvhar3)
+        with self._Phase(self, "4_closure", device):
+            clo = closure_from_fields(n_e_density, cvhar3, grid, self.params, self._tp)
 
         cvhar_z = cvhar3.mean(dim=(0, 1))
         prof_ne_z = n_e_values.mean(dim=(0, 1))
@@ -333,12 +353,14 @@ class PB1DBackend:
         center_z = 0.5 * (cell_np[0, 2] + cell_np[1, 2] + cell_np[2, 2])
         nouth = nz_s // 2
         indmin = int((nouth + int(0.5 * nz_s) + 10 * nz_s) % nz_s + 1)
-        out = solver.solve(
-            cvhar_z=cvhar_s, s_ion=s_ion_s, a1=a_s, p_off=p_off, q_sol=q_sol,
-            val_ion_dipole_z=val_dip_z, c_unit=self._c_unit(cell_np),
-            center_z=center_z, indmin=indmin,
-            fixsol_steps=self.fixsol_steps, tol=self.tol, max_outer=self.max_outer,
-        )
+        with self._Phase(self, "5_solve1d", device):
+            out = solver.solve(
+                cvhar_z=cvhar_s, s_ion=s_ion_s, a1=a_s, p_off=p_off, q_sol=q_sol,
+                val_ion_dipole_z=val_dip_z, c_unit=self._c_unit(cell_np),
+                center_z=center_z, indmin=indmin,
+                fixsol_steps=self.fixsol_steps, tol=self.tol, max_outer=self.max_outer,
+                grad_passes=int(os.environ.get("MACE_PB1D_GRAD_PASSES", "0")),
+            )
 
         rho_ion_z = -(out["n_ion"] / volume)
         rho_bound_z = -(out["n_b"] / volume)
@@ -359,6 +381,15 @@ class PB1DBackend:
             "mu_bound": float(mu_bound_t.detach()),
             **delta_stats,
         }
+        if self._timing_on:
+            every = int(os.environ.get("MACE_PB1D_TIMING_EVERY", "100"))
+            if self.timing_calls % every == 0:
+                snap = {k: 1e3 * v / self.timing_calls
+                        for k, v in sorted(self.timings.items())}
+                total = sum(snap.values())
+                msg = " ".join(f"{k}={v:.1f}" for k, v in snap.items())
+                print(f"PB1DTIMING calls={self.timing_calls} "
+                      f"fwd_total={total:.1f}ms/graph {msg}", flush=True)
         return {
             "z": z,
             "phi_z": out["phi"],

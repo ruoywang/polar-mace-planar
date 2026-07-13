@@ -737,18 +737,9 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_grid_spacing: float = 0.15,
         solvent_pb_fixsol_steps: int = 2,
         solvent_pb_tol: float = 1.0e-3,
-        solvent_pb_nuclear_sigma: float = 0.4,
-        solvent_pb_coarse_init: bool = True,
-        solvent_pb_include_bound: bool = True,
-        solvent_pb_backend: str = "torch",
         solvent_pb_baseline_cache: Optional[str] = None,
         solvent_pb_phi_cache_dir: Optional[str] = None,
-        solvent_pb_warmup_encounters: int = 0,
-        solvent_pb_refresh_every: int = 1,
-        solvent_pb_warm_start: bool = True,
-        solvent_pb_warm_fixsol_steps: int = 0,
         solvent_pb_learn_center_shift: bool = False,
-        solvent_pb_differentiable: bool = False,
         solvent_pb1d_zones: int = 8,
         solvent_pb1d_sigma_z: float = 0.2,
         solvent_pb1d_c_max: float = 0.25,
@@ -857,11 +848,11 @@ class PolarMACE(ScaleShiftMACE):
                 f"got {solvent_plane_feature_convention!r}"
             )
         self.solvent_plane_feature_convention = str(solvent_plane_feature_convention)
-        if solvent_model not in ("planar", "pb", "pb1d"):
+        if solvent_model not in ("planar", "pb1d"):
             raise ValueError(
-                f"solvent_model must be 'planar', 'pb' or 'pb1d', got {solvent_model!r}"
+                f"solvent_model must be 'planar' or 'pb1d', got {solvent_model!r}"
             )
-        if solvent_model in ("pb", "pb1d") and not solvent_pb_config:
+        if solvent_model == "pb1d" and not solvent_pb_config:
             raise ValueError(f"solvent_model={solvent_model!r} requires solvent_pb_config")
         self.solvent_model = str(solvent_model)
         self.solvent_pb_config = solvent_pb_config
@@ -869,41 +860,20 @@ class PolarMACE(ScaleShiftMACE):
         self.solvent_pb_grid_spacing = float(solvent_pb_grid_spacing)
         self.solvent_pb_fixsol_steps = int(solvent_pb_fixsol_steps)
         self.solvent_pb_tol = float(solvent_pb_tol)
-        self.solvent_pb_nuclear_sigma = float(solvent_pb_nuclear_sigma)
-        self.solvent_pb_coarse_init = bool(solvent_pb_coarse_init)
-        self.solvent_pb_include_bound = bool(solvent_pb_include_bound)
-        if solvent_pb_backend not in ("numpy", "torch"):
-            raise ValueError(
-                f"solvent_pb_backend must be 'numpy' or 'torch', got {solvent_pb_backend!r}"
-            )
-        self.solvent_pb_backend = str(solvent_pb_backend)
         self.solvent_pb_baseline_cache = solvent_pb_baseline_cache
         self.solvent_pb_phi_cache_dir = solvent_pb_phi_cache_dir
-        self.solvent_pb_warmup_encounters = int(solvent_pb_warmup_encounters)
-        self.solvent_pb_refresh_every = max(1, int(solvent_pb_refresh_every))
-        self._pb_encounters: Dict[int, int] = {}
-        self._pb_profile_cache: Dict[int, Dict[str, Any]] = {}
-        self.solvent_pb_warm_start = bool(solvent_pb_warm_start)
-        self.solvent_pb_warm_fixsol_steps = int(solvent_pb_warm_fixsol_steps)
-        # When True (PB mode), add a learnable tanh shift to the otherwise
+        # When True (pb1d mode), add a learnable tanh shift to the otherwise
         # detached, physics-fixed PB solvent-layer center, giving the
         # potential/Phi1D loss a gradient lever on the layer position (the
         # degree of freedom the planar model has via its learnable center).
         # Diagnostic for the PB-vs-planar 1D-potential gap; default off.
         self.solvent_pb_learn_center_shift = bool(solvent_pb_learn_center_shift)
-        # When True, the PB solve is DIFFERENTIABLE in the model's density
-        # coefficients (IFT adjoint, FD-verified): coeffs are passed to the
-        # solver without detach and the layer profile / q / mu keep their
-        # autograd graph, so potential/fermi/Phi1D losses train the density
-        # through the PB physics. Default False = detached (byte-identical).
-        self.solvent_pb_differentiable = bool(solvent_pb_differentiable)
         self.solvent_pb1d_zones = int(solvent_pb1d_zones)
         self.solvent_pb1d_sigma_z = float(solvent_pb1d_sigma_z)
         self.solvent_pb1d_c_max = float(solvent_pb1d_c_max)
         self.solvent_pb1d_upsample = int(solvent_pb1d_upsample)
         self.solvent_pb1d_max_outer = int(solvent_pb1d_max_outer)
         self._pb1d_backend = None
-        self._pb_solver = None
         self.register_buffer(
             "fermi_level_baseline",
             torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
@@ -1547,453 +1517,6 @@ class PolarMACE(ScaleShiftMACE):
         )
         return out
 
-    def _get_pb_solver(self):
-        if self._pb_solver is None:
-            common = dict(
-                config_path=self.solvent_pb_config,
-                repo_path=self.solvent_pb_repo,
-                grid_spacing=self.solvent_pb_grid_spacing,
-                fixsol_steps=self.solvent_pb_fixsol_steps,
-                tol=self.solvent_pb_tol,
-                coarse_init=self.solvent_pb_coarse_init,
-                nuclear_sigma=self.solvent_pb_nuclear_sigma,
-                axis=self.solvent_potential_axis,
-            )
-            if self.solvent_pb_backend == "torch":
-                from .pb_solvent import PBTorchBackend
-
-                self._pb_solver = PBTorchBackend(
-                    warm_start=self.solvent_pb_warm_start,
-                    warm_fixsol_steps=self.solvent_pb_warm_fixsol_steps,
-                    baseline_cache=self.solvent_pb_baseline_cache,
-                    phi_cache_dir=self.solvent_pb_phi_cache_dir,
-                    **common,
-                )
-            else:
-                from .pb_solvent import PBPlanarSolvent
-
-                self._pb_solver = PBPlanarSolvent(**common)
-        return self._pb_solver
-
-    # -- rank-independent PB schedule state (shared dir = phi cache dir) ----
-    # The warmup/refresh schedule is defined PER STRUCTURE ("this structure's
-    # N-th training encounter"), and reuse means "the latest solved profile".
-    # With a global-shuffle sampler a structure visits different ranks, so the
-    # in-memory per-process counter/cache would undercount encounters ~3x and
-    # serve ~3x-staler profiles. When solvent_pb_phi_cache_dir is set, the
-    # counter and the reuse profile live there instead (atomic writes; each
-    # structure is touched by exactly one rank per epoch, so no races).
-    def _pb_get_encounter(self, sid: int) -> int:
-        d = self.solvent_pb_phi_cache_dir
-        if not d:
-            return self._pb_encounters.get(sid, 0)
-        try:
-            with open(os.path.join(d, f"enc_{sid}.txt")) as f:
-                return int(f.read().strip())
-        except (OSError, ValueError):
-            return 0
-
-    def _pb_set_encounter(self, sid: int, value: int) -> None:
-        d = self.solvent_pb_phi_cache_dir
-        if not d:
-            self._pb_encounters[sid] = value
-            return
-        p = os.path.join(d, f"enc_{sid}.txt")
-        tmp = f"{p}.tmp.{os.getpid()}"
-        with open(tmp, "w") as f:
-            f.write(str(int(value)))
-        os.replace(tmp, p)
-
-    def _pb_cached_profile(self, sid: int):
-        d = self.solvent_pb_phi_cache_dir
-        if not d:
-            return self._pb_profile_cache.get(sid)
-        try:
-            z = np.load(os.path.join(d, f"prof_{sid}.npz"))
-            return {
-                "feat": torch.from_numpy(z["feat"]),
-                "energy": torch.from_numpy(z["energy"]),
-                "q": float(z["q"]), "mu": float(z["mu"]),
-            }
-        except (OSError, ValueError, KeyError):
-            return None
-
-    def _pb_store_profile(self, sid: int, entry) -> None:
-        d = self.solvent_pb_phi_cache_dir
-        if not d:
-            self._pb_profile_cache[sid] = entry
-            return
-        p = os.path.join(d, f"prof_{sid}.npz")
-        tmp = f"{p}.tmp.{os.getpid()}.npz"
-        np.savez(
-            tmp[:-4], feat=entry["feat"].numpy(), energy=entry["energy"].numpy(),
-            q=entry["q"], mu=entry["mu"],
-        )
-        os.replace(tmp, p)
-
-    def _solve_pb_profiles(
-        self,
-        data: Dict[str, torch.Tensor],
-        positions: torch.Tensor,
-        cell: torch.Tensor,
-        radial_blocks: torch.Tensor,
-        node_valence_electrons: torch.Tensor,
-        num_graphs: int,
-        planar_center: Optional[torch.Tensor] = None,
-    ) -> Dict[str, torch.Tensor]:
-        """Detached per-graph nonlinear PB solve on the current (pre-SCF)
-        density; returns rho_ion(z) resampled onto the feature grid (1024,
-        offset 0) and the 1D-energy grid (512, offset 1/2), plus the layer
-        charge, mean and dipole moment used by the observables.
-
-        The same profile (from the pre-SCF density) is reused post-SCF for
-        the energy and observables — the PB analogue of the planar model's
-        pre/post-SCF center inconsistency, kept deliberately so a single
-        solve per forward suffices.
-        """
-        from .loss import _gto_density_at_points_axis2_pbc
-        from .pb_solvent import (
-            profiles_to_tensors,
-            resample_profile_periodic_torch,
-        )
-
-        solver = self._get_pb_solver()
-        use_torch = self.solvent_pb_backend == "torch"
-        eval_chunk = 262144 if positions.is_cuda else 4096
-        axis = self.solvent_potential_axis
-        cells = cell.detach()
-        if cells.dim() == 2 and cells.shape[1] == 3:
-            cells = cells.view(-1, 3, 3)
-        pbc_g = data["pbc"].view(-1, 3).to(torch.bool)
-        slab = torch.ones(3, dtype=torch.bool, device=pbc_g.device)
-        slab[axis] = False
-        slab_mask = torch.all(pbc_g == slab, dim=1)
-        element_index = torch.argmax(data["node_attrs"], dim=-1)
-        atomic_numbers_nodes = self.atomic_numbers[element_index]
-        total_charge_g = data["total_charge"].view(-1)
-        sample_ids = data.get("sample_id")
-        if sample_ids is not None:
-            sample_ids = sample_ids.view(-1)
-
-        def _planar_layer_result(g, cell_g, H_g):
-            """Truncated-Gaussian planar layer at the density-crossing center,
-            in the same result format as a PB solve (rho_bound = 0)."""
-            cell_g33 = cell_g.view(3, 3)
-            area_g = _cell_area_for_axis_batch(
-                cell_g33.unsqueeze(0).to(positions.dtype), axis
-            )[0]
-            c0 = planar_center[g].to(positions.dtype)
-            sg = float(self.solvent_sigma_g)
-            nzf = 512
-            zf = torch.arange(
-                nzf, device=positions.device, dtype=positions.dtype
-            ) * (H_g / nzf)
-            inv_sqrt2 = 1.0 / math.sqrt(2.0)
-            normc = torch.clamp(
-                0.5 * (torch.erf((H_g - c0) / sg * inv_sqrt2)
-                       - torch.erf((0.0 - c0) / sg * inv_sqrt2)),
-                min=1.0e-12,
-            )
-            q_fb = -float(total_charge_g[g].item())
-            prof = (q_fb / area_g) * torch.exp(
-                -0.5 * torch.square((zf - c0) / sg)
-            ) / (math.sqrt(2.0 * math.pi) * sg * normc)
-            lm_fb = _truncated_gaussian_mean(
-                center=c0.view(1), sigma=sg,
-                lower=torch.zeros(1, device=positions.device, dtype=positions.dtype),
-                upper=torch.full((1,), H_g, device=positions.device, dtype=positions.dtype),
-            ).view(())
-            return {
-                "z": zf, "rho_ion_z": prof,
-                "rho_bound_z": torch.zeros_like(prof),
-                "height": H_g, "q_ion": q_fb,
-                "layer_mean": float(lm_fb.item()), "mu_bound": 0.0,
-            }
-
-        profiles: List[Optional[Dict[str, Any]]] = []
-        heights: List[float] = []
-        q_ion = positions.new_zeros(num_graphs)
-        solvent_mu = positions.new_zeros(num_graphs)
-        prof_feat = positions.new_zeros(num_graphs, 1024)
-        prof_energy = positions.new_zeros(num_graphs, 512)
-        # grad-carrying profile copy for the observable path (Phi1D loss);
-        # rows are grad only for freshly-solved graphs, detached (same values)
-        # for reuse/planar rows.
-        prof_feat_grad: Optional[torch.Tensor] = (
-            positions.new_zeros(num_graphs, 1024)
-            if (self.solvent_pb_differentiable and self.training)
-            else None
-        )
-        for g in range(num_graphs):
-            cell_g = cells[g]
-            heights.append(float(_axis_box_length(cell_g, axis).item()))
-            atom_mask = data["batch"] == g
-            if not bool(slab_mask[g].item()) or not bool(torch.any(atom_mask).item()):
-                profiles.append(None)
-                continue
-            pos_g = positions[atom_mask].detach()
-            coeffs_g = (
-                radial_blocks[atom_mask]
-                if (self.solvent_pb_differentiable and self.training)
-                else radial_blocks[atom_mask].detach()
-            )
-            numbers_g = atomic_numbers_nodes[atom_mask]
-            zval_g = node_valence_electrons[atom_mask].detach()
-            sid = (
-                int(sample_ids[g].detach().cpu().item())
-                if sample_ids is not None
-                else None
-            )
-
-            def eval_net_density_t(pts):
-                with torch.no_grad():
-                    chunks = []
-                    for chunk in pts.to(positions.dtype).split(eval_chunk):
-                        chunks.append(
-                            _gto_density_at_points_axis2_pbc(
-                                chunk,
-                                coeffs_g,
-                                pos_g,
-                                numbers_g,
-                                cell_g,
-                                self.atomic_density_sigmas,
-                            )
-                        )
-                    return torch.cat(chunks).detach()
-
-            # ---- PB schedule (torch backend): planar warmup, then a fresh
-            # solve every K-th training encounter with cached-profile reuse
-            # in between. The profile is detached, so reuse is gradient-safe;
-            # at convergence cached and fresh profiles coincide. Eval reuses
-            # the cache when present (falls back to a fresh solve).
-            solved_ok = False
-            mode = "solve"
-            cached_prof = (
-                self._pb_cached_profile(sid) if sid is not None else None
-            )
-            if use_torch and sid is not None and planar_center is not None:
-                enc = self._pb_get_encounter(sid)
-                if self.training:
-                    self._pb_set_encounter(sid, enc + 1)
-                    warmup = self.solvent_pb_warmup_encounters
-                    if enc < warmup:
-                        mode = "planar"
-                    elif (enc - warmup) % self.solvent_pb_refresh_every != 0:
-                        mode = "reuse"
-                else:
-                    mode = "reuse"
-            if mode == "reuse":
-                if cached_prof is not None:
-                    prof_feat[g] = cached_prof["feat"].to(
-                        device=positions.device, dtype=positions.dtype
-                    )
-                    prof_energy[g] = cached_prof["energy"].to(
-                        device=positions.device, dtype=positions.dtype
-                    )
-                    q_ion[g] = cached_prof["q"]
-                    solvent_mu[g] = cached_prof["mu"]
-                    if prof_feat_grad is not None:
-                        prof_feat_grad[g] = prof_feat[g]
-                    profiles.append(None)
-                    continue
-                mode = "solve"
-            if mode == "planar":
-                result = _planar_layer_result(g, cell_g, float(heights[g]))
-            elif use_torch:
-                result = solver.solve_rho_ion_z(
-                    positions=pos_g,
-                    cell=cell_g,
-                    z_valence=zval_g,
-                    total_charge=float(total_charge_g[g].item()),
-                    neutral_sigma=float(self.atomic_multipoles_smearing_width),
-                    sample_id=sid,
-                    radial_coeffs=coeffs_g,
-                    sigmas=self.atomic_density_sigmas,
-                )
-                solved_ok = True
-            else:
-                def eval_net_density(points_np):
-                    pts = torch.as_tensor(
-                        points_np, device=positions.device, dtype=positions.dtype
-                    )
-                    return eval_net_density_t(pts).cpu().numpy()
-
-                result = solver.solve_rho_ion_z(
-                    positions=pos_g.cpu().numpy(),
-                    cell=cell_g.cpu().numpy(),
-                    z_valence=zval_g.cpu().numpy(),
-                    total_charge=float(total_charge_g[g].item()),
-                    neutral_sigma=float(self.atomic_multipoles_smearing_width),
-                    eval_net_density=eval_net_density,
-                )
-                solved_ok = True
-            # Health guard: an untrained/excursive model density can make the
-            # PB solve diverge or produce unphysical moments (the PB<->density
-            # feedback loop). Per structure, per step, fall back to the planar
-            # truncated-Gaussian layer at the density-crossing center — the
-            # stable baseline physics. Self-deactivating: a converged model
-            # yields healthy solves and the guard never fires.
-            H_g = float(result.get("height", heights[g]))
-            rms_h = float(result.get("rms_last", 0.0))
-            lm_h = float(result["layer_mean"])
-            mb_h = float(result["mu_bound"])
-            healthy = (not solved_ok) or (
-                rms_h == rms_h
-                and rms_h < 10.0 * self.solvent_pb_tol
-                and 0.0 <= lm_h <= H_g
-                and abs(mb_h) <= 2.0 * H_g
-            )
-            if not healthy and use_torch and cached_prof is not None:
-                # stale-but-healthy PB beats the planar fallback
-                import os as _os
-                if _os.environ.get("MACE_PB_DEBUG"):
-                    print(
-                        f"PBDBG-STALE sid={sid} rms={rms_h:.2e} "
-                        f"(reusing cached profile)", flush=True,
-                    )
-                prof_feat[g] = cached_prof["feat"].to(
-                    device=positions.device, dtype=positions.dtype
-                )
-                prof_energy[g] = cached_prof["energy"].to(
-                    device=positions.device, dtype=positions.dtype
-                )
-                q_ion[g] = cached_prof["q"]
-                solvent_mu[g] = cached_prof["mu"]
-                if prof_feat_grad is not None:
-                    prof_feat_grad[g] = prof_feat[g]
-                profiles.append(None)
-                continue
-            if not healthy and planar_center is not None:
-                import os as _os
-                if _os.environ.get("MACE_PB_DEBUG"):
-                    print(
-                        f"PBDBG-FALLBACK sid={sid} rms={rms_h:.2e} "
-                        f"layer_mean={lm_h:+.2f} mu_bound={mb_h:+.2f}",
-                        flush=True,
-                    )
-                cell_g33 = cell_g.view(3, 3)
-                area_g = _cell_area_for_axis_batch(
-                    cell_g33.unsqueeze(0).to(positions.dtype), axis
-                )[0]
-                c0 = planar_center[g].to(positions.dtype)
-                sg = float(self.solvent_sigma_g)
-                nzf = 512
-                zf = torch.arange(
-                    nzf, device=positions.device, dtype=positions.dtype
-                ) * (H_g / nzf)
-                inv_sqrt2 = 1.0 / math.sqrt(2.0)
-                normc = torch.clamp(
-                    0.5 * (torch.erf((H_g - c0) / sg * inv_sqrt2)
-                           - torch.erf((0.0 - c0) / sg * inv_sqrt2)),
-                    min=1.0e-12,
-                )
-                q_fb = -float(total_charge_g[g].item())
-                prof = (q_fb / area_g) * torch.exp(
-                    -0.5 * torch.square((zf - c0) / sg)
-                ) / (math.sqrt(2.0 * math.pi) * sg * normc)
-                lm_fb = _truncated_gaussian_mean(
-                    center=c0.view(1), sigma=sg,
-                    lower=torch.zeros(1, device=positions.device, dtype=positions.dtype),
-                    upper=torch.full((1,), H_g, device=positions.device, dtype=positions.dtype),
-                ).view(())
-                result = {
-                    "z": zf, "rho_ion_z": prof,
-                    "rho_bound_z": torch.zeros_like(prof),
-                    "height": H_g, "q_ion": q_fb,
-                    "layer_mean": float(lm_fb.item()), "mu_bound": 0.0,
-                }
-                if not use_torch:
-                    result = {
-                        k: (v.detach().cpu().numpy() if torch.is_tensor(v) else v)
-                        for k, v in result.items()
-                    }
-                solved_ok = False
-            # The solvent layer the model sees: ionic charge alone, or the
-            # full implicit-region solvent charge (ionic + bound). The bound
-            # (polarization) charge integrates to ~0 but carries the
-            # dielectric screening dipole of the implicit region.
-            result = dict(result)
-            # differentiable path: the solver returns tensor moments (values
-            # identical to the floats, carrying the autograd graph)
-            diff_grad = "q_ion_t" in result
-            _q = result["q_ion_t"] if diff_grad else result["q_ion"]
-            _lm = result["layer_mean_t"] if diff_grad else result["layer_mean"]
-            _mb = result["mu_bound_t"] if diff_grad else result["mu_bound"]
-            if self.solvent_pb_include_bound:
-                result["rho_layer_z"] = (
-                    result["rho_ion_z"] + result["rho_bound_z"]
-                )
-                mu_g = _q * _lm + _mb
-            else:
-                result["rho_layer_z"] = result["rho_ion_z"]
-                mu_g = _q * _lm
-            profiles.append(result)
-            if diff_grad:
-                q_ion[g] = _q.to(positions.dtype)
-                solvent_mu[g] = mu_g.to(positions.dtype)
-            else:
-                q_ion[g] = float(result["q_ion"])
-                solvent_mu[g] = float(mu_g)
-            import os as _os
-            if _os.environ.get("MACE_PB_DEBUG"):
-                print(
-                    f"PBDBG sid={sid} q_ion={result['q_ion']:+.4f} "
-                    f"layer_mean={result['layer_mean']:+.3f} "
-                    f"mu_bound={result['mu_bound']:+.3f} mu_tot={float(mu_g):+.3f} "
-                    f"diag={getattr(solver, 'last_diagnostics', {})}",
-                    flush=True,
-                )
-            if use_torch:
-                layer = result["rho_layer_z"].to(positions.dtype)
-                height_g = float(result["height"])
-                # features/energy always consume the DETACHED profile: the
-                # energy graph feeds the force computation (autograd w.r.t.
-                # positions with create_graph), which must not traverse the
-                # PB adjoint. Observables get the grad-carrying copies below.
-                prof_feat[g] = resample_profile_periodic_torch(
-                    layer, height_g, 1024, False
-                ).detach()
-                prof_energy[g] = resample_profile_periodic_torch(
-                    layer, height_g, 512, True
-                ).detach()
-                if prof_feat_grad is not None:
-                    prof_feat_grad[g] = (
-                        resample_profile_periodic_torch(layer, height_g, 1024, False)
-                        if diff_grad else prof_feat[g]
-                    )
-                if solved_ok and sid is not None:
-                    self._pb_store_profile(sid, {
-                        "feat": prof_feat[g].detach().to(torch.float32).cpu(),
-                        "energy": prof_energy[g].detach().to(torch.float32).cpu(),
-                        "q": float(result["q_ion"]),
-                        "mu": float(mu_g),
-                    })
-
-        if not use_torch:
-            prof_feat = profiles_to_tensors(
-                profiles, heights, 1024, False, positions.device, positions.dtype,
-                key="rho_layer_z",
-            )
-            prof_energy = profiles_to_tensors(
-                profiles, heights, 512, True, positions.device, positions.dtype,
-                key="rho_layer_z",
-            )
-        # Effective layer mean of the combined profile (dipole / charge);
-        # the charge is the ionic one (bound integrates to ~0).
-        layer_mean = solvent_mu / torch.where(
-            torch.abs(q_ion) > 1.0e-12, q_ion, torch.full_like(q_ion, 1.0e-12)
-        )
-        out = {
-            "profile_features": prof_feat,
-            "profile_energy": prof_energy,
-            "q_ion": q_ion,
-            "layer_mean": layer_mean,
-            "solvent_mu": solvent_mu,
-        }
-        if prof_feat_grad is not None:
-            out["profile_features_grad"] = prof_feat_grad
-        return out
-
     def forward(
         self,
         data: Dict[str, torch.Tensor],
@@ -2287,27 +1810,16 @@ class PolarMACE(ScaleShiftMACE):
             )
         ).detach()
         pb_solvent_data: Optional[Dict[str, torch.Tensor]] = None
-        if self.solvent_model in ("pb", "pb1d"):
-            if self.solvent_model == "pb1d":
-                pb_solvent_data = self._pb1d_stage1(
-                    data=data,
-                    positions=positions,
-                    cell=cell,
-                    radial_blocks=self._radial_flat_to_blocks(comp_charge_density),
-                    node_valence_electrons=node_valence_electrons,
-                    num_graphs=num_graphs,
-                    planar_center=comp_center_init,
-                )
-            else:
-                pb_solvent_data = self._solve_pb_profiles(
-                    data=data,
-                    positions=positions,
-                    cell=cell,
-                    radial_blocks=self._radial_flat_to_blocks(comp_charge_density),
-                    node_valence_electrons=node_valence_electrons,
-                    num_graphs=num_graphs,
-                    planar_center=comp_center_init,
-                )
+        if self.solvent_model == "pb1d":
+            pb_solvent_data = self._pb1d_stage1(
+                data=data,
+                positions=positions,
+                cell=cell,
+                radial_blocks=self._radial_flat_to_blocks(comp_charge_density),
+                node_valence_electrons=node_valence_electrons,
+                num_graphs=num_graphs,
+                planar_center=comp_center_init,
+            )
             (
                 compensation_external_features,
                 _compensation_phi_nodes,

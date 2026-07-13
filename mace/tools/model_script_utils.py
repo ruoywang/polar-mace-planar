@@ -349,21 +349,10 @@ def _build_model(
             solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.15),
             solvent_pb_fixsol_steps=getattr(args, "solvent_pb_fixsol_steps", 2),
             solvent_pb_tol=getattr(args, "solvent_pb_tol", 1.0e-3),
-            solvent_pb_nuclear_sigma=getattr(args, "solvent_pb_nuclear_sigma", 0.4),
-            solvent_pb_coarse_init=getattr(args, "solvent_pb_coarse_init", True),
-            solvent_pb_include_bound=getattr(args, "solvent_pb_include_bound", True),
-            solvent_pb_backend=getattr(args, "solvent_pb_backend", "torch"),
             solvent_pb_baseline_cache=getattr(args, "solvent_pb_baseline_cache", None),
             solvent_pb_phi_cache_dir=getattr(args, "solvent_pb_phi_cache_dir", None),
-            solvent_pb_warmup_encounters=getattr(args, "solvent_pb_warmup_encounters", 0),
-            solvent_pb_refresh_every=getattr(args, "solvent_pb_refresh_every", 1),
-            solvent_pb_warm_start=getattr(args, "solvent_pb_warm_start", True),
-            solvent_pb_warm_fixsol_steps=getattr(args, "solvent_pb_warm_fixsol_steps", 0),
             solvent_pb_learn_center_shift=getattr(
                 args, "solvent_pb_learn_center_shift", False
-            ),
-            solvent_pb_differentiable=getattr(
-                args, "solvent_pb_differentiable", False
             ),
             fermi_level_baseline=getattr(args, "fermi_level_baseline", 0.0),
             atomic_valence_electrons=atomic_valence_electrons,
