@@ -316,8 +316,20 @@ class PB1DBackend:
             fields = ram.to(device, non_blocking=True).to(dt)
             neutral_v, phi_base = fields[0], fields[1]
 
+        # checkpointed when grad is needed: keeping the full-grid graph
+        # resident OOMs a 40 GB A100 (measured); the ~85 ms recompute is cheap
+        want_grad = bool(radial_coeffs.requires_grad or (
+            node_feats is not None and node_feats.requires_grad))
+
         with self._Phase(self, "2_assembly", device):
-            net_g = self._gto_net_density_g(grid, pos_frac.detach(), radial_coeffs.to(dt), sigmas)
+            def _assemble(coeffs):
+                return self._gto_net_density_g(grid, pos_frac.detach(), coeffs.to(dt), sigmas)
+
+            if want_grad:
+                from torch.utils.checkpoint import checkpoint as _ckpt
+                net_g = _ckpt(_assemble, radial_coeffs, use_reentrant=False)
+            else:
+                net_g = _assemble(radial_coeffs)
         with self._Phase(self, "3_poisson", device):
             net_values = grid.ifft_real(net_g)
             n_e_values = neutral_v - net_values
@@ -325,7 +337,18 @@ class PB1DBackend:
             cvhar3 = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
 
         with self._Phase(self, "4_closure", device):
-            clo = closure_from_fields(n_e_density, cvhar3, grid, self.params, self._tp)
+            if want_grad:
+                from torch.utils.checkpoint import checkpoint as _ckpt
+                keys = ("A_scr", "S_ion_z", "prior", "w_env", "u")
+
+                def _closure_tuple(ne, cv):
+                    out = closure_from_fields(ne, cv, grid, self.params, self._tp)
+                    return tuple(out[k] for k in keys)
+
+                vals = _ckpt(_closure_tuple, n_e_density, cvhar3, use_reentrant=False)
+                clo = dict(zip(keys, vals))
+            else:
+                clo = closure_from_fields(n_e_density, cvhar3, grid, self.params, self._tp)
 
         cvhar_z = cvhar3.mean(dim=(0, 1))
         prof_ne_z = n_e_values.mean(dim=(0, 1))
