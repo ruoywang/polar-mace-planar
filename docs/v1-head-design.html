@@ -1,0 +1,368 @@
+<title>The P_z residual head — where the error lives, and how v1 predicts it</title>
+<style>
+:root{
+  --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6; --good:#0a7a33;
+  --s2:#1baf7a; --s3:#eda100;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+    --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72; --s2:#199e70; --s3:#c98500; }
+}
+:root[data-theme="dark"]{ --paper:#14181d; --card:#1b2129; --ink:#e8ecf1; --ink2:#a6b0bc; --muted:#717c89;
+  --accent:#3987e5; --accent-ink:#6aa6ee; --hair:#2a323d; --code-bg:#222a35; --good:#4bbf72; --s2:#199e70; --s3:#c98500; }
+:root[data-theme="light"]{ --paper:#f8f9fa; --card:#ffffff; --ink:#182230; --ink2:#4d5a68; --muted:#8a94a0;
+  --accent:#2a78d6; --accent-ink:#1e5ea8; --hair:#dde3e9; --code-bg:#eef2f6; --good:#0a7a33; --s2:#1baf7a; --s3:#eda100; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:17px/1.65 Charter,"Bitstream Charter",Georgia,Cambria,serif;}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+.topbar{display:flex;align-items:baseline;gap:12px;padding:18px 0;border-bottom:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;color:var(--ink2)}
+.topbar .series{letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.badge{margin-left:auto;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--hair);border-radius:3px;padding:2px 8px;color:var(--muted)}
+h1{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:34px;line-height:1.2;font-weight:650;
+  letter-spacing:-.01em;margin:40px 0 10px;text-wrap:balance}
+.dek{font-size:19px;color:var(--ink2);max-width:68ch;margin:0 0 26px}
+h2{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:21px;font-weight:650;margin:52px 0 12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+p{max-width:68ch;margin:0 0 14px}
+code{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;font-size:.86em;
+  background:var(--code-bg);border-radius:3px;padding:1px 5px}
+var{font-style:italic;font-family:Charter,Georgia,serif}
+.eq{background:var(--card);border:1px solid var(--hair);border-radius:6px;
+  padding:12px 20px;margin:16px 0;max-width:680px;overflow-x:auto}
+.eq math{font-size:1.16rem;margin:6px 0}
+.eq math[display="block"]{margin:8px 0}
+.eq .lbl{float:right;color:var(--muted);font-size:13px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+.eq sub,.eq sup{font-size:.68em}
+.tblwrap{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;min-width:560px}
+th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;
+  text-align:left;padding:8px 14px 6px 0;border-bottom:1px solid var(--hair)}
+td{padding:8px 14px 8px 0;border-bottom:1px solid var(--hair)}
+td.num,th.num{text-align:right;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums;font-size:13.5px}
+td.hl{color:var(--accent-ink);font-weight:600}
+.fig{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:20px;margin:20px 0;position:relative}
+.fig .cap{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--ink2);margin-top:10px;max-width:78ch}
+.panel-title{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:600;
+  color:var(--ink2);margin:10px 0 2px}
+.note{border-left:3px solid var(--accent);padding:2px 0 2px 16px;color:var(--ink2);margin:18px 0;max-width:66ch}
+ul,ol{max-width:68ch;padding-left:22px} li{margin-bottom:7px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12.5px;color:var(--ink2);margin:0 0 8px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--hair);
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--muted)}
+a{color:var(--accent-ink)} a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.d-lab{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12.5px;fill:var(--ink2)}
+.d-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;fill:var(--ink)}
+</style>
+<style>
+.eqx{background:var(--card);border:1px solid var(--hair);border-radius:6px;
+  padding:14px 22px;margin:18px 0;max-width:760px}
+.eqx .lbl{float:right;color:var(--muted);font-size:13px;
+  font-family:-apple-system,"Segoe UI",Roboto,sans-serif;margin-top:2px}
+.eqx .row{display:flex;justify-content:space-between;align-items:baseline;
+  gap:26px;padding:6px 0;border-bottom:1px dashed var(--hair)}
+.eqx .row:last-child{border-bottom:none}
+.eqx .f{font:16.5px/1.7 Charter,"Bitstream Charter",Georgia,serif}
+.eqx .f.big{font-size:19px}
+.eqx .n{font:12.5px -apple-system,"Segoe UI",Roboto,sans-serif;color:var(--muted);
+  text-align:right;flex-shrink:0;max-width:36%}
+</style>
+<div class="wrap">
+  <div class="topbar"><span class="series">pb-1d · design notes (review)</span>
+    <span class="badge">v1 · free-trained</span></div>
+
+  <h1>The P<sub>z</sub> residual head: where the error lives, and how v1 predicts it</h1>
+  <p class="dek">A measurement — every closure error on cal_18 lives in the
+  laterally-corrugated shell of the cavity — and the head design it licenses: an envelope
+  taken from the live cavity times a small learned shape factor. No interface convention
+  (z<sub>if</sub>) anywhere.</p>
+
+  <h2><span class="no">1</span>Why the residual can only live in the corrugated shell</h2>
+  <p>The learned object sits in the offset slot of the polarization law
+  ⟨P<sub>z</sub>⟩ = A·⟨ℰ<sub>z</sub>⟩ + P<sub>off</sub>, and P<sub>off</sub> is a lateral
+  covariance: how "some of this plane is water, some is not" correlates with the lateral
+  field pattern. Two hard locality facts follow.</p>
+  <p><strong>Support.</strong> A plane that is all water (bulk) or all cavity/metal has no
+  lateral χ fluctuation — the covariance is identically zero there. Cauchy–Schwarz makes
+  this an inequality: |P<sub>off</sub>(z)| ≤ √var<sub>xy</sub>(χ) · √var<sub>xy</sub>(ℰ<sub>z</sub>).</p>
+  <p><strong>Reach.</strong> A lateral field pattern of wavelength λ decays as
+  e<sup>−2πd/λ</sup> with distance d: molecular-scale patterns (λ ≈ 3 Å) from atoms more
+  than ~2 Å away are exponentially gone. Distant atoms contribute only the plane mean,
+  which belongs to A·⟨ℰ⟩, not to the covariance.</p>
+  <p>So the residual at height z is set by the atoms within a ~2 Å shell of that height —
+  the outermost water layer and the top metal layer. Both statements are measurable.</p>
+
+  <h2><span class="no">2</span>Measured: 96–99.9% of every error lives inside the shell</h2>
+  <p>cal_18, screened-vacuum 1-D solve vs the DFT reference. The permitted region comes
+  from the live cavity — planes whose in-plane variance of s<sub>diel</sub> exceeds 0.1% of
+  its peak: z ∈ [9.6, 19.0] Å, 93 of 384 planes. The three
+  error profiles below are <em>one</em> error seen three ways, not three defects: the
+  P<sub>off</sub> residual is the cause (exactly the head's target ΔP*), the ρ<sub>b</sub>
+  and P<sub>z</sub> errors are its downstream consequences through the solve. Predict the
+  first curve and all three collapse to the machinery floor (measured: exact anchor →
+  φ 5.6×10⁻⁴ eV vs 0.75 eV).</p>
+
+  <div class="fig">
+    <div class="legend"><span><i style="background:var(--accent)"></i>in-plane variance of s_diel (scaled)</span>
+      <span><i style="background:var(--muted)"></i>plane mean of s_diel</span></div>
+    <div class="panel-title">the permitted region</div>
+    <svg id="p-var" width="100%" viewBox="0 0 880 200" role="img" aria-label="cavity variance and mean"></svg>
+    <div class="panel-title">P_off residual (prior − exact)</div>
+    <svg id="p-poff" width="100%" viewBox="0 0 880 180" role="img" aria-label="P_off residual"></svg>
+    <div class="panel-title">ρ_bound error (10⁻³ e/Å³)</div>
+    <svg id="p-nb" width="100%" viewBox="0 0 880 180" role="img" aria-label="bound charge error"></svg>
+    <div class="panel-title">P_z error (10⁻² e/Å²)</div>
+    <svg id="p-pz" width="100%" viewBox="0 0 880 180" role="img" aria-label="P_z error"></svg>
+    <div class="cap">The shaded band (same in all panels) is the variance criterion. Top
+    panel — why variance, not "mean between 0 and 1": the plane mean stays fractional out
+    to z ≈ 31 Å (the smooth solvation-window ramp), but that ramp is laterally uniform, has
+    no variance, and carries no error. Corrugation is the right criterion.</div>
+  </div>
+
+  <div class="tblwrap"><table>
+    <tr><th>error profile</th><th class="num">energy inside</th><th class="num">rms inside</th>
+        <th class="num">rms outside</th><th>95%-energy window</th></tr>
+    <tr><td>P<sub>off</sub> residual (prior − exact)</td><td class="num hl">99.7%</td>
+        <td class="num">9.9e-3</td><td class="num">3.0e-4</td><td>[14.9, 18.6] Å — 3.7 Å</td></tr>
+    <tr><td>ρ<sub>bound</sub> error (vs DFT RHOB)</td><td class="num hl">96.4%</td>
+        <td class="num">6.6e-4</td><td class="num">7.2e-5</td><td>[9.5, 18.7] Å</td></tr>
+    <tr><td>P<sub>z</sub> error</td><td class="num hl">99.9%</td>
+        <td class="num">9.8e-4</td><td class="num">1.5e-5</td><td>[11.7, 16.3] Å — 4.6 Å</td></tr>
+  </table></div>
+  <p>One structure so far (cal_18); the cross-structure version rides along with the label
+  factory for free.</p>
+
+  <h2><span class="no">3</span>The parametrization: envelope × shape factor</h2>
+  <div class="eqx"><span class="lbl">v1 residual</span>
+    <div class="row"><span class="f big">Δ<var>P</var>(<var>z</var>) = G<sub>σz</sub> ∗ [ <var>w</var>(<var>z</var>) · Σ<sub><var>k</var></sub> <var>c</var><sub><var>k</var></sub> <var>B</var><sub><var>k</var></sub>(<var>u</var>(<var>z</var>)) ]</span><span class="n">K = 8;&nbsp; σ<sub>z</sub> = 0.2 Å</span></div>
+    <div class="row"><span class="f"><var>w</var>(<var>z</var>) = √var<sub>xy</sub>[χ] · √var<sub>xy</sub>[ℰ<sup>scr</sup>]</span><span class="n">envelope — where a residual may exist; physical units, not normalized</span></div>
+    <div class="row"><span class="f"><var>u</var>(<var>z</var>) = Σ<sub><var>z</var>′≤<var>z</var></sub> <var>w</var> ⁄ Σ <var>w</var></span><span class="n">interface progress, 0 → 1 across the shell</span></div>
+    <div class="row"><span class="f"><var>B</var><sub><var>k</var></sub>(<var>u</var>) = e<sup>−(<var>u</var>−<var>u</var><sub><var>k</var></sub>)²/2σ²</sup>,&nbsp; <var>u</var><sub><var>k</var></sub> = (<var>k</var>−½)/<var>K</var>,&nbsp; σ = 1/<var>K</var></span><span class="n">fixed basis — never changes</span></div>
+    <div class="row"><span class="f"><var>c</var><sub><var>k</var></sub> = 0.25 · tanh( MLP(<var>x</var><sub><var>k</var></sub>) )</span><span class="n">the only learned numbers (§5)</span></div>
+    <div class="row"><span class="f">G<sub>σz</sub>: fixed Gaussian blur in <var>z</var></span><span class="n">z-width floor — caps the ρ<sub>b</sub> frequencies the u-compression would create (§4)</span></div>
+  </div>
+  <p>The hard, structure-dependent geometry — where the shell sits, how wide, how strong —
+  is carried by w and u, both computed from the cavity that is already built live every
+  forward. Because w has physical units, interface roughness and the charge-state field
+  amplitude act directly through the envelope; because w vanishes outside the shell, the
+  residual <em>cannot</em> leak out, whatever the coefficients do. The basis only has to
+  draw a smooth curve on a normalized [0, 1] interval.</p>
+
+  <h2><span class="no">4</span>Do eight Gaussians suffice? Direct check</h2>
+  <p>Least-squares fit of the <em>actual</em> cal_18 residual (prior − exact) in exactly
+  this form. The target is a single peak with a shoulder; eight overlapping Gaussians are
+  a smooth spline with eight degrees of freedom.</p>
+  <div class="fig">
+    <div class="panel-title">the 8 building blocks — w(z)·B_k(u(z)), each × its fitted coefficient</div>
+    <svg id="p-blk" width="100%" viewBox="0 0 880 180" role="img" aria-label="basis building blocks"></svg>
+    <div class="legend"><span><i style="background:var(--ink2)"></i>actual residual (prior − exact)</span>
+      <span><i style="background:var(--s2)"></i>8-coefficient reconstruction</span></div>
+    <div class="panel-title">actual residual vs reconstruction</div>
+    <svg id="p-fit" width="100%" viewBox="0 0 880 200" role="img" aria-label="fit vs target"></svg>
+    <div class="cap">Fitted c = [+0.038, -0.016, +0.053, -0.053, +0.105, -0.131, +0.173, -0.129] (max |c| 0.173 → c<sub>max</sub> = 0.25);
+    reconstruction rms 4.7e-04 against a target of rms 4.9e-3, peak 2.2e-2 — already
+    below the 5×10⁻⁴ solver bar. The learning problem is exactly "predict these eight
+    numbers per structure".</div>
+  </div>
+  <div class="tblwrap"><table>
+    <tr><th>basis size (σ<sub>z</sub> = 0.2 Å)</th><th class="num">reconstruction rms</th><th>vs the accuracy bars</th></tr>
+    <tr><td>K = 4</td><td class="num">1.7e-03</td><td>above the training bar</td></tr>
+    <tr><td>K = 6</td><td class="num">8.4e-04</td><td>below the 1e-3 training bar</td></tr>
+    <tr><td>K = 8</td><td class="num hl">4.7e-04</td><td>below the 5e-4 solver bar</td></tr>
+    <tr><td>K = 12</td><td class="num">3.6e-04</td><td>below the 5e-4 solver bar</td></tr>
+    <tr><td>K = 16</td><td class="num">3.5e-04</td><td>below the 5e-4 solver bar</td></tr>
+  </table></div>
+  <p><strong>End-to-end.</strong> The K = 8 reconstruction through the solve: φ 3.6×10⁻³ eV
+  (prior-only 0.747; machinery floor 5.6×10⁻⁴). The σ<sub>z</sub> floor exists because the
+  progress coordinate squeezes mid-shell basis functions to ~0.7 Å in z and ρ<sub>b</sub>
+  amplifies the unsmoothed leftover into wiggles; 0.2 Å improves every metric at once,
+  0.4 Å over-smooths (φ 2×10⁻²).</p>
+  <p><strong>The metric matters more than capacity.</strong> Measured leverage: a
+  unit-integral P<sub>off</sub> error costs −159 eV of electrode potential at the shell's
+  metal edge but −1.4 eV on the screened solvent side (>100× — dielectric screening).
+  Plain L2 is blind to this weight: over K = 6…32, φ bounces non-monotonically
+  (3.6×10⁻³–6.5×10⁻², each value predicted to ~1.4× by the leverage-weighted moment of the
+  leftover) and no K beats 8. The φ-optimal eight coefficients (Gauss–Newton — the
+  simulation of converged v1) reach φ 2.3×10⁻³ at a mild ρ<sub>b</sub> cost (peak
+  7.2→8.7×10⁻⁴): a fixed information budget; φ-training parks the deficit in pointwise
+  ρ<sub>b</sub>, the one channel nothing in the pipeline reads. v2's label regression must
+  be leverage-weighted, not plain L2.</p>
+  <p><strong>What stays sharp in ρ<sub>b</sub> is the target's own fine structure.</strong>
+  A ρ<sub>b</sub>-metric-optimal fit gains 1.3%; an atom-anchored basis (110 dof) at most
+  1.6× with unlearnable coefficients; grid refinement (dz 0.091→0.046) changes nothing,
+  while coarsening aliases (at 0.18 Å even the exact anchor degrades). Recovering it needs
+  the 3-D field itself. The residual right of the band is the absorption tail — outside the
+  envelope's reach, but its φ effect is an offset the in-band coefficients cancel (the
+  φ-optimal run does exactly that). All tunings are cal_18; the label factory revalidates
+  them for free.</p>
+  <div class="fig">
+    <div class="legend"><span><i style="background:var(--ink2)"></i>DFT reference</span>
+      <span><i style="background:var(--s2)"></i>prior + 8-coefficient fit</span></div>
+    <div class="panel-title">φ(z) — plane-averaged potential (eV)</div>
+    <svg id="p-e2f" width="100%" viewBox="0 0 880 200" role="img" aria-label="potential three ways"></svg>
+    <div class="panel-title">ρ_bound(z) (10⁻³ e/Å³)</div>
+    <svg id="p-e2b" width="100%" viewBox="0 0 880 200" role="img" aria-label="bound charge three ways"></svg>
+    <div class="panel-title">⟨P_z⟩(z) = −∫ρ_bound dz (10⁻² e/Å²)</div>
+    <svg id="p-e2p" width="100%" viewBox="0 0 880 200" role="img" aria-label="P_z three ways"></svg>
+    <div class="cap">The solved quantities with the eight-coefficient P<sub>off</sub>
+    against the DFT reference: φ and P<sub>z</sub> sit on the reference at line width; the
+    only visible departure is the residual wiggle in ρ<sub>b</sub> — the parked information
+    deficit. Omitted: prior-only (φ displaced −1.2 eV) and exact-anchor (overlays the
+    reference everywhere).</div>
+  </div>
+
+  <h2><span class="no">5</span>Predicting the coefficients</h2>
+  <div class="eqx"><span class="lbl">c<sub>k</sub> — explicit</span>
+    <div class="row"><span class="f big"><var>c</var><sub><var>k</var></sub> = 0.25 · tanh( MLP( [ <var>F</var><sub><var>k</var></sub> ‖ <var>F</var><sub>glob</sub> ‖ <var>s</var><sub><var>k</var></sub> ] ) )</span><span class="n">one MLP shared by all zones</span></div>
+    <div class="row"><span class="f"><var>F</var><sub><var>k</var></sub> = Σ<sub><var>i</var></sub> ω<sub><var>i</var><var>k</var></sub> <var>f</var><sub><var>i</var></sub> ⁄ Σ<sub><var>i</var></sub> ω<sub><var>i</var><var>k</var></sub></span><span class="n">zone-k pooled atom features (1152)</span></div>
+    <div class="row"><span class="f"><strong>ω<sub><var>i</var><var>k</var></sub> = <var>w</var>(<var>z</var><sub><var>i</var></sub>) · e<sup>−(<var>u</var>(<var>z</var><sub><var>i</var></sub>)−<var>u</var><sub><var>k</var></sub>)²/2σ<sub>f</sub>²</sup></strong>,&nbsp; σ<sub>f</sub> = 1.5/<var>K</var></span><span class="n">soft atom weights: in the shell × near zone k</span></div>
+    <div class="row"><span class="f"><var>F</var><sub>glob</sub> = (1/<var>N</var>) Σ<sub><var>i</var></sub> <var>f</var><sub><var>i</var></sub></span><span class="n">whole-structure mean (1152)</span></div>
+    <div class="row"><span class="f"><var>s</var><sub><var>k</var></sub> = [ <var>q</var><sub>tot</sub>/10,&nbsp; <var>u</var><sub><var>k</var></sub>,&nbsp; <var>P</var><sub>prior</sub>(<var>u</var><sub><var>k</var></sub>)/0.3 ]</span><span class="n">three scalars</span></div>
+    <div class="row"><span class="f">MLP: 2307 → 128 → 1</span><span class="n">SiLU; final layer zero-init → ΔP ≡ 0 at step 0</span></div>
+  </div>
+  <p>f<sub>i</sub> are the per-atom multi-layer mixed features the center-head already uses
+  (layer_feature_mixer; each encodes the atom's ~10 Å environment). The two poolings differ
+  only in weights: F<sub>k</sub> answers "what does slice k look like" — only shell atoms
+  near u<sub>k</sub> speak; F<sub>glob</sub> answers "what kind of system is this" — the
+  context the normalized zone mean has discarded. The weights are soft: a shell oxygen at
+  u = 0.30 contributes ≈ 0.80 to zone 3, ≈ 0.68 to zone 2, ≈ 0.31 to zone 5; a deep slab
+  atom (w ≈ 0) is silent everywhere. No hard partition → features move smoothly with atoms
+  and stay differentiable, which the end-to-end v1 gradient requires.</p>
+  <p>Deliberately excluded, and why: absolute z, cell size, z<sub>e50</sub> (replaced by
+  u); species counts (already in f<sub>i</sub>); A(u<sub>k</sub>) (monotone across the
+  shell — duplicates u<sub>k</sub>); ⟨S<sub>ion</sub>⟩(u<sub>k</sub>) (the ion cavity opens
+  outside the shell, ≈0 over most of it). The last two are ablation candidates once v2
+  labels exist; in the label-free v1 every input is a potential fudge channel, so the
+  scalar set stays minimal.</p>
+
+  <h2><span class="no">6</span>One forward pass</h2>
+  <div class="fig">
+    <svg id="pipe" width="100%" viewBox="0 0 880 372" role="img" aria-label="pipeline"></svg>
+    <div class="cap">Every step encodes one physical judgment: <em>where</em> a residual may
+    exist (the cavity decides), <em>who</em> gets a say (shell atoms), <em>what</em> they say
+    (local arrangement → local correction). Nothing is supervised in v1: the potential /
+    Fermi / Φ1D loss gradients flow back through the differentiable 1-D solve into the MLP
+    and the MACE trunk. The energy/forces path stays detached from the head at first.</div>
+  </div>
+
+  <h2><span class="no">7</span>Trainability, and the risks</h2>
+  <ul>
+    <li><strong>The gradient signal is strong and already measured.</strong> The medium
+    screens an offset-slot bias ~10× in P<sub>z</sub>; the survivor lands almost entirely
+    as a slab-side potential shift (~2×10⁻² of offset ↦ ~1.2 eV of electrode potential).
+    The potential and Fermi losses see the head at first order.</li>
+    <li><strong>Risk: shape under-determination.</strong> The observables mostly constrain
+    the integrated moment of ΔP — shape drift is possible (the layer_mean-creep failure
+    mode of the planar era). Monitor per epoch: rms, dipole moment, correlation with the
+    prior. v2 is the antidote if it bites; v1-vs-v2 is the fudge experiment.</li>
+    <li><strong>Risk: the envelope follows the model density.</strong> Early in training
+    the density is poor and the envelope with it. Mitigations: zero-init (ΔP ≡ 0 at step 0)
+    and the per-structure health guard (Newton failure → prior-only fallback).</li>
+    <li><strong>Single-structure evidence.</strong> All numbers — including the
+    σ<sub>z</sub> = 0.2 Å sweet spot, which sits in a narrow window (0.4 Å already
+    collapses φ) — are cal_18; the cross-structure check rides along with the label
+    factory.</li>
+  </ul>
+
+  <div class="footer">pb-1d design note (review) · data: exp_prior_profiles/check_error_support.py
+  on cal_18 · related: <a href="https://ruoywang.github.io/cep-dip-python-pb/closure_1d.html">the
+  1-D closure route</a></div>
+</div>
+<script>
+(function(){
+  const NS="http://www.w3.org/2000/svg";
+  const el=(t,a)=>{const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+  const txt=(g,x,y,s,a)=>{const t=el("text",Object.assign({x,y},a||{}));t.textContent=s;g.appendChild(t);return t;};
+  const MONO="ui-monospace,Menlo,monospace", SANS="-apple-system,'Segoe UI',Roboto,sans-serif";
+  const Z=[0.00,0.18,0.36,0.55,0.73,0.91,1.09,1.28,1.46,1.64,1.82,2.01,2.19,2.37,2.55,2.73,2.92,3.10,3.28,3.46,3.65,3.83,4.01,4.19,4.38,4.56,4.74,4.92,5.10,5.29,5.47,5.65,5.83,6.02,6.20,6.38,6.56,6.74,6.93,7.11,7.29,7.47,7.66,7.84,8.02,8.20,8.39,8.57,8.75,8.93,9.11,9.30,9.48,9.66,9.84,10.03,10.21,10.39,10.57,10.76,10.94,11.12,11.30,11.48,11.67,11.85,12.03,12.21,12.40,12.58,12.76,12.94,13.12,13.31,13.49,13.67,13.85,14.04,14.22,14.40,14.58,14.77,14.95,15.13,15.31,15.49,15.68,15.86,16.04,16.22,16.41,16.59,16.77,16.95,17.14,17.32,17.50,17.68,17.86,18.05,18.23,18.41,18.59,18.78,18.96,19.14,19.32,19.51,19.69,19.87,20.05,20.23,20.42,20.60,20.78,20.96,21.15,21.33,21.51,21.69,21.88,22.06,22.24,22.42,22.60,22.79,22.97,23.15,23.33,23.52,23.70,23.88,24.06,24.24,24.43,24.61,24.79,24.97,25.16,25.34,25.52,25.70,25.89,26.07,26.25,26.43,26.61,26.80,26.98,27.16,27.34,27.53,27.71,27.89,28.07,28.26,28.44,28.62,28.80,28.98,29.17,29.35,29.53,29.71,29.90,30.08,30.26,30.44,30.62,30.81,30.99,31.17,31.35,31.54,31.72,31.90,32.08,32.27,32.45,32.63,32.81,32.99,33.18,33.36,33.54,33.72,33.91,34.09,34.27,34.45,34.64,34.82];
+  const VARN=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0009,0.0025,0.0031,0.0021,0.0007,0.0001,0.0000,0.0000,0.0000,0.0001,0.0029,0.0201,0.0510,0.0791,0.0976,0.1072,0.1095,0.1061,0.0985,0.0883,0.0774,0.0681,0.0620,0.0601,0.0626,0.0689,0.0787,0.0918,0.1094,0.1400,0.2046,0.2871,0.3624,0.4304,0.4990,0.5907,0.7202,0.8494,0.9468,1.0000,0.9706,0.8612,0.7379,0.5951,0.4729,0.3976,0.3396,0.2786,0.2150,0.1547,0.0972,0.0433,0.0093,0.0007,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000];
+  const MEANS=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0003,0.0011,0.0019,0.0021,0.0016,0.0009,0.0003,0.0001,0.0000,0.0000,0.0004,0.0026,0.0082,0.0149,0.0204,0.0239,0.0258,0.0264,0.0259,0.0243,0.0220,0.0197,0.0176,0.0162,0.0157,0.0161,0.0174,0.0195,0.0226,0.0278,0.0386,0.0559,0.0746,0.0924,0.1111,0.1365,0.1763,0.2308,0.2952,0.3683,0.4488,0.5394,0.6409,0.7350,0.8083,0.8615,0.8952,0.9155,0.9309,0.9455,0.9595,0.9725,0.9844,0.9938,0.9985,0.9998,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,0.9997,0.9986,0.9944,0.9814,0.9482,0.8794,0.7630,0.6027,0.4226,0.2575,0.1342,0.0591,0.0218,0.0067,0.0017,0.0004,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000];
+  const POFF=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0002,0.0002,0.0001,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0002,0.0008,0.0017,0.0025,0.0030,0.0033,0.0035,0.0034,0.0032,0.0030,0.0027,0.0024,0.0022,0.0022,0.0023,0.0025,0.0029,0.0033,0.0039,0.0052,0.0076,0.0101,0.0123,0.0139,0.0156,0.0176,0.0199,0.0218,0.0220,0.0188,0.0179,0.0185,0.0166,0.0113,0.0034,-0.0030,-0.0078,-0.0120,-0.0130,-0.0113,-0.0073,-0.0024,0.0004,0.0013,0.0013,0.0013,0.0012,0.0012,0.0011,0.0010,0.0009,0.0008,0.0007,0.0006,0.0005,0.0004,0.0004,0.0003,0.0002,0.0002,0.0002,0.0001,0.0001,0.0001,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000];
+  const NBE=[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0026,-0.0383,-0.1877,-0.3487,-0.2512,0.0434,0.2806,0.3022,0.1587,0.0393,0.0024,-0.0470,-0.4388,-1.4830,-2.0719,-1.4793,-0.7565,-0.3823,-0.1906,-0.0738,0.0262,0.1253,0.2046,0.2435,0.2185,0.1102,-0.0519,-0.2100,-0.3303,-0.3885,-0.3294,-0.3679,-0.6452,-0.5257,-0.1385,0.1744,0.4179,0.6320,0.9508,0.9124,0.7789,1.2739,1.5258,-0.1598,0.5828,0.4305,0.8883,0.7594,0.2917,0.4419,0.2657,-0.1367,-0.1539,-0.5578,-0.2914,-0.0975,0.0295,-0.0022,-0.0136,-0.0165,-0.0104,-0.0045,-0.0046,-0.0089,-0.0124,-0.0133,-0.0120,-0.0083,-0.0040,-0.0014,0.0002,0.0021,0.0042,0.0054,0.0064,0.0077,0.0092,0.0097,0.0093,0.0090,0.0092,0.0092,0.0087,0.0083,0.0083,0.0075,0.0060,0.0050,0.0045,0.0032,0.0022,0.0022,0.0012,0.0001,0.0025,0.0062,0.0085,0.0078,-0.0011,-0.0111,-0.0050,0.0142,0.0212,0.0009,-0.0120,0.0081,0.0105,-0.0084,0.0067,0.0069,-0.0139,0.0164,0.0001,-0.0127,0.0190,-0.0183,-0.0001,0.0089,-0.0059,-0.0065,-0.0189,-0.0166,-0.0068,-0.0018,-0.0004,-0.0001,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000];
+  const PZE=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0005,0.0031,0.0089,0.0142,0.0149,0.0106,0.0050,0.0013,0.0002,0.0000,0.0005,0.0060,0.0278,0.0644,0.0949,0.1116,0.1200,0.1242,0.1260,0.1260,0.1242,0.1208,0.1164,0.1122,0.1097,0.1098,0.1130,0.1185,0.1254,0.1318,0.1380,0.1485,0.1593,0.1635,0.1618,0.1550,0.1447,0.1286,0.1115,0.0966,0.0775,0.0470,0.0444,0.0376,0.0286,0.0151,-0.0005,-0.0076,-0.0144,-0.0210,-0.0198,-0.0172,-0.0088,-0.0017,0.0007,0.0006,0.0004,0.0007,0.0010,0.0012,0.0013,0.0014,0.0015,0.0017,0.0020,0.0022,0.0024,0.0025,0.0025,0.0025,0.0025,0.0024,0.0023,0.0022,0.0021,0.0019,0.0017,0.0016,0.0014,0.0012,0.0011,0.0009,0.0007,0.0006,0.0005,0.0003,0.0002,0.0002,0.0001,0.0000,0.0000,-0.0000,-0.0000,-0.0001,-0.0002,-0.0003,-0.0005,-0.0005,-0.0003,-0.0002,-0.0003,-0.0007,-0.0009,-0.0007,-0.0007,-0.0009,-0.0008,-0.0009,-0.0010,-0.0009,-0.0010,-0.0012,-0.0009,-0.0011,-0.0010,-0.0008,-0.0010,-0.0010,-0.0009,-0.0006,-0.0002,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000];
+  const FIT8=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0001,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0003,0.0008,0.0016,0.0024,0.0030,0.0034,0.0036,0.0035,0.0033,0.0031,0.0027,0.0025,0.0023,0.0022,0.0023,0.0025,0.0028,0.0033,0.0041,0.0054,0.0073,0.0097,0.0120,0.0141,0.0160,0.0178,0.0196,0.0215,0.0221,0.0197,0.0172,0.0176,0.0175,0.0123,0.0036,-0.0046,-0.0099,-0.0119,-0.0112,-0.0090,-0.0061,-0.0033,-0.0014,-0.0004,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000];
+  const PHR=[0.3081,0.5222,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6095,0.6094,0.6093,0.6091,0.6087,0.6079,0.6065,0.6038,0.5989,0.5896,0.5723,0.5403,0.4809,0.3706,0.1647,-0.2216,-0.9474,-2.2947,-4.7992,-9.6813,-16.1707,-20.9745,-23.2239,-23.4378,-20.2253,-14.1656,-8.6242,-4.9093,-2.5478,-1.2940,-0.7302,-0.5455,-0.5877,-0.7609,-0.9622,-1.3077,-1.8361,-2.4365,-3.0862,-3.5660,-3.6494,-3.5035,-3.1804,-2.7839,-2.6797,-2.6607,-2.5078,-2.4000,-2.3194,-2.1670,-2.1692,-2.4789,-2.8215,-3.0441,-3.0211,-2.8115,-2.6382,-2.7066,-2.8133,-2.9275,-3.1040,-3.1730,-3.2322,-3.3081,-3.0630,-2.7855,-2.9237,-3.2043,-3.4792,-3.6611,-3.4041,-2.7811,-2.1452,-1.4971,-0.9269,-0.5536,-0.3860,-0.3430,-0.3539,-0.3650,-0.3440,-0.2748,-0.1387,-0.0250,0.0277,0.0541,0.0645,0.0675,0.0671,0.0649,0.0620,0.0591,0.0562,0.0534,0.0506,0.0478,0.0451,0.0425,0.0400,0.0376,0.0353,0.0332,0.0312,0.0293,0.0276,0.0260,0.0244,0.0230,0.0217,0.0204,0.0193,0.0182,0.0172,0.0163,0.0154,0.0146,0.0138,0.0131,0.0124,0.0118,0.0113,0.0107,0.0102,0.0098,0.0094,0.0090,0.0087,0.0083,0.0081,0.0078,0.0076,0.0074,0.0072,0.0070,0.0069,0.0068,0.0067,0.0067,0.0067,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0066,0.0940];
+  const PHF=[0.3061,0.5187,0.6055,0.6055,0.6055,0.6055,0.6055,0.6055,0.6055,0.6055,0.6054,0.6054,0.6054,0.6054,0.6054,0.6053,0.6053,0.6052,0.6049,0.6045,0.6038,0.6023,0.5997,0.5947,0.5854,0.5682,0.5361,0.4767,0.3664,0.1605,-0.2257,-0.9516,-2.2989,-4.8034,-9.6855,-16.1749,-20.9787,-23.2282,-23.4421,-20.2296,-14.1700,-8.6285,-4.9136,-2.5522,-1.2984,-0.7346,-0.5499,-0.5921,-0.7653,-0.9667,-1.3122,-1.8406,-2.4404,-3.0881,-3.5650,-3.6456,-3.4980,-3.1743,-2.7777,-2.6736,-2.6550,-2.5036,-2.3989,-2.3205,-2.1675,-2.1677,-2.4764,-2.8191,-3.0428,-3.0212,-2.8130,-2.6411,-2.7107,-2.8182,-2.9329,-3.1095,-3.1784,-3.2373,-3.3129,-3.0678,-2.7920,-2.9330,-3.2137,-3.4858,-3.6653,-3.4081,-2.7869,-2.1521,-1.5035,-0.9325,-0.5590,-0.3921,-0.3499,-0.3591,-0.3704,-0.3503,-0.2816,-0.1452,-0.0300,0.0234,0.0490,0.0584,0.0601,0.0598,0.0584,0.0563,0.0541,0.0518,0.0495,0.0472,0.0450,0.0427,0.0405,0.0384,0.0363,0.0344,0.0325,0.0307,0.0290,0.0274,0.0258,0.0244,0.0230,0.0217,0.0205,0.0194,0.0183,0.0173,0.0164,0.0155,0.0147,0.0140,0.0133,0.0126,0.0120,0.0114,0.0109,0.0104,0.0099,0.0095,0.0091,0.0088,0.0084,0.0081,0.0079,0.0076,0.0074,0.0073,0.0071,0.0070,0.0069,0.0068,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0067,0.0066,0.0066,0.0934];
+  const RBR=[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0007,0.0042,0.0107,0.0118,0.0037,-0.0066,-0.0101,-0.0077,-0.0047,-0.0017,0.0012,0.0175,0.0842,0.1671,0.1496,0.0630,0.0051,-0.0176,-0.0248,-0.0196,-0.0063,0.0069,0.0085,-0.0053,-0.0269,-0.0491,-0.0672,-0.0817,-0.0945,-0.1103,-0.1512,-0.2469,-0.3098,-0.2930,-0.3565,-0.4193,-0.5182,-0.8158,-1.0993,-1.2091,-1.6723,-2.3149,-2.9209,-3.2773,-3.6076,-3.4002,-2.6629,-1.7513,-0.8119,-0.3356,-0.0819,0.0989,-0.0010,-0.0609,0.0055,-0.0375,-0.0776,-0.0070,0.0530,0.1193,0.1984,0.3116,0.4823,0.6934,0.8913,1.0367,1.1020,1.1091,1.1002,1.0879,1.0722,1.0537,1.0335,1.0055,0.9628,0.9128,0.8647,0.8190,0.7762,0.7357,0.6979,0.6622,0.6288,0.5975,0.5684,0.5410,0.5157,0.4919,0.4701,0.4497,0.4311,0.4138,0.3982,0.3838,0.3709,0.3591,0.3488,0.3395,0.3313,0.3230,0.3135,0.2987,0.2745,0.2367,0.1867,0.1310,0.0802,0.0419,0.0186,0.0069,0.0021,0.0004,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000];
+  const RBF=[0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0002,0.0018,0.0085,0.0037,-0.0930,-0.2247,-0.1702,0.0248,0.1796,0.1872,0.0822,0.0121,0.0403,0.2061,0.3937,0.0425,-0.4098,-0.1488,0.1803,0.2041,0.1155,0.0296,-0.0023,0.0009,-0.0206,-0.0611,-0.0876,-0.1059,-0.1143,-0.1085,-0.1029,-0.0678,0.1416,0.0295,-0.8615,-0.8192,-0.2038,-0.0403,-0.1658,-0.9416,-1.4961,-1.2337,-1.5249,-2.1855,-2.7438,-3.9606,-3.0788,-3.4139,-2.6497,-1.8430,-1.1443,-0.1868,0.2112,0.1541,0.0793,-0.3777,-0.0934,-0.0631,-0.0544,0.0066,0.0895,0.1356,0.1765,0.2744,0.4723,0.7185,0.9120,1.0250,1.0771,1.0980,1.0964,1.0804,1.0719,1.0590,1.0347,1.0083,0.9693,0.9186,0.8682,0.8215,0.7835,0.7462,0.7039,0.6675,0.6361,0.6014,0.5726,0.5501,0.5230,0.4929,0.4738,0.4596,0.4293,0.3944,0.3844,0.3935,0.3996,0.3792,0.3356,0.3213,0.3441,0.3513,0.3296,0.3041,0.2915,0.2332,0.1433,0.1473,0.1313,0.0248,-0.0094,-0.0019,0.0287,0.0130,-0.0433,0.0401,0.0190,-0.0497,0.0123,0.0221,-0.0044,-0.0099,-0.0058,-0.0016,-0.0002,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000];
+  const PZR=[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0002,-0.0005,-0.0006,-0.0005,-0.0003,-0.0002,-0.0001,-0.0000,-0.0000,-0.0002,-0.0014,-0.0041,-0.0071,-0.0086,-0.0089,-0.0087,-0.0082,-0.0078,-0.0077,-0.0077,-0.0079,-0.0079,-0.0075,-0.0067,-0.0056,-0.0041,-0.0025,-0.0005,0.0020,0.0060,0.0115,0.0169,0.0230,0.0304,0.0393,0.0525,0.0716,0.0930,0.1209,0.1601,0.2109,0.2691,0.3336,0.3973,0.4496,0.4858,0.5047,0.5123,0.5150,0.5137,0.5131,0.5142,0.5143,0.5147,0.5161,0.5166,0.5159,0.5140,0.5108,0.5057,0.4977,0.4861,0.4707,0.4524,0.4325,0.4122,0.3921,0.3723,0.3526,0.3333,0.3144,0.2959,0.2782,0.2613,0.2453,0.2302,0.2158,0.2023,0.1894,0.1771,0.1655,0.1545,0.1440,0.1340,0.1245,0.1154,0.1068,0.0985,0.0905,0.0829,0.0756,0.0685,0.0617,0.0551,0.0487,0.0425,0.0364,0.0305,0.0247,0.0192,0.0141,0.0096,0.0059,0.0033,0.0016,0.0007,0.0002,0.0001,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000];
+  const PZF=[-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0003,0.0008,0.0044,0.0080,0.0085,0.0058,0.0023,0.0002,-0.0002,-0.0007,-0.0035,-0.0101,-0.0132,-0.0072,-0.0026,-0.0048,-0.0086,-0.0112,-0.0121,-0.0121,-0.0121,-0.0119,-0.0109,-0.0094,-0.0076,-0.0055,-0.0035,-0.0016,-0.0001,-0.0015,-0.0037,0.0079,0.0247,0.0308,0.0319,0.0338,0.0469,0.0727,0.0967,0.1218,0.1598,0.2049,0.2745,0.3341,0.3946,0.4477,0.4844,0.5087,0.5165,0.5134,0.5105,0.5082,0.5133,0.5168,0.5176,0.5188,0.5190,0.5177,0.5154,0.5124,0.5080,0.5004,0.4884,0.4726,0.4543,0.4348,0.4149,0.3949,0.3751,0.3555,0.3362,0.3172,0.2987,0.2808,0.2638,0.2478,0.2326,0.2182,0.2044,0.1913,0.1790,0.1673,0.1562,0.1456,0.1355,0.1258,0.1167,0.1080,0.0995,0.0915,0.0842,0.0772,0.0701,0.0628,0.0558,0.0494,0.0436,0.0374,0.0310,0.0249,0.0192,0.0139,0.0093,0.0063,0.0037,0.0011,0.0002,0.0003,0.0004,0.0000,-0.0004,0.0002,-0.0000,-0.0007,0.0000,0.0001,-0.0003,-0.0004,-0.0002,-0.0001,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000];
+  const BLK=[[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0001,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0003,0.0009,0.0017,0.0026,0.0033,0.0037,0.0039,0.0039,0.0036,0.0033,0.0030,0.0026,0.0024,0.0023,0.0024,0.0026,0.0029,0.0034,0.0040,0.0051,0.0064,0.0074,0.0077,0.0070,0.0055,0.0037,0.0021,0.0009,0.0003,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000],[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0001,-0.0003,-0.0004,-0.0006,-0.0007,-0.0008,-0.0008,-0.0008,-0.0008,-0.0007,-0.0007,-0.0007,-0.0007,-0.0007,-0.0008,-0.0010,-0.0012,-0.0016,-0.0022,-0.0031,-0.0043,-0.0054,-0.0061,-0.0062,-0.0056,-0.0042,-0.0026,-0.0012,-0.0004,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000],[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0001,0.0002,0.0003,0.0004,0.0005,0.0005,0.0006,0.0006,0.0006,0.0006,0.0006,0.0006,0.0007,0.0008,0.0010,0.0013,0.0019,0.0029,0.0048,0.0079,0.0123,0.0178,0.0240,0.0294,0.0312,0.0271,0.0183,0.0094,0.0036,0.0010,0.0002,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000],[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0002,-0.0002,-0.0004,-0.0008,-0.0017,-0.0032,-0.0062,-0.0114,-0.0197,-0.0301,-0.0379,-0.0375,-0.0283,-0.0161,-0.0070,-0.0024,-0.0007,-0.0002,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000],[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0001,0.0003,0.0007,0.0018,0.0047,0.0118,0.0268,0.0504,0.0746,0.0842,0.0717,0.0467,0.0242,0.0106,0.0042,0.0017,0.0007,0.0003,0.0001,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000],[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0001,-0.0005,-0.0021,-0.0072,-0.0206,-0.0460,-0.0778,-0.0986,-0.0955,-0.0732,-0.0470,-0.0269,-0.0148,-0.0082,-0.0046,-0.0026,-0.0014,-0.0008,-0.0004,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000],[0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0002,0.0010,0.0045,0.0150,0.0375,0.0696,0.0977,0.1075,0.0971,0.0766,0.0562,0.0399,0.0274,0.0181,0.0114,0.0066,0.0033,0.0013,0.0004,0.0001,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000],[-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0003,-0.0013,-0.0049,-0.0129,-0.0255,-0.0389,-0.0477,-0.0501,-0.0477,-0.0423,-0.0350,-0.0269,-0.0190,-0.0120,-0.0063,-0.0025,-0.0007,-0.0001,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,0.0000,0.0000,0.0000,-0.0000,-0.0000]];
+  const Z0=9.57, Z1=19.05;
+
+  function panel(id, series, ymin, ymax, yticks, fmt){
+    const svg=document.getElementById(id);
+    const W=880,H=+svg.viewBox.baseVal.height,M={l:64,r:20,t:12,b:28},ZA=0,ZB=35.09;
+    const sx=z=>M.l+(z-ZA)/(ZB-ZA)*(W-M.l-M.r);
+    const sy=v=>M.t+(ymax-v)/(ymax-ymin)*(H-M.t-M.b);
+    svg.appendChild(el("rect",{x:sx(Z0),y:M.t,width:sx(Z1)-sx(Z0),height:H-M.t-M.b,
+      fill:"var(--accent)",opacity:0.08}));
+    yticks.forEach(v=>{
+      svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:sy(v),y2:sy(v),stroke:"var(--hair)"}));
+      txt(svg,M.l-8,sy(v)+4,fmt(v),{"text-anchor":"end",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    });
+    [0,5,10,15,20,25,30,35].forEach(zz=>{
+      txt(svg,sx(zz),H-M.b+16,zz,{"text-anchor":"middle",fill:"var(--muted)","font-size":"11","font-family":MONO});
+    });
+    txt(svg,W-M.r,H-4,"z / Å",{"text-anchor":"end",fill:"var(--ink2)","font-size":"12","font-family":SANS});
+    series.forEach(sr=>{
+      const dd=sr.y.map((v,i)=>(i?"L":"M")+sx(Z[i]).toFixed(1)+","+
+        sy(Math.max(ymin,Math.min(ymax,v))).toFixed(1)).join(" ");
+      const a={d:dd,fill:"none",stroke:sr.c,"stroke-width":sr.dash?1.8:2,"stroke-linejoin":"round"};
+      if(sr.dash)a["stroke-dasharray"]=sr.dash;
+      svg.appendChild(el("path",a));
+    });
+  }
+  panel("p-var",[
+    {y:VARN,c:"var(--accent)"},
+    {y:MEANS,c:"var(--muted)",dash:"5,4"}],
+    -0.05,1.1,[0,0.5,1],v=>v);
+  panel("p-poff",[{y:POFF,c:"var(--s2)"}],-0.016,0.026,[-0.01,0,0.01,0.02],v=>v);
+  panel("p-nb",[{y:NBE,c:"var(--s2)"}],-2.6,2.6,[-2,0,2],v=>v);
+  panel("p-pz",[{y:PZE,c:"var(--s2)"}],-0.06,0.2,[0,0.1,0.2],v=>v);
+  panel("p-blk",BLK.map(b=>({y:b,c:"var(--accent)"})),-0.078,0.089,[-0.05,0,0.05],v=>v);
+  panel("p-fit",[{y:POFF,c:"var(--ink2)",dash:"5,4"},{y:FIT8,c:"var(--s2)"}],
+    -0.016,0.026,[-0.01,0,0.01,0.02],v=>v);
+  panel("p-e2f",[{y:PHR,c:"var(--ink2)",dash:"5,4"},{y:PHF,c:"var(--s2)"}],
+    -25,2,[-24,-16,-8,0],v=>v);
+  panel("p-e2b",[{y:RBR,c:"var(--ink2)",dash:"5,4"},{y:RBF,c:"var(--s2)"}],
+    -4.2,2.2,[-4,-2,0,2],v=>v);
+  panel("p-e2p",[{y:PZR,c:"var(--ink2)",dash:"5,4"},{y:PZF,c:"var(--s2)"}],
+    -0.06,0.6,[0,0.25,0.5],v=>v);
+
+  /* pipeline diagram */
+  (function(){
+    const g=document.getElementById("pipe");
+    const steps=[
+      ["current density (MACE)","cavity built live, every forward"],
+      ["envelope w(z) + coordinate u(z)","where a residual may exist; 0→1 across the shell"],
+      ["atom weights ω = w(z_atom)·gauss(u−u_k)","shell atoms speak; deep atoms silent"],
+      ["K zone-pooled features + global + scalars","x_k, 2307 dims per zone"],
+      ["shared MLP → c₁…c₈","tanh-bounded, zero-init — the only learned step"],
+      ["ΔP(z) = w(z)·Σ c_k B_k(u)","into the P_z offset slot"],
+      ["differentiable 1-D solve","→ potential / Fermi / Φ1D losses"]
+    ];
+    const X=170,Wb=430,Hb=38,gap=10;
+    steps.forEach((s,i)=>{
+      const y=8+i*(Hb+gap);
+      g.appendChild(el("rect",{x:X,y:y,width:Wb,height:Hb,rx:6,fill:"var(--card)",
+        stroke:i===4?"var(--s2)":"var(--hair)","stroke-width":i===4?2:1}));
+      txt(g,X+14,y+16,s[0],{fill:"var(--ink)","font-size":"13","font-family":SANS,"font-weight":"600"});
+      txt(g,X+14,y+31,s[1],{fill:"var(--ink2)","font-size":"11.5","font-family":SANS});
+      if(i<steps.length-1)
+        g.appendChild(el("path",{d:"M"+(X+Wb/2)+","+(y+Hb)+" l0,"+gap,stroke:"var(--muted)","stroke-width":1.5}));
+    });
+    const yMLP=8+4*(Hb+gap)+Hb/2, yBot=8+6*(Hb+gap)+Hb/2;
+    g.appendChild(el("path",{d:"M"+(X+Wb+16)+","+yBot+" C "+(X+Wb+86)+","+yBot+" "+(X+Wb+86)+","+yMLP+" "+(X+Wb+16)+","+yMLP,
+      fill:"none",stroke:"var(--s3)","stroke-width":1.6,"stroke-dasharray":"6,4"}));
+    txt(g,X+Wb+96,(yMLP+yBot)/2-2,"loss gradients",{fill:"var(--s3)","font-size":"12","font-family":SANS});
+    txt(g,X+Wb+96,(yMLP+yBot)/2+13,"(v1: label-free)",{fill:"var(--s3)","font-size":"11","font-family":SANS});
+  })();
+})();
+</script>
