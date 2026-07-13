@@ -109,6 +109,13 @@ class PB1DBackend:
         self._bl_arr = None
         self._bl_index: Dict[int, int] = {}
         self._bl_shape = None
+        # lazy RAM cache of the two used fields (neutral, phi_base) as f32;
+        # kills the ~80 ms/graph disk re-read measured in real training
+        # (3 ranks hammering one 14 GB file). ~24 MB/sample.
+        self._bl_ram: Dict[int, torch.Tensor] = {}
+        self._bl_ram_max = int(os.environ.get("MACE_PB1D_PRELOAD_MAX", "512"))
+        if os.environ.get("MACE_PB1D_NO_PRELOAD"):
+            self._bl_ram_max = 0
         if baseline_cache:
             bl = os.path.expandvars(os.path.expanduser(baseline_cache))
             with open(os.path.join(bl, "baseline_index.json")) as f:
@@ -297,10 +304,17 @@ class PB1DBackend:
         pos_frac = torch.remainder(pos64 @ torch.linalg.inv(cell64), 1.0)
 
         with self._Phase(self, "1_baseline", device):
-            fields = torch.as_tensor(
-                np.ascontiguousarray(self._bl_arr[bl_row]), device=device
-            ).to(dt)
-            neutral_v, phi_base = fields[0], fields[2]
+            ram = self._bl_ram.get(sample_id)
+            if ram is None:
+                ram = torch.from_numpy(
+                    np.ascontiguousarray(self._bl_arr[bl_row][[0, 2]])
+                )
+                if len(self._bl_ram) < self._bl_ram_max:
+                    if device.type == "cuda":
+                        ram = ram.pin_memory()
+                    self._bl_ram[sample_id] = ram
+            fields = ram.to(device, non_blocking=True).to(dt)
+            neutral_v, phi_base = fields[0], fields[1]
 
         with self._Phase(self, "2_assembly", device):
             net_g = self._gto_net_density_g(grid, pos_frac.detach(), radial_coeffs.to(dt), sigmas)
@@ -359,7 +373,7 @@ class PB1DBackend:
                 val_ion_dipole_z=val_dip_z, c_unit=self._c_unit(cell_np),
                 center_z=center_z, indmin=indmin,
                 fixsol_steps=self.fixsol_steps, tol=self.tol, max_outer=self.max_outer,
-                grad_passes=int(os.environ.get("MACE_PB1D_GRAD_PASSES", "0")),
+                grad_passes=int(os.environ.get("MACE_PB1D_GRAD_PASSES", "1")),
             )
 
         rho_ion_z = -(out["n_ion"] / volume)

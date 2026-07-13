@@ -77,7 +77,12 @@ def closure_from_fields(
     s_ion3, s_diel3, _ = tp.create_cavity_torch(n_e_density, grid, params)
 
     sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
-    w_b = tp._normalized_gaussian_kernel_g(grid, sigma_b)
+    cached = getattr(grid, "_pb1d_wb_kernel", None)
+    if cached is not None and cached[0] == sigma_b:
+        w_b = cached[1]
+    else:
+        w_b = tp._normalized_gaussian_kernel_g(grid, sigma_b)
+        grid._pb1d_wb_kernel = (sigma_b, w_b)
 
     # zero-field response -> local dielectric for the screening heuristic
     a3_zero = response_a3(torch.zeros_like(s_diel3), s_diel3, params, tp)
