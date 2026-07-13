@@ -1431,6 +1431,7 @@ class PolarMACE(ScaleShiftMACE):
                 solved_ok = False
 
             healthy = False
+            rms_h = lm_h = mb_h = float("nan")
             if solved_ok:
                 rms_h = float(result["rms_last"])
                 lm_h = float(result["layer_mean"])
@@ -1441,9 +1442,18 @@ class PolarMACE(ScaleShiftMACE):
                     and 0.0 <= lm_h <= H_g
                     and abs(mb_h) <= 2.0 * H_g
                 )
+                if not healthy and os.environ.get("MACE_PB1D_NO_GUARD"):
+                    # test hook: accept any finite solve (FD consistency tests
+                    # need the pb1d path in the graph even for wild densities)
+                    healthy = rms_h == rms_h and abs(mb_h) < 1.0e6
             if not healthy:
                 if os.environ.get("MACE_PB_DEBUG"):
-                    print(f"PB1DDBG-FALLBACK sid={sid} healthy={healthy}", flush=True)
+                    print(
+                        f"PB1DDBG-FALLBACK sid={sid} rms={rms_h:.3e} "
+                        f"lm={lm_h:+.2f} mu_b={mb_h:+.2f} "
+                        f"diag={getattr(self._get_pb1d_backend(), 'last_diagnostics', {})}",
+                        flush=True,
+                    )
                 if cached is not None:
                     prof_feat[g] = cached["feat"].to(positions.device, positions.dtype)
                     prof_energy[g] = cached["energy"].to(positions.device, positions.dtype)
@@ -1524,12 +1534,16 @@ class PolarMACE(ScaleShiftMACE):
         """Scheme C stage 2: fresh solve with the FINAL (post-recursion)
         density + residual head. Observables carry gradients; the energy rows
         are detached; the cache is refreshed for the next encounter."""
+        freeze = bool(os.environ.get("MACE_PB1D_FREEZE_SOLVE"))
+        # freeze: test hook — reuse the cached profile instead of a fresh
+        # solve so the forward is deterministic in the solvent (FD force
+        # checks differentiate the implemented gradient path only)
         out = self._pb1d_run_graphs(
             data, positions, cell, radial_blocks, node_valence_electrons,
             num_graphs, planar_center,
             node_feats_mixed=node_feats_mixed, use_head=True,
             want_grad=self.training or torch.is_grad_enabled(),
-            use_cache_rows=False, write_cache=True,
+            use_cache_rows=freeze, write_cache=not freeze,
         )
         return out
 
