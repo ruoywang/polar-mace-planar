@@ -7,8 +7,13 @@ produce everything the pb1d route needs per forward:
                field (the published consistent pairing)
   S_ion(z)   — plane-averaged ion cavity
   prior(z)   — screened-vacuum P_off prior (its own covariance)
-  w(z)       — envelope sqrt(var_xy[chi]) * sqrt(var_xy[E_scr]) (physical
-               units, not normalized; the residual's permitted region)
+  w(z)       — envelope var_xy[chi], normalized to max 1 per structure
+               (the residual's permitted region). MEASURED on cal_18
+               (2026-07-13): plain var_chi fits the true residual to
+               4.6e-4 while the Cauchy-Schwarz product
+               sqrt(var_chi)*sqrt(var_E) degrades 4x to 2.0e-3 — the
+               field-fluctuation factor distorts the shape. Amplitude
+               information flows through the q_tot scalar instead.
   u(z)       — interface progress coordinate cumsum(w)/sum(w)
 
 The heavy 3-D machinery (TorchGrid, cavity, kernels) is reused from
@@ -93,8 +98,7 @@ def closure_from_fields(
     prior = plane_mean(a3_scr * ez_scr) - A_scr * ez_scr_mean
 
     var_chi = torch.clamp(plane_var(a3_scr), min=0.0)
-    var_e = torch.clamp(plane_var(ez_scr), min=0.0)
-    w_env = torch.sqrt(var_chi) * torch.sqrt(var_e)
+    w_env = var_chi / torch.clamp(var_chi.max(), min=1.0e-30)
     u = torch.cumsum(w_env, dim=0)
     u = u / torch.clamp(u[-1], min=1.0e-30)
 
