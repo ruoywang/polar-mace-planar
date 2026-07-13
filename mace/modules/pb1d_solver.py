@@ -199,6 +199,7 @@ class Solver1D:
         resid, n_b, n_ion = self.residual(phi, phi_sol, s_ion, B, nb_off, q_sol)
         rms = self.resid_rms(resid)
         n_outer = 0
+        self._last_rms = float(rms)
         for outer in range(max_outer + 1):
             if float(rms) < tol and outer >= 1:
                 break
@@ -216,6 +217,7 @@ class Solver1D:
                     n_b, n_ion = t_nb, t_nion
                     break
                 alpha *= 0.5
+            self._last_rms = float(rms)
         return phi, n_b, n_ion, n_outer
 
     # -- full solve with the fixsol dipole loop -----------------------------
@@ -260,4 +262,5 @@ class Solver1D:
             "n_ion": n_ion,
             "phi_sol": phi_sol,
             "n_outer": torch.tensor(total_outer),
+            "rms_last": float(getattr(self, "_last_rms", float("nan"))),
         }

@@ -485,8 +485,28 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "--solvent_pb_config and the cep-dip-python-pb package)"
         ),
         type=str,
-        choices=["planar", "pb"],
+        choices=["planar", "pb", "pb1d"],
         default="planar",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_zones", type=int, default=8,
+        help="pb1d residual head: number of basis functions / zones (K)",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_sigma_z", type=float, default=0.2,
+        help="pb1d residual head: z-width floor (Gaussian blur, A)",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_c_max", type=float, default=0.25,
+        help="pb1d residual head: tanh coefficient bound",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_upsample", type=int, default=2,
+        help="pb1d: solver-grid upsampling factor over the closure grid",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_max_outer", type=int, default=12,
+        help="pb1d: Newton max outer iterations per fixsol step",
     )
     parser.add_argument(
         "--solvent_pb_config",
