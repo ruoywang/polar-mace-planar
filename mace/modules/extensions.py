@@ -741,6 +741,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb_phi_cache_dir: Optional[str] = None,
         solvent_pb_learn_center_shift: bool = False,
         solvent_pb1d_zones: int = 8,
+        solvent_pb1d_warmup_encounters: int = 0,
         solvent_pb1d_sigma_z: float = 0.2,
         solvent_pb1d_c_max: float = 0.25,
         solvent_pb1d_upsample: int = 2,
@@ -869,6 +870,12 @@ class PolarMACE(ScaleShiftMACE):
         # Diagnostic for the PB-vs-planar 1D-potential gap; default off.
         self.solvent_pb_learn_center_shift = bool(solvent_pb_learn_center_shift)
         self.solvent_pb1d_zones = int(solvent_pb1d_zones)
+        # per-structure planar warmup: the first N training encounters use
+        # the planar layer (no PB solve) so the PB route only engages once
+        # the density is sane. Measured (H1, 2026-07-13): cold start leaves
+        # a 3-4x loss plateau (head saturated); warmup 15 reached loss 0.28
+        # by epoch 29 vs 0.46 at epoch 79 without.
+        self.solvent_pb1d_warmup_encounters = int(solvent_pb1d_warmup_encounters)
         self.solvent_pb1d_sigma_z = float(solvent_pb1d_sigma_z)
         self.solvent_pb1d_c_max = float(solvent_pb1d_c_max)
         self.solvent_pb1d_upsample = int(solvent_pb1d_upsample)
@@ -1248,6 +1255,7 @@ class PolarMACE(ScaleShiftMACE):
                 "energy": torch.from_numpy(z["energy"]),
                 "q": float(z["q"]), "mu": float(z["mu"]),
                 "layer_mean": float(z["lm"]),
+                "enc": int(z["enc"]) if "enc" in z else 0,
             }
         except (OSError, ValueError, KeyError):
             return None
@@ -1264,6 +1272,7 @@ class PolarMACE(ScaleShiftMACE):
         np.savez(
             tmp[:-4], feat=entry["feat"].numpy(), energy=entry["energy"].numpy(),
             q=entry["q"], mu=entry["mu"], lm=entry["layer_mean"],
+            enc=int(entry.get("enc", 0)),
         )
         os.replace(tmp, p)
 
@@ -1368,6 +1377,32 @@ class PolarMACE(ScaleShiftMACE):
                     prof_feat_grad[g] = prof_feat[g]
                 continue
 
+            warmup = self.solvent_pb1d_warmup_encounters
+            if warmup > 0 and self.training and sid is not None:
+                enc = int(cached.get("enc", 0)) if cached is not None else 0
+                if enc < warmup:
+                    fbw = self._pb1d_planar_result(
+                        g, cell_g, H_g, planar_center, total_charge_g, positions)
+                    layer_w = fbw["rho_layer_z"].to(positions.dtype)
+                    prof_feat[g] = resample_profile_periodic_torch(
+                        layer_w, H_g, 1024, False).detach()
+                    prof_energy[g] = resample_profile_periodic_torch(
+                        layer_w, H_g, 512, True).detach()
+                    q_ion[g] = fbw["q_ion"]
+                    solvent_mu[g] = fbw["mu"]
+                    layer_mean[g] = fbw["layer_mean"]
+                    if prof_feat_grad is not None:
+                        prof_feat_grad[g] = prof_feat[g]
+                    if write_cache and use_head:  # stage 2 counts the encounter
+                        self._pb1d_store_profile(sid, {
+                            "feat": prof_feat[g].detach().to(torch.float32).cpu(),
+                            "energy": prof_energy[g].detach().to(torch.float32).cpu(),
+                            "q": float(fbw["q_ion"]),
+                            "mu": float(fbw["mu"]),
+                            "layer_mean": float(fbw["layer_mean"]),
+                            "enc": enc + 1,
+                        })
+                    continue
             pos_g = positions[atom_mask].detach()
             coeffs_g = (
                 radial_blocks[atom_mask]
@@ -1474,6 +1509,7 @@ class PolarMACE(ScaleShiftMACE):
                     "q": float(result["q_ion"]),
                     "mu": float(mu_g.detach()),
                     "layer_mean": float(result["layer_mean"]),
+                    "enc": (int(cached.get("enc", 0)) if cached is not None else 0) + 1,
                 })
 
         out = {

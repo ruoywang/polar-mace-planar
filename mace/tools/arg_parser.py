@@ -489,6 +489,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default="planar",
     )
     parser.add_argument(
+        "--solvent_pb1d_warmup_encounters", type=int, default=0,
+        help=(
+            "pb1d: use the planar layer (no PB solve) for each structure's "
+            "first N training encounters, so PB engages on a sane density "
+            "(cold start measured to cause a 3-4x loss plateau)"
+        ),
+    )
+    parser.add_argument(
         "--solvent_pb1d_zones", type=int, default=8,
         help="pb1d residual head: number of basis functions / zones (K)",
     )

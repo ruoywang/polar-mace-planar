@@ -341,6 +341,9 @@ def _build_model(
             solvent_model=getattr(args, "solvent_model", "planar"),
             solvent_pb_config=getattr(args, "solvent_pb_config", None),
             solvent_pb1d_zones=getattr(args, "solvent_pb1d_zones", 8),
+            solvent_pb1d_warmup_encounters=getattr(
+                args, "solvent_pb1d_warmup_encounters", 0
+            ),
             solvent_pb1d_sigma_z=getattr(args, "solvent_pb1d_sigma_z", 0.2),
             solvent_pb1d_c_max=getattr(args, "solvent_pb1d_c_max", 0.25),
             solvent_pb1d_upsample=getattr(args, "solvent_pb1d_upsample", 2),
