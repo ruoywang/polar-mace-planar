@@ -6,6 +6,7 @@
 
 import dataclasses
 import logging
+import os
 import time
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
@@ -453,13 +454,27 @@ def take_step(
     max_grad_norm: Optional[float],
     device: torch.device,
 ) -> Tuple[float, Dict[str, Any]]:
+    timing = os.environ.get("MACE_STEP_TIMING")
+
+    def tick():
+        if timing:
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            return time.perf_counter()
+        return 0.0
+
     start_time = time.time()
+    t0 = tick()
     batch = batch.to(device)
     attach_density_3d_samples_to_batch(batch, loss_fn)
     batch_dict = batch.to_dict()
+    t1 = tick()
+
+    phases = {}
 
     def closure():
         optimizer.zero_grad(set_to_none=True)
+        ta = tick()
         output = model(
             batch_dict,
             training=True,
@@ -467,18 +482,37 @@ def take_step(
             compute_virials=output_args["virials"],
             compute_stress=output_args["stress"],
         )
+        tb = tick()
         loss = loss_fn(pred=output, ref=batch)
+        tc = tick()
         loss.backward()
+        td = tick()
         if max_grad_norm is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-
+        if timing:
+            phases.update(fwd=tb - ta, loss=tc - tb, bwd=td - tc)
         return loss
 
     loss = closure()
+    t2 = tick()
     optimizer.step()
 
     if ema is not None:
         ema.update()
+    t3 = tick()
+
+    if timing:
+        acc = take_step.__dict__.setdefault("_timing_acc", {})
+        n = acc.get("_n", 0) + 1
+        acc["_n"] = n
+        for key, val in (("data", t1 - t0), ("fwd", phases.get("fwd", 0.0)),
+                         ("loss_fn", phases.get("loss", 0.0)),
+                         ("bwd", phases.get("bwd", 0.0)), ("opt", t3 - t2)):
+            acc[key] = acc.get(key, 0.0) + val
+        every = int(os.environ.get("MACE_STEP_TIMING_EVERY", "100"))
+        if n % every == 0:
+            msg = " ".join(f"{k}={1e3 * v / n:.1f}" for k, v in acc.items() if k != "_n")
+            print(f"STEPTIMING steps={n} per-step-ms: {msg}", flush=True)
 
     loss_dict = {
         "loss": to_numpy(loss),
