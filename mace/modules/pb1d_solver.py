@@ -332,6 +332,7 @@ class Solver1D:
         # EwaldDipoleMixer state (z channel only; ef = c_unit * d_mix, exact linearity)
         dip_tmp = torch.zeros((), dtype=DTYPE, device=dev)
         res_old = torch.zeros((), dtype=DTYPE, device=dev)
+        _d_prev = torch.zeros((), dtype=DTYPE, device=dev)
         B_fix = self.bound_matrix(a1)
         nb_off_fix = self.bound_offset(p_off)
         total_outer = 0
@@ -341,12 +342,31 @@ class Solver1D:
             dip_z = val_ion_dipole_z + dsol_z - qsol_cache * center_z
             dip_in = torch.clamp(dip_z, -20.0, 20.0)
             res = dip_in - dip_tmp
-            alpha = torch.where(torch.abs(res) > 1.0,
-                                0.6 / (torch.abs(res) * torch.abs(res)),
-                                torch.full_like(res, 0.6))
-            alpha = torch.where((res * res_old < 0.0) & (torch.abs(res) > 0.7 * torch.abs(res_old)),
-                                alpha * 0.5, alpha)
-            d_mix = (1.0 - alpha) * dip_tmp + alpha * dip_in
+            # secant acceleration on the SCALAR fix point d = g(d) once two
+            # (d, res) pairs exist: superlinear, ~8 total steps vs ~40 damped
+            # (converged loop measured 216 ms — dominated by per-step syncs).
+            # Fall back to the legacy damped mixer for the bootstrap steps,
+            # for tiny/unstable denominators, and when fixsol_converge=False
+            # (exact numpy-parity path).
+            use_secant = (
+                fixsol_converge and _step > 2
+                and float(torch.abs(res - res_old)) > 1.0e-14
+            )
+            if use_secant:
+                d_sec = dip_tmp - res * (dip_tmp - _d_prev) / (res - res_old)
+                # trust region: reject wild extrapolations
+                if float(torch.abs(d_sec - dip_tmp)) < 10.0 * float(torch.abs(res)) + 1.0:
+                    d_mix = d_sec
+                else:
+                    use_secant = False
+            if not use_secant:
+                alpha = torch.where(torch.abs(res) > 1.0,
+                                    0.6 / (torch.abs(res) * torch.abs(res)),
+                                    torch.full_like(res, 0.6))
+                alpha = torch.where((res * res_old < 0.0) & (torch.abs(res) > 0.7 * torch.abs(res_old)),
+                                    alpha * 0.5, alpha)
+                d_mix = (1.0 - alpha) * dip_tmp + alpha * dip_in
+            _d_prev = dip_tmp
             res_old = res
             dip_tmp = d_mix
             ef_z = c_unit * d_mix
