@@ -1427,6 +1427,7 @@ class PolarMACE(ScaleShiftMACE):
                     node_feats=feats_g,
                     head=self.pb1d_head if use_head else None,
                     q_tot=total_charge_g[g].detach(),
+                    ckpt_closure=not self.training,
                 )
                 solved_ok = True
             except RuntimeError as exc:

@@ -275,6 +275,7 @@ class PB1DBackend:
         node_feats: Optional[torch.Tensor] = None,
         head=None,
         q_tot: Optional[torch.Tensor] = None,
+        ckpt_closure: bool = True,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -337,11 +338,23 @@ class PB1DBackend:
             cvhar3 = phi_base - grid.ifft_real(grid.l0_inv_op(net_g))
 
         with self._Phase(self, "4_closure", device):
-            # NOT checkpointed: closure intermediates are ~0.7 GB (fine on a
-            # 40 GB card); recomputing them cost ~100 ms/graph in backward.
-            # Only the spectral assembly above (653 MB basis product) stays
-            # checkpointed — that was the OOM culprit.
-            clo = closure_from_fields(n_e_density, cvhar3, grid, self.params, self._tp)
+            # ckpt_closure=False (training steps): keep the closure graph
+            # resident (~0.7 GB, freed at backward) — saves the ~100 ms
+            # recompute. ckpt_closure=True (eval / default): checkpoint it —
+            # the eval loop retains per-structure graphs long enough that
+            # uncheckpointed closures OOM a 40 GB card (measured, prod400).
+            if want_grad and ckpt_closure:
+                from torch.utils.checkpoint import checkpoint as _ckpt
+                keys = ("A_scr", "S_ion_z", "prior", "w_env", "u")
+
+                def _closure_tuple(ne, cv):
+                    out = closure_from_fields(ne, cv, grid, self.params, self._tp)
+                    return tuple(out[k] for k in keys)
+
+                vals = _ckpt(_closure_tuple, n_e_density, cvhar3, use_reentrant=False)
+                clo = dict(zip(keys, vals))
+            else:
+                clo = closure_from_fields(n_e_density, cvhar3, grid, self.params, self._tp)
 
         cvhar_z = cvhar3.mean(dim=(0, 1))
         prof_ne_z = n_e_values.mean(dim=(0, 1))
