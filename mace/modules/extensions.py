@@ -1244,14 +1244,24 @@ class PolarMACE(ScaleShiftMACE):
             )
         return self._pb1d_backend
 
+    def _pb1d_mem_cache(self) -> dict:
+        # lazy: the attribute must survive both fresh construction and
+        # torch.load of full-module files saved before it existed
+        cache = getattr(self, "_pb_profile_cache", None)
+        if cache is None:
+            cache = {}
+            self._pb_profile_cache = cache
+        return cache
+
     def _pb1d_cached_profile(self, sid: int):
+        mem = self._pb1d_mem_cache()
         d = self.solvent_pb_phi_cache_dir
         if not d:
-            return self._pb_profile_cache.get(("pb1d", sid))
+            return mem.get(("pb1d", sid))
         path = os.path.join(d, f"prof1d_{sid}.npz")
         try:
             mtime = os.path.getmtime(path)
-            ram = self._pb_profile_cache.get(("pb1d_ram", sid))
+            ram = mem.get(("pb1d_ram", sid))
             if ram is not None and ram[0] == mtime:
                 return dict(ram[1])
         except OSError:
@@ -1265,7 +1275,7 @@ class PolarMACE(ScaleShiftMACE):
                 "layer_mean": float(z["lm"]),
                 "enc": int(z["enc"]) if "enc" in z else 0,
             }
-            self._pb_profile_cache[("pb1d_ram", sid)] = (mtime, dict(entry))
+            mem[("pb1d_ram", sid)] = (mtime, dict(entry))
             return entry
         except (OSError, ValueError, KeyError):
             return None
@@ -1275,7 +1285,7 @@ class PolarMACE(ScaleShiftMACE):
             return
         d = self.solvent_pb_phi_cache_dir
         if not d:
-            self._pb_profile_cache[("pb1d", sid)] = entry
+            self._pb1d_mem_cache()[("pb1d", sid)] = entry
             return
         p = os.path.join(d, f"prof1d_{sid}.npz")
         tmp = f"{p}.tmp.{os.getpid()}.npz"
