@@ -455,10 +455,16 @@ class Density3DGridTargets:
     def __init__(self, manifest_path: Union[str, Path], max_cache_size: int = 32):
         self.manifest_path = Path(manifest_path)
         payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-        if payload.get("format") != "density3d_grid_npz_v1":
+        fmt = payload.get("format")
+        if fmt not in ("density3d_grid_npz_v1", "density3d_grid_npy_v1"):
             raise ValueError(
                 f"Unsupported density grid manifest format in {self.manifest_path}"
             )
+        # npy_v1: rho is a raw .npy — mmap it and fancy-index only the sampled
+        # points (the npz path decompresses 54 MB per load; measured
+        # ~110 ms/step under global shuffle with the LRU thrashing).
+        # Values are byte-identical between the two formats.
+        self.mmap_mode = fmt == "density3d_grid_npy_v1"
         self.entries = {int(k): v for k, v in payload["entries"].items()}
         self.max_cache_size = int(max_cache_size)
         self._cache: OrderedDict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = (
@@ -477,10 +483,19 @@ class Density3DGridTargets:
         path = Path(entry["path"])
         if not path.is_absolute():
             path = self.manifest_path.parent / path
-        with np.load(path) as data:
-            rho = np.asarray(data["rho"], dtype=np.float32)
-            lattice = np.asarray(data["lattice"], dtype=np.float64)
-            valid_iz = np.asarray(data["valid_iz"], dtype=np.int64)
+        if self.mmap_mode:
+            rho = np.load(path, mmap_mode="r")  # no decompress, no copy
+            meta_path = Path(entry["meta_path"])
+            if not meta_path.is_absolute():
+                meta_path = self.manifest_path.parent / meta_path
+            with np.load(meta_path) as meta:
+                lattice = np.asarray(meta["lattice"], dtype=np.float64)
+                valid_iz = np.asarray(meta["valid_iz"], dtype=np.int64)
+        else:
+            with np.load(path) as data:
+                rho = np.asarray(data["rho"], dtype=np.float32)
+                lattice = np.asarray(data["lattice"], dtype=np.float64)
+                valid_iz = np.asarray(data["valid_iz"], dtype=np.int64)
         self._cache[sample_id] = (rho, lattice, valid_iz)
         self._cache.move_to_end(sample_id)
         while len(self._cache) > self.max_cache_size:

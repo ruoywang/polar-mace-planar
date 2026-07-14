@@ -44,7 +44,8 @@ def langevin_g_torch(y: torch.Tensor) -> torch.Tensor:
 
 def response_a3(emag: torch.Tensor, s_diel: torch.Tensor, params: dict, tp) -> torch.Tensor:
     """A(r) = f_loc * N_MOL * s_diel * (alpha0_rot*g(y) + alpha_pol)/EDEPS."""
-    f_loc = tp._local_field_factor(emag, params)
+    from .pb1d_localfield import local_field_factor
+    f_loc = local_field_factor(emag, params)
     y = float(params["PBETA"]) * emag * f_loc
     g = langevin_g_torch(y) if bool(params["LNLDIEL"]) else torch.ones_like(y)
     poe = float(params["alpha0_rot"]) / EDEPS * g + float(params["alpha_pol"]) / EDEPS

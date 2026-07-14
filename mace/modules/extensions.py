@@ -1248,15 +1248,25 @@ class PolarMACE(ScaleShiftMACE):
         d = self.solvent_pb_phi_cache_dir
         if not d:
             return self._pb_profile_cache.get(("pb1d", sid))
+        path = os.path.join(d, f"prof1d_{sid}.npz")
         try:
-            z = np.load(os.path.join(d, f"prof1d_{sid}.npz"))
-            return {
+            mtime = os.path.getmtime(path)
+            ram = self._pb_profile_cache.get(("pb1d_ram", sid))
+            if ram is not None and ram[0] == mtime:
+                return dict(ram[1])
+        except OSError:
+            return None
+        try:
+            z = np.load(path)
+            entry = {
                 "feat": torch.from_numpy(z["feat"]),
                 "energy": torch.from_numpy(z["energy"]),
                 "q": float(z["q"]), "mu": float(z["mu"]),
                 "layer_mean": float(z["lm"]),
                 "enc": int(z["enc"]) if "enc" in z else 0,
             }
+            self._pb_profile_cache[("pb1d_ram", sid)] = (mtime, dict(entry))
+            return entry
         except (OSError, ValueError, KeyError):
             return None
 
