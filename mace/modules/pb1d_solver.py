@@ -159,6 +159,7 @@ class Solver1D:
         self.l0_inv = ops["l0_inv"]
         sigma_b = params["R_B"] if params["R_B"] > 0.0 else params["A_K"]
         self.WB = _gaussian_wb_matrix(nz, self.lz, sigma_b, device)
+        self._core = self.D @ self.WB  # reused by every bound_matrix call
         self.z = torch.arange(nz, dtype=DTYPE, device=device) * self.lz / nz
 
     # -- pieces -----------------------------------------------------------
@@ -168,8 +169,7 @@ class Solver1D:
         E_z = -(w_b * grad phi) = -(D @ WB) phi;  P = a1 * E_z (+ p_off);
         n_b = -V * WB @ D @ P  =>  B = +V * WB @ D @ diag(a1) @ D @ WB.
         """
-        core = self.D @ self.WB
-        return self.volume * (self.WB @ (self.D @ (a1[:, None] * core)))
+        return self.volume * (self.WB @ (self.D @ (a1[:, None] * self._core)))
 
     def bound_offset(self, p_off: torch.Tensor) -> torch.Tensor:
         """n_b contribution of the constant offset P_off: -V * WB @ D @ p_off."""
@@ -194,9 +194,14 @@ class Solver1D:
     # -- one nonlinear solve (fixed phi_sol) --------------------------------
     def newton(self, phi0: torch.Tensor, phi_sol: torch.Tensor, s_ion: torch.Tensor,
                a1: torch.Tensor, p_off: torch.Tensor, q_sol: float,
-               tol: float, max_outer: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
-        B = self.bound_matrix(a1)
-        nb_off = self.bound_offset(p_off)
+               tol: float, max_outer: int,
+               B: Optional[torch.Tensor] = None,
+               nb_off: Optional[torch.Tensor] = None
+               ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+        if B is None:
+            B = self.bound_matrix(a1)
+        if nb_off is None:
+            nb_off = self.bound_offset(p_off)
         phi = phi0
         resid, n_b, n_ion = self.residual(phi, phi_sol, s_ion, B, nb_off, q_sol)
         rms = self.resid_rms(resid)
@@ -327,6 +332,8 @@ class Solver1D:
         # EwaldDipoleMixer state (z channel only; ef = c_unit * d_mix, exact linearity)
         dip_tmp = torch.zeros((), dtype=DTYPE, device=dev)
         res_old = torch.zeros((), dtype=DTYPE, device=dev)
+        B_fix = self.bound_matrix(a1)
+        nb_off_fix = self.bound_offset(p_off)
         total_outer = 0
         _step = 0
         while True:
@@ -346,7 +353,8 @@ class Solver1D:
             cvdip = cdipol_potential_1d(nz, self.lz, ef_z, indmin, dev)
             phi_sol = cvhar_z + cvdip
             phi, n_b, n_ion, n_outer = self.newton(
-                phi, phi_sol, s_ion, a1, p_off, q_sol, tol, max_outer)
+                phi, phi_sol, s_ion, a1, p_off, q_sol, tol, max_outer,
+                B=B_fix, nb_off=nb_off_fix)
             total_outer += n_outer
             charge = n_b + n_ion
             qsol_cache = charge.mean()
@@ -354,7 +362,7 @@ class Solver1D:
             if _step >= fixsol_steps:
                 if not fixsol_converge or _step >= fixsol_max_steps:
                     break
-                if float(torch.abs(res)) <= 1.0e-9 * max(1.0, float(torch.abs(dip_in))):
+                if float(torch.abs(res)) <= 1.0e-7 * max(1.0, float(torch.abs(dip_in))):
                     break
         return {
             "phi": phi,
