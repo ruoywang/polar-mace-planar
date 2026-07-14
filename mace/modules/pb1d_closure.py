@@ -84,8 +84,13 @@ def closure_from_fields(
         w_b = tp._normalized_gaussian_kernel_g(grid, sigma_b)
         grid._pb1d_wb_kernel = (sigma_b, w_b)
 
-    # zero-field response -> local dielectric for the screening heuristic
-    a3_zero = response_a3(torch.zeros_like(s_diel3), s_diel3, params, tp)
+    # zero-field response -> local dielectric for the screening heuristic.
+    # At E=0 the response is a CONSTANT times s_diel (Langevin g(0)=1, local
+    # field factor constant): evaluate the constant on one element instead of
+    # running grid-wide transcendentals (verified identical to 1e-16).
+    zero1 = s_diel3.new_zeros(1)
+    resp_unit = response_a3(zero1, s_diel3.new_ones(1), params, tp)[0]
+    a3_zero = resp_unit * s_diel3
     eps3 = 1.0 + EDEPS * a3_zero
 
     # screened vacuum field: E = -(w_b * grad phi_sol) / eps(r)
