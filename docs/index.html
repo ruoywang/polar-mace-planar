@@ -35,6 +35,9 @@
   .report .tag { display: inline-block; font: 11px var(--mono); letter-spacing: .06em;
     text-transform: uppercase; color: var(--muted); border: 1px solid var(--grid);
     border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 1px; }
+  .section { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); margin: 34px 0 10px; border-bottom: 1px solid var(--grid);
+    padding-bottom: 6px; }
   footer { margin-top: 44px; font-size: 12.5px; color: var(--muted); }
   footer a { color: var(--accent); }
 </style>
@@ -49,6 +52,25 @@
   <a href="https://ruoywang.github.io/cep-dip-python-pb/"
      style="color:var(--accent)">cep-dip-python-pb site</a>.</p>
 
+  <div class="section">1-D closure route (v1) — production model &amp; results</div>
+
+  <a class="report" href="./pb1d-structure-sid152.html">
+    <div class="date">2026-07-15<span class="tag">result &middot; 1-D</span></div>
+    <h2>Single-Structure Report: sid 152 (training, NiN44)</h2>
+    <p>400-epoch pb1d model on one training snapshot: per-element charges, predicted
+    vs DFT 1-D potential (&phi; residual rms 0.021 eV), plane-averaged net density,
+    and ionic/bound solvent charge against the raw VASPsol RHOION/RHOB grids
+    (ionic 9.7%, bound 31%).</p>
+  </a>
+
+  <a class="report" href="./pb1d-structure-sid307.html">
+    <div class="date">2026-07-15<span class="tag">result &middot; 1-D</span></div>
+    <h2>Single-Structure Report: sid 307 (training, NiN88)</h2>
+    <p>Same analysis on the 88-water hydration level: &phi; residual rms 0.031 eV,
+    ionic layer 6.8% vs DFT with exact charge compensation (+1.157 e), bound-charge
+    inner lobe illustrating the known corrugation-covariance limit (56%).</p>
+  </a>
+
   <a class="report" href="./v1-head-design.html">
     <div class="date">2026-07-13<span class="tag">design</span></div>
     <h2>The P<sub>z</sub> Residual Head: Where the Error Lives, and How v1 Predicts It</h2>
@@ -58,6 +80,8 @@
     &sigma;<sub>z</sub> floor, and the four-way proof that the remaining &rho;<sub>b</sub>
     sharpness is irreducible.</p>
   </a>
+
+  <div class="section">3-D nonlinear PB era — archived route</div>
 
   <a class="report" href="./pb-training-engineering.html">
     <div class="date">2026-07-08<span class="tag">training</span></div>
