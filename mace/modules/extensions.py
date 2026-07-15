@@ -1398,7 +1398,8 @@ class PolarMACE(ScaleShiftMACE):
                 continue
 
             warmup = self.solvent_pb1d_warmup_encounters
-            if warmup > 0 and self.training and sid is not None:
+            training_step = bool(getattr(self, "_pb1d_training_flag", False))
+            if warmup > 0 and training_step and sid is not None:
                 enc = int(cached.get("enc", 0)) if cached is not None else 0
                 if enc < warmup:
                     fbw = self._pb1d_planar_result(
@@ -1868,6 +1869,13 @@ class PolarMACE(ScaleShiftMACE):
         ).detach()
         pb_solvent_data: Optional[Dict[str, torch.Tensor]] = None
         if self.solvent_model == "pb1d":
+            # warmup gating must follow the TRAINING-STEP semantic (the
+            # forward's `training` argument), not module train/eval mode:
+            # mace's final tables evaluate with the module still in train
+            # mode, which silently ran never-seen (enc<warmup) TEST
+            # structures through the planar warmup branch — the potential/
+            # fermi/Phi1D test-table blowup of prod400 (0.84 eV vs true 0.06).
+            self._pb1d_training_flag = bool(training)
             pb_solvent_data = self._pb1d_stage1(
                 data=data,
                 positions=positions,
