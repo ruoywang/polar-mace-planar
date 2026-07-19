@@ -2046,10 +2046,31 @@ def mean_squared_error_solvent_rhob_1d(
     sigma_A: float,
     ddp: Optional[bool] = None,
 ) -> Optional[torch.Tensor]:
-    residuals = solvent_rhob_1d_residuals(ref, pred, rhob_targets, sigma_A)
-    if residuals is None:
+    prof = pred.get("solvent_rho_bound_1d")
+    if prof is None or not rhob_targets:
+        # config-level absence: identical on every rank, safe to skip
         return None
-    return reduce_loss(torch.square(residuals), ddp)
+    residuals = solvent_rhob_1d_residuals(ref, pred, rhob_targets, sigma_A)
+    # The scoreable-row count is DATA-dependent and differs across ranks
+    # (fallback/warmup rows are masked), so every rank must take part in
+    # the same collective here — a rank-local early return deadlocks DDP.
+    if residuals is None:
+        sq_sum = prof.sum() * 0.0
+        n_local = 0
+    else:
+        sq = torch.square(residuals)
+        sq_sum = sq.sum()
+        n_local = int(sq.numel())
+    ddp_flag = is_ddp_enabled() if ddp is None else ddp
+    if ddp_flag and dist.is_initialized():
+        total = torch.tensor(float(n_local), device=prof.device, dtype=prof.dtype)
+        dist.all_reduce(total, op=dist.ReduceOp.SUM)
+        if float(total.item()) < 0.5:
+            return None  # global count is zero on every rank consistently
+        return sq_sum * dist.get_world_size() / total
+    if n_local == 0:
+        return None
+    return sq_sum / float(n_local)
 
 
 class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
