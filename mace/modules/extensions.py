@@ -1375,6 +1375,8 @@ class PolarMACE(ScaleShiftMACE):
         prof_feat = positions.new_zeros(num_graphs, 1024)
         prof_energy = positions.new_zeros(num_graphs, 512)
         prof_feat_grad = positions.new_zeros(num_graphs, 1024) if want_grad else None
+        rho_bound_prof = positions.new_zeros(num_graphs, 512)
+        rho_bound_mask = positions.new_zeros(num_graphs)
 
         for g in range(num_graphs):
             cell_g = cells[g]
@@ -1508,13 +1510,18 @@ class PolarMACE(ScaleShiftMACE):
                 layer, H_g, 1024, False).detach()
             prof_energy[g] = resample_profile_periodic_torch(
                 layer, H_g, 512, True).detach()
+            rb_g = result["rho_bound_z"].to(positions.dtype)
             if prof_feat_grad is not None:
                 prof_feat_grad[g] = resample_profile_periodic_torch(layer, H_g, 1024, False)
                 q_ion[g] = result["q_ion_t"].to(positions.dtype)
                 solvent_mu[g] = mu_g.to(positions.dtype)
+                rho_bound_prof[g] = resample_profile_periodic_torch(rb_g, H_g, 512, False)
             else:
                 q_ion[g] = float(result["q_ion"])
                 solvent_mu[g] = float(mu_g.detach())
+                rho_bound_prof[g] = resample_profile_periodic_torch(
+                    rb_g, H_g, 512, False).detach()
+            rho_bound_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
             if os.environ.get("MACE_PB_DEBUG"):
                 print(
@@ -1540,6 +1547,8 @@ class PolarMACE(ScaleShiftMACE):
             "q_ion": q_ion,
             "layer_mean": layer_mean,
             "solvent_mu": solvent_mu,
+            "rho_bound_1d": rho_bound_prof,
+            "rho_bound_1d_mask": rho_bound_mask,
         }
         if prof_feat_grad is not None:
             out["profile_features_grad"] = prof_feat_grad
@@ -2447,6 +2456,19 @@ class PolarMACE(ScaleShiftMACE):
             if pb_solvent_data is not None
             else positions.new_zeros((num_graphs, 1024))
         )
+        # Fresh-solve bound-charge profile (physics sign, e/A^3, on
+        # z_j = j*H/512) for the optional rho_b supervision; mask row is 1
+        # only where this forward produced a healthy fresh solve.
+        solvent_rho_bound_out = (
+            pb_solvent_data["rho_bound_1d"]
+            if pb_solvent_data is not None and "rho_bound_1d" in pb_solvent_data
+            else positions.new_zeros((num_graphs, 512))
+        )
+        solvent_rho_bound_mask_out = (
+            pb_solvent_data["rho_bound_1d_mask"]
+            if pb_solvent_data is not None and "rho_bound_1d_mask" in pb_solvent_data
+            else positions.new_zeros(num_graphs)
+        )
 
         return {
             "energy": total_energy,
@@ -2496,6 +2518,8 @@ class PolarMACE(ScaleShiftMACE):
             "msum_o": msum_o,
             "msum_h": msum_h,
             "solvent_profile_features": solvent_profile_features_out,
+            "solvent_rho_bound_1d": solvent_rho_bound_out,
+            "solvent_rho_bound_1d_mask": solvent_rho_bound_mask_out,
             "solv_center_physical_shift": torch.zeros_like(solv_center),
             "solv_center": solv_center,
             "solv_center_residual": solvent_center_residual,

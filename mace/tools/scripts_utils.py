@@ -812,6 +812,9 @@ def get_loss_fn(
                 args, "potential_1d_profile_use_solvent_profile", False
             ),
             solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
+            solvent_rhob_1d_weight=getattr(args, "solvent_rhob_1d_weight", 0.0),
+            solvent_rhob_1d_file=getattr(args, "solvent_rhob_1d_file", None),
+            solvent_rhob_1d_sigma=getattr(args, "solvent_rhob_1d_sigma", 0.25),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),
             solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),
@@ -908,6 +911,9 @@ def get_swa(
                 args, "potential_1d_profile_use_solvent_profile", False
             ),
             solvent_center_weight=getattr(args, "solvent_center_weight", 0.0),
+            solvent_rhob_1d_weight=getattr(args, "solvent_rhob_1d_weight", 0.0),
+            solvent_rhob_1d_file=getattr(args, "solvent_rhob_1d_file", None),
+            solvent_rhob_1d_sigma=getattr(args, "solvent_rhob_1d_sigma", 0.25),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),
             solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),

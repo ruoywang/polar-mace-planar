@@ -1152,6 +1152,24 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=0.0,
     )
     parser.add_argument(
+        "--solvent_rhob_1d_weight",
+        help="weight of the 1-D bound-charge profile loss (pb1d solvent only)",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--solvent_rhob_1d_file",
+        help="npz with DFT plane-averaged RHOB references (dft_solvent1d_ref.npz)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--solvent_rhob_1d_sigma",
+        help="gaussian smearing (A) applied to both profiles in the rho_b loss",
+        type=float,
+        default=0.25,
+    )
+    parser.add_argument(
         "--swa_dipole_weight",
         "--stage_two_dipole_weight",
         help="weight of dipoles after starting Stage Two (previously called swa)",

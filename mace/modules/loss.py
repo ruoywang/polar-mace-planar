@@ -1961,6 +1961,97 @@ class WeightedEnergyForcesDipoleLoss(torch.nn.Module):
         )
 
 
+def _load_solvent_rhob_1d_npz(path: Union[str, Path]) -> dict:
+    """DFT solvent bound-charge 1-D references (dft_solvent1d_ref.npz).
+
+    Stored rows are plane-averaged RHOB in the VASP electron-positive
+    convention; they are negated here to the physics convention and
+    periodically resampled onto the model's 512-point grid (z_j = j*H/512).
+    """
+    arrays = np.load(path)
+    required = {"sample_ids", "z_A", "lz_A", "rb_z_vasp"}
+    missing = required.difference(arrays.files)
+    if missing:
+        raise ValueError(f"Missing arrays in solvent_rhob_1d_file {path}: {sorted(missing)}")
+    sids = np.asarray(arrays["sample_ids"], dtype=np.int64)
+    rb = -np.asarray(arrays["rb_z_vasp"], dtype=np.float64)
+    lz = float(arrays["lz_A"])
+    nz = rb.shape[1]
+    ngrid = 512
+    u = np.arange(ngrid) * (nz / float(ngrid))
+    i0 = np.floor(u).astype(np.int64) % nz
+    i1 = (i0 + 1) % nz
+    w = u - np.floor(u)
+    rb512 = rb[:, i0] * (1.0 - w) + rb[:, i1] * w
+    targets = {int(s): rb512[k] for k, s in enumerate(sids)}
+    return {"targets": targets, "lz_A": lz}
+
+
+def _gaussian_smear_periodic_1d(x: torch.Tensor, sigma_A: float, lz_A: float) -> torch.Tensor:
+    """Periodic gaussian smearing along the last axis of a uniform-grid profile."""
+    if sigma_A <= 0.0:
+        return x
+    n = x.shape[-1]
+    dz = lz_A / float(n)
+    j = torch.arange(n, device=x.device, dtype=x.dtype)
+    d = torch.minimum(j, n - j) * dz
+    ker = torch.exp(-0.5 * (d / sigma_A) ** 2)
+    ker = ker / ker.sum()
+    return torch.fft.irfft(
+        torch.fft.rfft(x, dim=-1) * torch.fft.rfft(ker), n=n, dim=-1
+    )
+
+
+def solvent_rhob_1d_residuals(
+    ref: Batch,
+    pred: TensorDict,
+    rhob_targets: dict,
+    sigma_A: float,
+) -> Optional[torch.Tensor]:
+    """Per-graph residual profiles (model - DFT bound charge, both smeared).
+
+    Rows exist only for graphs whose forward produced a healthy fresh 1-D
+    solve (mask == 1); returns None when nothing is scoreable.
+    """
+    prof = pred.get("solvent_rho_bound_1d")
+    mask = pred.get("solvent_rho_bound_1d_mask")
+    if prof is None or mask is None or not rhob_targets:
+        return None
+    sid_arr = _batch_get(ref, "sample_id")
+    if sid_arr is None:
+        return None
+    targets = rhob_targets["targets"]
+    lz = float(rhob_targets["lz_A"])
+    num_graphs = int(ref.ptr.numel() - 1)
+    rows_model, rows_ref = [], []
+    for graph_idx in range(num_graphs):
+        if float(mask.view(-1)[graph_idx].detach().item()) < 0.5:
+            continue
+        sample_id = int(sid_arr.view(-1)[graph_idx].detach().cpu().item())
+        if sample_id not in targets:
+            raise KeyError(f"sample_id {sample_id} is missing from solvent_rhob_1d_file")
+        rows_model.append(prof[graph_idx])
+        rows_ref.append(prof.new_tensor(targets[sample_id]))
+    if not rows_model:
+        return None
+    model_s = _gaussian_smear_periodic_1d(torch.stack(rows_model), sigma_A, lz)
+    ref_s = _gaussian_smear_periodic_1d(torch.stack(rows_ref), sigma_A, lz)
+    return model_s - ref_s
+
+
+def mean_squared_error_solvent_rhob_1d(
+    ref: Batch,
+    pred: TensorDict,
+    rhob_targets: dict,
+    sigma_A: float,
+    ddp: Optional[bool] = None,
+) -> Optional[torch.Tensor]:
+    residuals = solvent_rhob_1d_residuals(ref, pred, rhob_targets, sigma_A)
+    if residuals is None:
+        return None
+    return reduce_loss(torch.square(residuals), ddp)
+
+
 class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
     def __init__(
         self,
@@ -1982,6 +2073,9 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         potential_1d_profile_align="mean",
         potential_1d_profile_use_solvent_profile=False,
         solvent_center_weight=0.0,
+        solvent_rhob_1d_weight=0.0,
+        solvent_rhob_1d_file=None,
+        solvent_rhob_1d_sigma=0.25,
         potential_axis=2,
         potential_sign=1.0,
         solvent_sigma_g=0.85,
@@ -2032,6 +2126,18 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.register_buffer(
             "solvent_center_weight",
             torch.tensor(solvent_center_weight, dtype=torch.get_default_dtype()),
+        )
+        self.register_buffer(
+            "solvent_rhob_1d_weight",
+            torch.tensor(solvent_rhob_1d_weight, dtype=torch.get_default_dtype()),
+        )
+        self.solvent_rhob_1d_file = solvent_rhob_1d_file
+        self.solvent_rhob_1d_sigma = float(solvent_rhob_1d_sigma)
+        self.solvent_rhob_1d_targets = (
+            _load_solvent_rhob_1d_npz(solvent_rhob_1d_file)
+            if solvent_rhob_1d_file is not None
+            and float(solvent_rhob_1d_weight) > 1.0e-12
+            else {}
         )
         self.density_3d_file = density_3d_file
         self.density_3d_targets = (
@@ -2158,6 +2264,16 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             )
             if loss_potential_1d_profile is not None:
                 loss = loss + self.potential_1d_profile_weight * loss_potential_1d_profile
+        if self.solvent_rhob_1d_weight > 1e-12:
+            loss_solvent_rhob_1d = mean_squared_error_solvent_rhob_1d(
+                ref=ref,
+                pred=pred,
+                rhob_targets=self.solvent_rhob_1d_targets,
+                sigma_A=self.solvent_rhob_1d_sigma,
+                ddp=ddp,
+            )
+            if loss_solvent_rhob_1d is not None:
+                loss = loss + self.solvent_rhob_1d_weight * loss_solvent_rhob_1d
         if self.solvent_center_weight > 1e-12:
             loss_solvent_layer_mean, pred_solvent_layer_mean = (
                 weighted_mean_squared_error_solvent_layer_mean(
@@ -2190,6 +2306,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             f"density_3d_samples={self.density_3d_samples}, "
             f"potential_1d_profile_weight={self.potential_1d_profile_weight:.3f}, "
             f"solvent_center_weight={self.solvent_center_weight:.3f}, "
+            f"solvent_rhob_1d_weight={self.solvent_rhob_1d_weight:.3f}, "
             f"potential_axis={self.potential_axis}, potential_sign={self.potential_sign:.3f})"
         )
 

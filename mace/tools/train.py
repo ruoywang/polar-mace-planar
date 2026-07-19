@@ -30,6 +30,7 @@ from mace.modules.loss import (
     potential_1d_profile_residuals,
     predict_potential_from_dipole,
     solvent_layer_mean_residuals,
+    solvent_rhob_1d_residuals,
 )
 
 from . import torch_geometric
@@ -86,6 +87,10 @@ def valid_err_log(
     if eval_metrics.get("rmse_potential_1d_profile") is not None:
         density_msg += (
             f", RMSE_potential_1d_profile={eval_metrics['rmse_potential_1d_profile']:.5f} eV"
+        )
+    if eval_metrics.get("rmse_solvent_rhob_1d") is not None:
+        density_msg += (
+            f", RMSE_rhob_1d={eval_metrics['rmse_solvent_rhob_1d']:.6f} e/A^3"
         )
     if eval_metrics.get("rmse_solvent_layer_mean") is not None:
         density_msg += (
@@ -717,6 +722,10 @@ class MACELoss(Metric):
         )
         self.add_state("delta_potential_1d_profile", default=[], dist_reduce_fx="cat")
         self.add_state(
+            "SolventRhob1D_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_solvent_rhob_1d", default=[], dist_reduce_fx="cat")
+        self.add_state(
             "SolventLayerMean_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
         self.add_state("delta_solvent_layer_mean", default=[], dist_reduce_fx="cat")
@@ -877,6 +886,21 @@ class MACELoss(Metric):
                     dtype=self.Potential1DProfile_computed.dtype,
                     device=self.Potential1DProfile_computed.device,
                 )
+        rhob_1d_targets = getattr(self.loss_fn, "solvent_rhob_1d_targets", None)
+        if rhob_1d_targets:
+            rhob_1d_res = solvent_rhob_1d_residuals(
+                ref=batch,
+                pred=output,
+                rhob_targets=rhob_1d_targets,
+                sigma_A=float(getattr(self.loss_fn, "solvent_rhob_1d_sigma", 0.25)),
+            )
+            if rhob_1d_res is not None:
+                self.delta_solvent_rhob_1d.append(rhob_1d_res.detach())
+                self.SolventRhob1D_computed += torch.tensor(
+                    float(rhob_1d_res.numel()),
+                    dtype=self.SolventRhob1D_computed.dtype,
+                    device=self.SolventRhob1D_computed.device,
+                )
         if getattr(self.loss_fn, "solvent_center_weight", 0.0) > 1.0e-12:
             solvent_layer_res, pred_layer_mean, target_layer_mean = (
                 solvent_layer_mean_residuals(
@@ -1013,6 +1037,10 @@ class MACELoss(Metric):
             aux["mae_potential_1d_profile"] = compute_mae(delta_potential_1d_profile)
             aux["rmse_potential_1d_profile"] = compute_rmse(delta_potential_1d_profile)
             aux["q95_potential_1d_profile"] = compute_q95(delta_potential_1d_profile)
+        if self.SolventRhob1D_computed:
+            delta_solvent_rhob_1d = self.convert(self.delta_solvent_rhob_1d)
+            aux["mae_solvent_rhob_1d"] = compute_mae(delta_solvent_rhob_1d)
+            aux["rmse_solvent_rhob_1d"] = compute_rmse(delta_solvent_rhob_1d)
         if self.SolventLayerMean_computed:
             delta_solvent_layer_mean = self.convert(self.delta_solvent_layer_mean)
             aux["mae_solvent_layer_mean"] = compute_mae(delta_solvent_layer_mean)
