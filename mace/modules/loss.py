@@ -2007,6 +2007,7 @@ def solvent_rhob_1d_residuals(
     pred: TensorDict,
     rhob_targets: dict,
     sigma_A: float,
+    smear_ref: bool = True,
 ) -> Optional[torch.Tensor]:
     """Per-graph residual profiles (model - DFT bound charge, both smeared).
 
@@ -2035,7 +2036,10 @@ def solvent_rhob_1d_residuals(
     if not rows_model:
         return None
     model_s = _gaussian_smear_periodic_1d(torch.stack(rows_model), sigma_A, lz)
-    ref_s = _gaussian_smear_periodic_1d(torch.stack(rows_ref), sigma_A, lz)
+    ref_stack = torch.stack(rows_ref)
+    ref_s = (
+        _gaussian_smear_periodic_1d(ref_stack, sigma_A, lz) if smear_ref else ref_stack
+    )
     return model_s - ref_s
 
 
@@ -2044,13 +2048,14 @@ def mean_squared_error_solvent_rhob_1d(
     pred: TensorDict,
     rhob_targets: dict,
     sigma_A: float,
+    smear_ref: bool = True,
     ddp: Optional[bool] = None,
 ) -> Optional[torch.Tensor]:
     prof = pred.get("solvent_rho_bound_1d")
     if prof is None or not rhob_targets:
         # config-level absence: identical on every rank, safe to skip
         return None
-    residuals = solvent_rhob_1d_residuals(ref, pred, rhob_targets, sigma_A)
+    residuals = solvent_rhob_1d_residuals(ref, pred, rhob_targets, sigma_A, smear_ref)
     # The scoreable-row count is DATA-dependent and differs across ranks
     # (fallback/warmup rows are masked), so every rank must take part in
     # the same collective here — a rank-local early return deadlocks DDP.
@@ -2097,6 +2102,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         solvent_rhob_1d_weight=0.0,
         solvent_rhob_1d_file=None,
         solvent_rhob_1d_sigma=0.25,
+        solvent_rhob_1d_smear_ref=True,
         potential_axis=2,
         potential_sign=1.0,
         solvent_sigma_g=0.85,
@@ -2154,6 +2160,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         )
         self.solvent_rhob_1d_file = solvent_rhob_1d_file
         self.solvent_rhob_1d_sigma = float(solvent_rhob_1d_sigma)
+        self.solvent_rhob_1d_smear_ref = bool(solvent_rhob_1d_smear_ref)
         self.solvent_rhob_1d_targets = (
             _load_solvent_rhob_1d_npz(solvent_rhob_1d_file)
             if solvent_rhob_1d_file is not None
@@ -2291,6 +2298,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 pred=pred,
                 rhob_targets=self.solvent_rhob_1d_targets,
                 sigma_A=self.solvent_rhob_1d_sigma,
+                smear_ref=self.solvent_rhob_1d_smear_ref,
                 ddp=ddp,
             )
             if loss_solvent_rhob_1d is not None:

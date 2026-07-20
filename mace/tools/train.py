@@ -893,6 +893,7 @@ class MACELoss(Metric):
                 pred=output,
                 rhob_targets=rhob_1d_targets,
                 sigma_A=float(getattr(self.loss_fn, "solvent_rhob_1d_sigma", 0.25)),
+                smear_ref=bool(getattr(self.loss_fn, "solvent_rhob_1d_smear_ref", True)),
             )
             if rhob_1d_res is not None:
                 self.delta_solvent_rhob_1d.append(rhob_1d_res.detach())

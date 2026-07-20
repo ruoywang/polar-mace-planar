@@ -1170,6 +1170,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=0.25,
     )
     parser.add_argument(
+        "--solvent_rhob_1d_smear_ref",
+        help="also smear the DFT reference in the rho_b loss (False = raw reference)",
+        type=str2bool,
+        default=True,
+    )
+    parser.add_argument(
         "--swa_dipole_weight",
         "--stage_two_dipole_weight",
         help="weight of dipoles after starting Stage Two (previously called swa)",
