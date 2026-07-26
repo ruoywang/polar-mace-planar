@@ -125,6 +125,7 @@ class PB1DResidualHead(torch.nn.Module):
         shape = basis @ c.to(w_env.dtype)
         return gaussian_blur_periodic(w_env * shape, self.sigma_z, lz)
 
+    @torch.jit.ignore
     def forward(self, **kw) -> torch.Tensor:  # pragma: no cover - thin wrapper
         c = self.coefficients(
             kw["node_feats"], kw["z_atoms"], kw["w_env_closure"], kw["u_closure"],

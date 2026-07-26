@@ -1,7 +1,7 @@
 import math
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -141,7 +141,12 @@ def _slab_dipole_correction_delta(
     slab[axis] = False
     slab_mask = torch.all(pbc_g == slab, dim=1).to(total_dipole.dtype)
     volume_g = torch.clamp(volume.view(-1).to(total_dipole.dtype), min=1.0e-12)
-    const = total_dipole.new_tensor(0.5 * float(FIELD_CONSTANT))
+    const = torch.full(
+        (),
+        90.47564011373334,  # 0.5 * FIELD_CONSTANT
+        dtype=total_dipole.dtype,
+        device=total_dipole.device,
+    )
     explicit_mu = explicit_dipole[:, axis]
     total_mu = total_dipole[:, axis]
     delta = const * (torch.square(total_mu) - torch.square(explicit_mu)) / volume_g
@@ -698,7 +703,8 @@ class MACELES(ScaleShiftMACE):
 
 
 def _permute_to_e3nn_convention(x: torch.Tensor) -> torch.Tensor:
-    return x[..., torch.LongTensor([1, 2, 0]).to(x.device)]
+    idx = torch.tensor([1, 2, 0], dtype=torch.long, device=x.device)
+    return torch.index_select(x, -1, idx)
 
 
 @compile_mode("script")
@@ -890,6 +896,8 @@ class PolarMACE(ScaleShiftMACE):
         self.fermi_vacuum_offset = torch.nn.Parameter(
             torch.zeros((), dtype=torch.get_default_dtype())
         )
+        self._charges_dim = int(self.charges_irreps.dim)
+        self._potential_dim = int(self.potential_irreps.dim)
         self.center_density_baselines = (
             _load_center_density_baselines_npz(potential_1d_profile_file)
             if potential_1d_profile_file is not None
@@ -1174,6 +1182,48 @@ class PolarMACE(ScaleShiftMACE):
             self.fermi_vacuum_offset = torch.nn.Parameter(
                 torch.zeros((), dtype=torch.get_default_dtype())
             )
+        if "_charges_dim" not in self.__dict__:
+            self._charges_dim = int(self.charges_irreps.dim)
+        if "_potential_dim" not in self.__dict__:
+            self._potential_dim = int(self.potential_irreps.dim)
+
+    @torch.jit.ignore
+    def _field_geometry_ignored(
+        self,
+        k_vectors: torch.Tensor,
+        k_norm2: torch.Tensor,
+        k_vector_batch: torch.Tensor,
+        k0_mask: torch.Tensor,
+        node_positions: torch.Tensor,
+        batch: torch.Tensor,
+        volume: torch.Tensor,
+        pbc: torch.Tensor,
+        force_pbc_evaluator: bool,
+    ) -> Dict[str, torch.Tensor]:
+        # graph_longrange's k-space cache API is not TorchScript-friendly;
+        # the whole descriptor family stays eager behind this boundary.
+        return self.electric_potential_descriptor.precompute_geometry(
+            k_vectors=k_vectors,
+            k_norm2=k_norm2,
+            k_vector_batch=k_vector_batch,
+            k0_mask=k0_mask,
+            node_positions=node_positions,
+            batch=batch,
+            volume=volume,
+            pbc=pbc,
+            force_pbc_evaluator=force_pbc_evaluator,
+        )
+
+    @torch.jit.ignore
+    def _field_dynamic_ignored(
+        self,
+        cache: Dict[str, torch.Tensor],
+        source_feats: torch.Tensor,
+        pbc: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.electric_potential_descriptor.forward_dynamic(
+            cache=cache, source_feats=source_feats, pbc=pbc
+        )
 
     def set_element_charge_baseline(self, baseline: torch.Tensor) -> None:
         if baseline.shape != self.element_charge_baseline.shape:
@@ -1208,13 +1258,14 @@ class PolarMACE(ScaleShiftMACE):
     def _radial_flat_to_effective(self, radial_flat: torch.Tensor) -> torch.Tensor:
         return self._radial_flat_to_blocks(radial_flat).sum(dim=1)
 
+    @torch.jit.ignore
     def _center_profile_inputs(
         self,
         data: Dict[str, torch.Tensor],
         num_graphs: int,
         device: torch.device,
         dtype: torch.dtype,
-    ) -> Optional[tuple[List[torch.Tensor], List[torch.Tensor]]]:
+    ) -> Optional[Tuple[List[torch.Tensor], List[torch.Tensor]]]:
         if not self.center_density_baselines:
             return None
         sample_ids = data.get("sample_id")
@@ -1572,8 +1623,11 @@ class PolarMACE(ScaleShiftMACE):
             out["profile_features_grad"] = prof_feat_grad
         return out
 
-    def _pb1d_stage1(self, data, positions, cell, radial_blocks,
-                     node_valence_electrons, num_graphs, planar_center):
+    @torch.jit.ignore
+    def _pb1d_stage1(self, data: Dict[str, torch.Tensor], positions: torch.Tensor,
+                     cell: torch.Tensor, radial_blocks: torch.Tensor,
+                     node_valence_electrons: torch.Tensor, num_graphs: int,
+                     planar_center: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Scheme C stage 1: SCF features from the cached previous-encounter
         profile; first encounter = fresh prior-only solve on the pre-recursion
         density (detached), which also seeds the cache."""
@@ -1583,9 +1637,12 @@ class PolarMACE(ScaleShiftMACE):
             use_head=False, want_grad=False, use_cache_rows=True, write_cache=True,
         )
 
-    def _pb1d_stage2(self, data, positions, cell, radial_blocks,
-                     node_valence_electrons, num_graphs, planar_center,
-                     node_feats_mixed, prev_data):
+    @torch.jit.ignore
+    def _pb1d_stage2(self, data: Dict[str, torch.Tensor], positions: torch.Tensor,
+                     cell: torch.Tensor, radial_blocks: torch.Tensor,
+                     node_valence_electrons: torch.Tensor, num_graphs: int,
+                     planar_center: torch.Tensor, node_feats_mixed: torch.Tensor,
+                     prev_data: Optional[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         """Scheme C stage 2: fresh solve with the FINAL (post-recursion)
         density + residual head. Observables carry gradients; the energy rows
         are detached; the cache is refreshed for the next encounter."""
@@ -1602,235 +1659,50 @@ class PolarMACE(ScaleShiftMACE):
         )
         return out
 
-    def forward(
+    @torch.jit.ignore
+    def _slab_periodic_1d_energy_ignored(
+        self,
+        radial_coefficients: torch.Tensor,
+        total_charge: torch.Tensor,
+        center: torch.Tensor,
+        cell: torch.Tensor,
+        pbc: torch.Tensor,
+        batch: torch.Tensor,
+        positions: torch.Tensor,
+        num_graphs: int,
+        comp_profile: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        return _slab_compensation_periodic_1d_energy_radial(
+            radial_coefficients=radial_coefficients,
+            atomic_density_sigmas=self.atomic_density_sigmas,
+            total_charge=total_charge,
+            center=center,
+            cell=cell,
+            pbc=pbc,
+            batch=batch,
+            positions=positions,
+            num_graphs=num_graphs,
+            sigma_g=self.solvent_sigma_g,
+            axis=self.solvent_potential_axis,
+            comp_profile=comp_profile,
+        )
+
+    @torch.jit.ignore
+    def _solvent_compensation_block(
         self,
         data: Dict[str, torch.Tensor],
-        training: bool = False,
-        compute_force: bool = True,
-        compute_virials: bool = False,
-        compute_stress: bool = False,
-        compute_displacement: bool = False,
-        compute_hessian: bool = False,
-        compute_edge_forces: bool = False,
-        compute_atomic_stresses: bool = False,
-        lammps_mliap: bool = False,
-        use_pbc_evaluator: bool = False,
-        fermi_level: Optional[torch.Tensor] = None,
-        external_field: Optional[torch.Tensor] = None,
-    ) -> Dict[str, Optional[torch.Tensor]]:
-        if not GRAPH_LONGRANGE_AVAILABLE:
-            raise ImportError(
-                "Cannot import 'graph_longrange'. Please install graph_electrostatics "
-                "from https://github.com/WillBaldwin0/graph_electrostatics."
-            )
-        ctx = prepare_graph(
-            data,
-            compute_virials=compute_virials,
-            compute_stress=compute_stress,
-            compute_displacement=compute_displacement,
-            lammps_mliap=lammps_mliap,
-        )
-
-        is_lammps = ctx.is_lammps
-        num_atoms_arange = ctx.num_atoms_arange
-        num_graphs = ctx.num_graphs
-        displacement = ctx.displacement
-        positions = ctx.positions
-        vectors = ctx.vectors
-        lengths = ctx.lengths
-        cell = ctx.cell
-        node_heads = ctx.node_heads
-        interaction_kwargs = ctx.interaction_kwargs
-        lammps_natoms = interaction_kwargs.lammps_natoms
-        lammps_class = interaction_kwargs.lammps_class
-
-        if fermi_level is None:
-            fermi_level = data["fermi_level"]
-        if external_field is None:
-            external_field = data["external_field"]
-        external_potential = torch.hstack(
-            (torch.zeros_like(fermi_level).unsqueeze(-1), external_field)
-        )
-        charges_to_mul_ir = getattr(self, "_charges_to_mul_ir", None)
-
-        node_e0 = self.atomic_energies_fn(data["node_attrs"])[
-            num_atoms_arange, node_heads
-        ]
-        e0 = scatter_sum(
-            src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
-        ).to(vectors.dtype)
-
-        node_feats = self.node_embedding(data["node_attrs"])
-        edge_attrs = self.spherical_harmonics(_permute_to_e3nn_convention(vectors))
-        edge_feats, cutoff = self.radial_embedding(
-            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
-        )
-        if hasattr(self, "pair_repulsion"):
-            pair_node_energy = self.pair_repulsion_fn(
-                lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
-            )
-            if is_lammps:
-                pair_node_energy = pair_node_energy[: lammps_natoms[0]]
-        else:
-            pair_node_energy = torch.zeros_like(node_e0)
-
-        node_es_list: List[torch.Tensor] = []
-        node_feats_list: List[torch.Tensor] = []
-        spin_charge_density = torch.zeros(
-            (data["batch"].size(-1), self.charges_irreps.dim),
-            device=data["batch"].device,
-            dtype=vectors.dtype,
-        )
-        node_charge_baseline = torch.sum(
-            self.element_charge_baseline.index_select(0, node_heads.to(torch.long))
-            * data["node_attrs"].to(self.element_charge_baseline.dtype),
-            dim=-1,
-        ).to(vectors.dtype)
-        node_charge_residual_scale = torch.full_like(
-            node_charge_baseline, self.element_charge_residual_scale
-        )
-
-        for i, (interaction, product, lr_src) in enumerate(
-            zip(self.interactions, self.products, self.lr_source_maps)
-        ):
-            node_attrs_slice = data["node_attrs"]
-            if is_lammps and i > 0:
-                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
-            node_feats, sc = interaction(
-                node_attrs=node_attrs_slice,
-                node_feats=node_feats,
-                edge_attrs=edge_attrs,
-                edge_feats=edge_feats,
-                edge_index=data["edge_index"],
-                cutoff=cutoff,
-                first_layer=(i == 0),
-                lammps_class=lammps_class,
-                lammps_natoms=lammps_natoms,
-            )
-            if is_lammps and i == 0:
-                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
-            node_feats = product(
-                node_feats=node_feats, sc=sc, node_attrs=node_attrs_slice
-            )
-            node_feats_list.append(node_feats)
-
-            feat_idx = -1 if len(self.readouts) == 1 else min(i, len(self.readouts) - 1)
-            node_es = self.readouts[feat_idx](node_feats, node_heads)[
-                num_atoms_arange, node_heads
-            ]
-            node_es_list.append(node_es)
-
-            spin_charge_sources = lr_src(node_feats).squeeze(-2)
-            if self.element_charge_residual_scale != 1.0:
-                spin_charge_sources = spin_charge_sources.view(
-                    spin_charge_sources.shape[0], 2, -1
-                )
-                spin_charge_sources = spin_charge_sources.clone()
-                spin_charge_sources[:, :, : self.atomic_density_num_sigmas] = (
-                    node_charge_residual_scale[:, None, None]
-                    * spin_charge_sources[:, :, : self.atomic_density_num_sigmas]
-                )
-                spin_charge_sources = spin_charge_sources.view(
-                    spin_charge_sources.shape[0], -1
-                )
-            spin_charge_density = spin_charge_density + spin_charge_sources
-
-        node_feats_out = torch.cat(node_feats_list, dim=-1)
-        node_inter_es = torch.sum(torch.stack(node_es_list, dim=0), dim=0)
-        node_inter_es = self.scale_shift(node_inter_es, node_heads)
-        inter_e = scatter_sum(node_inter_es, data["batch"], dim=-1, dim_size=num_graphs)
-
-        # Build k-grid
-        (
-            k_vectors,
-            kv_norms_squared,
-            k_vectors_batch,
-            k_vectors_0mask,
-        ) = compute_k_vectors_flat(
-            self.kspace_cutoff, cell.view(-1, 3, 3), data["rcell"].view(-1, 3, 3)
-        )
-
-        field_feature_cache = self.electric_potential_descriptor.precompute_geometry(
-            k_vectors=k_vectors,
-            k_norm2=kv_norms_squared,
-            k_vector_batch=k_vectors_batch,
-            k0_mask=k_vectors_0mask,
-            node_positions=positions,
-            batch=data["batch"],
-            volume=data["volume"],
-            pbc=data["pbc"].view(-1, 3),
-            force_pbc_evaluator=use_pbc_evaluator,
-        )
-
-        # SCF fixed point
-        features_mixed = self.layer_feature_mixer(torch.stack(node_feats_list, dim=0))
-        spin_charge_density = spin_charge_density.view(
-            spin_charge_density.shape[0], 2, -1
-        )
-        spin_charge_density = spin_charge_density.clone()
-        half_node_charge_baseline = 0.5 * node_charge_baseline
-        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
-            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
-            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
-        )
-        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
-            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
-            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
-        )
-        fukui_input = node_feats
-        fukui_to_mul_ir = getattr(self, "_fukui_to_mul_ir", None)
-        if fukui_to_mul_ir is not None:
-            fukui_input = fukui_to_mul_ir(fukui_input)
-        fukui_sources = self.fukui_source_map(fukui_input)
-        fukui_norm = scatter_sum(
-            src=fukui_sources.double(),
-            index=data["batch"],
-            dim=0,
-            dim_size=num_graphs,
-        )[data["batch"]].to(vectors.dtype)
-        fukui_norm = torch.where(
-            fukui_norm == 0, torch.ones_like(fukui_norm), fukui_norm
-        )
-        fukui_sources = fukui_sources / fukui_norm
-        Q_p_S = (data["total_charge"] + (data["total_spin"] - 1))[data["batch"]]
-        Q_m_S = (data["total_charge"] - (data["total_spin"] - 1))[data["batch"]]
-        pred_total_charges_0 = scatter_sum(
-            src=spin_charge_density[:, :, : self.atomic_density_num_sigmas]
-            .sum(dim=-1)
-            .double(),
-            index=data["batch"],
-            dim=0,
-            dim_size=num_graphs,
-        )[data["batch"]].to(vectors.dtype)
-        spin_charge_density = spin_charge_density.clone()
-        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
-            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
-            + fukui_sources[:, 0, None]
-            * ((Q_p_S / 2) - pred_total_charges_0[:, 0])[:, None]
-            / float(self.atomic_density_num_sigmas)
-        )
-        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
-            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
-            + fukui_sources[:, 1, None]
-            * ((Q_m_S / 2) - pred_total_charges_0[:, 1])[:, None]
-            / float(self.atomic_density_num_sigmas)
-        )
-        # print("spin_charge_density", spin_charge_density)
-
-        potential_features = torch.zeros(
-            (data["batch"].size(-1), self.potential_irreps.dim),
-            device=data["batch"].device,
-            dtype=vectors.dtype,
-        )
-        field_independent_spin_charge_density = spin_charge_density.clone()
-        element_index = torch.argmax(data["node_attrs"], dim=-1)
-        node_valence_electrons = self.atomic_valence_electrons[element_index]
-        center_profile_inputs = self._center_profile_inputs(
-            data=data,
-            num_graphs=num_graphs,
-            device=positions.device,
-            dtype=positions.dtype,
-        )
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        vectors: torch.Tensor,
+        field_independent_spin_charge_density: torch.Tensor,
+        node_valence_electrons: torch.Tensor,
+        center_profile_inputs: Optional[Tuple[List[torch.Tensor], List[torch.Tensor]]],
+        num_graphs: int,
+        training: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
+        # Solvent-branch compensation (planar + pb1d): density crossings,
+        # pb1d stage 1, slab compensation features. Kept outside TorchScript
+        # (jit.ignore); compiled models call back into eager Python here.
         comp_charge_density = field_independent_spin_charge_density.sum(dim=1)
         comp_density_coefficients = self._radial_flat_to_effective(
             comp_charge_density
@@ -1973,10 +1845,262 @@ class PolarMACE(ScaleShiftMACE):
             compensation_external_features + compensation_slab_features
         )
         compensation_external_features = compensation_external_features.to(vectors.dtype)
+        return compensation_external_features, comp_center_init, pb_solvent_data
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        compute_atomic_stresses: bool = False,
+        lammps_mliap: bool = False,
+        use_pbc_evaluator: bool = False,
+        fermi_level: Optional[torch.Tensor] = None,
+        external_field: Optional[torch.Tensor] = None,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # graph_longrange availability is enforced at construction time; the
+        # guard cannot live in the scripted forward (module-global bool).
+        ctx = prepare_graph(
+            data,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_displacement=compute_displacement,
+            lammps_mliap=lammps_mliap,
+        )
+
+        is_lammps = ctx.is_lammps
+        num_atoms_arange = ctx.num_atoms_arange
+        num_graphs = ctx.num_graphs
+        displacement = ctx.displacement
+        positions = ctx.positions
+        vectors = ctx.vectors
+        lengths = ctx.lengths
+        cell = ctx.cell
+        node_heads = ctx.node_heads
+        interaction_kwargs = ctx.interaction_kwargs
+        lammps_natoms = interaction_kwargs.lammps_natoms
+        lammps_class = interaction_kwargs.lammps_class
+
+        if fermi_level is None:
+            fermi_level = data["fermi_level"]
+        if external_field is None:
+            external_field = data["external_field"]
+        external_potential = torch.hstack(
+            (torch.zeros_like(fermi_level).unsqueeze(-1), external_field)
+        )
+        charges_to_mul_ir = getattr(self, "_charges_to_mul_ir", None)
+
+        node_e0 = self.atomic_energies_fn(data["node_attrs"])[
+            num_atoms_arange, node_heads
+        ]
+        e0 = scatter_sum(
+            src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
+        ).to(vectors.dtype)
+
+        node_feats = self.node_embedding(data["node_attrs"])
+        edge_attrs = self.spherical_harmonics(_permute_to_e3nn_convention(vectors))
+        edge_feats, cutoff = self.radial_embedding(
+            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+        )
+        if hasattr(self, "pair_repulsion"):
+            pair_node_energy = self.pair_repulsion_fn(
+                lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+            )
+            if is_lammps:
+                pair_node_energy = pair_node_energy[: lammps_natoms[0]]
+        else:
+            pair_node_energy = torch.zeros_like(node_e0)
+
+        node_es_list: List[torch.Tensor] = []
+        node_feats_list: List[torch.Tensor] = []
+        spin_charge_density = torch.zeros(
+            (data["batch"].size(-1), self._charges_dim),
+            device=data["batch"].device,
+            dtype=vectors.dtype,
+        )
+        node_charge_baseline = torch.sum(
+            self.element_charge_baseline.index_select(0, node_heads.to(torch.long))
+            * data["node_attrs"].to(self.element_charge_baseline.dtype),
+            dim=-1,
+        ).to(vectors.dtype)
+        node_charge_residual_scale = torch.full_like(
+            node_charge_baseline, self.element_charge_residual_scale
+        )
+
+        for i, (interaction, product, lr_src) in enumerate(
+            zip(self.interactions, self.products, self.lr_source_maps)
+        ):
+            node_attrs_slice = data["node_attrs"]
+            if is_lammps and i > 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
+            node_feats, sc = interaction(
+                node_attrs=node_attrs_slice,
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+                cutoff=cutoff,
+                first_layer=(i == 0),
+                lammps_class=lammps_class,
+                lammps_natoms=lammps_natoms,
+            )
+            if is_lammps and i == 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
+            node_feats = product(
+                node_feats=node_feats, sc=sc, node_attrs=node_attrs_slice
+            )
+            node_feats_list.append(node_feats)
+
+            # ModuleList indexing needs literal indices in TorchScript;
+            # enumerate and select (feat_idx == min(i, len-1) in all cases)
+            feat_idx = min(i, len(self.readouts) - 1)
+            node_es_sel: Optional[torch.Tensor] = None
+            for ridx, readout in enumerate(self.readouts):
+                if ridx == feat_idx:
+                    node_es_sel = readout(node_feats, node_heads)[
+                        num_atoms_arange, node_heads
+                    ]
+            assert node_es_sel is not None
+            node_es = node_es_sel
+            node_es_list.append(node_es)
+
+            spin_charge_sources = lr_src(node_feats).squeeze(-2)
+            if self.element_charge_residual_scale != 1.0:
+                spin_charge_sources = spin_charge_sources.view(
+                    spin_charge_sources.shape[0], 2, -1
+                )
+                spin_charge_sources = spin_charge_sources.clone()
+                spin_charge_sources[:, :, : self.atomic_density_num_sigmas] = (
+                    node_charge_residual_scale[:, None, None]
+                    * spin_charge_sources[:, :, : self.atomic_density_num_sigmas]
+                )
+                spin_charge_sources = spin_charge_sources.view(
+                    spin_charge_sources.shape[0], -1
+                )
+            spin_charge_density = spin_charge_density + spin_charge_sources
+
+        node_feats_out = torch.cat(node_feats_list, dim=-1)
+        node_inter_es = torch.sum(torch.stack(node_es_list, dim=0), dim=0)
+        node_inter_es = self.scale_shift(node_inter_es, node_heads)
+        inter_e = scatter_sum(node_inter_es, data["batch"], dim=-1, dim_size=num_graphs)
+
+        # Build k-grid
+        (
+            k_vectors,
+            kv_norms_squared,
+            k_vectors_batch,
+            k_vectors_0mask,
+        ) = compute_k_vectors_flat(
+            self.kspace_cutoff, cell.view(-1, 3, 3), data["rcell"].view(-1, 3, 3)
+        )
+
+        field_feature_cache = self._field_geometry_ignored(
+            k_vectors,
+            kv_norms_squared,
+            k_vectors_batch,
+            k_vectors_0mask,
+            positions,
+            data["batch"],
+            data["volume"],
+            data["pbc"].view(-1, 3),
+            use_pbc_evaluator,
+        )
+
+        # SCF fixed point
+        features_mixed = self.layer_feature_mixer(torch.stack(node_feats_list, dim=0))
+        spin_charge_density = spin_charge_density.view(
+            spin_charge_density.shape[0], 2, -1
+        )
+        spin_charge_density = spin_charge_density.clone()
+        half_node_charge_baseline = 0.5 * node_charge_baseline
+        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
+            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
+        )
+        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
+            + half_node_charge_baseline[:, None] / float(self.atomic_density_num_sigmas)
+        )
+        fukui_input = node_feats
+        fukui_to_mul_ir = getattr(self, "_fukui_to_mul_ir", None)
+        if fukui_to_mul_ir is not None:
+            fukui_input = fukui_to_mul_ir(fukui_input)
+        fukui_sources = self.fukui_source_map(fukui_input)
+        fukui_norm = scatter_sum(
+            src=fukui_sources.double(),
+            index=data["batch"],
+            dim=0,
+            dim_size=num_graphs,
+        )[data["batch"]].to(vectors.dtype)
+        fukui_norm = torch.where(
+            fukui_norm == 0, torch.ones_like(fukui_norm), fukui_norm
+        )
+        fukui_sources = fukui_sources / fukui_norm
+        Q_p_S = (data["total_charge"] + (data["total_spin"] - 1))[data["batch"]]
+        Q_m_S = (data["total_charge"] - (data["total_spin"] - 1))[data["batch"]]
+        pred_total_charges_0 = scatter_sum(
+            src=spin_charge_density[:, :, : self.atomic_density_num_sigmas]
+            .sum(dim=-1)
+            .double(),
+            index=data["batch"],
+            dim=0,
+            dim_size=num_graphs,
+        )[data["batch"]].to(vectors.dtype)
+        spin_charge_density = spin_charge_density.clone()
+        spin_charge_density[:, 0, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 0, : self.atomic_density_num_sigmas]
+            + fukui_sources[:, 0, None]
+            * ((Q_p_S / 2) - pred_total_charges_0[:, 0])[:, None]
+            / float(self.atomic_density_num_sigmas)
+        )
+        spin_charge_density[:, 1, : self.atomic_density_num_sigmas] = (
+            spin_charge_density[:, 1, : self.atomic_density_num_sigmas]
+            + fukui_sources[:, 1, None]
+            * ((Q_m_S / 2) - pred_total_charges_0[:, 1])[:, None]
+            / float(self.atomic_density_num_sigmas)
+        )
+        # print("spin_charge_density", spin_charge_density)
+
+        potential_features = torch.zeros(
+            (data["batch"].size(-1), self._potential_dim),
+            device=data["batch"].device,
+            dtype=vectors.dtype,
+        )
+        field_independent_spin_charge_density = spin_charge_density.clone()
+        element_index = torch.argmax(data["node_attrs"], dim=-1)
+        node_valence_electrons = self.atomic_valence_electrons[element_index]
+        center_profile_inputs = self._center_profile_inputs(
+            data=data,
+            num_graphs=num_graphs,
+            device=positions.device,
+            dtype=positions.dtype,
+        )
+        (
+            compensation_external_features,
+            comp_center_init,
+            pb_solvent_data,
+        ) = self._solvent_compensation_block(
+            data=data,
+            positions=positions,
+            cell=cell,
+            vectors=vectors,
+            field_independent_spin_charge_density=field_independent_spin_charge_density,
+            node_valence_electrons=node_valence_electrons,
+            center_profile_inputs=center_profile_inputs,
+            num_graphs=num_graphs,
+            training=training,
+        )
         scf_external_potential = external_potential
         esps: Optional[torch.Tensor] = None
 
-        for i in range(self.num_recursion_steps):
+        for i, field_dependent_charges_map in enumerate(
+            self.field_dependent_charges_maps
+        ):
             source_feats_alpha = self._radial_flat_to_effective(
                 spin_charge_density[:, 0, :]
             )
@@ -1992,15 +2116,15 @@ class PolarMACE(ScaleShiftMACE):
             source_feats_beta = source_feats_beta[
                 :, : self.electrostatic_multipoles_dim
             ]
-            field_feats_alpha = self.electric_potential_descriptor.forward_dynamic(
-                cache=field_feature_cache,
-                source_feats=source_feats_alpha.unsqueeze(-2),
-                pbc=data["pbc"].view(-1, 3),
+            field_feats_alpha = self._field_dynamic_ignored(
+                field_feature_cache,
+                source_feats_alpha.unsqueeze(-2),
+                data["pbc"].view(-1, 3),
             )
-            field_feats_beta = self.electric_potential_descriptor.forward_dynamic(
-                cache=field_feature_cache,
-                source_feats=source_feats_beta.unsqueeze(-2),
-                pbc=data["pbc"].view(-1, 3),
+            field_feats_beta = self._field_dynamic_ignored(
+                field_feature_cache,
+                source_feats_beta.unsqueeze(-2),
+                data["pbc"].view(-1, 3),
             )
             field_from_mul_ir = getattr(self, "_field_from_mul_ir", None)
             if field_from_mul_ir is not None:
@@ -2033,7 +2157,7 @@ class PolarMACE(ScaleShiftMACE):
             potential_features = torch.cat(
                 (field_feats_alpha, field_feats_beta), dim=-1
             )
-            charge_sources_out = self.field_dependent_charges_maps[i](
+            charge_sources_out = field_dependent_charges_map(
                 node_attrs=data["node_attrs"],
                 node_feats=features_mixed,
                 edge_attrs=edge_attrs[:, : self.from_ell_max_field_update],
@@ -2135,7 +2259,12 @@ class PolarMACE(ScaleShiftMACE):
             charge_density_mul_ir, positions, data["batch"], num_graphs
         )
         if charge_density_mul_ir.shape[1] > 1:
-            atomic_dipole = charge_density_mul_ir[:, 1:4][:, [2, 0, 1]]
+            atomic_dipole = charge_density_mul_ir[:, 1:4].index_select(
+                1,
+                torch.tensor(
+                    [2, 0, 1], dtype=torch.long, device=charge_density_mul_ir.device
+                ),
+            )
         else:
             atomic_dipole = torch.zeros_like(positions)
         element_index = torch.argmax(data["node_attrs"], dim=-1)
@@ -2143,7 +2272,7 @@ class PolarMACE(ScaleShiftMACE):
         charge_density_radial_coefficients = self._radial_flat_to_blocks(
             charge_density_radial_mul_ir
         )
-        density_width_threshold = None
+        density_width_threshold: Optional[float] = None
         if (
             self.solvent_density_threshold is not None
             and center_profile_inputs is not None
@@ -2227,7 +2356,9 @@ class PolarMACE(ScaleShiftMACE):
             -0.5
             * torch.square(
                 (z_axis - z_center_nodes)
-                / z_axis.new_tensor(float(sigma_if))
+                / torch.full(
+                    (), float(sigma_if), dtype=z_axis.dtype, device=z_axis.device
+                )
             )
         )
         interface_w_sum = torch.clamp(
@@ -2322,7 +2453,8 @@ class PolarMACE(ScaleShiftMACE):
             ).to(solv_center.dtype)
         else:
             raise ValueError(
-                f"Unsupported cell shape for solvent axis length: {tuple(cell_for_axis.shape)}"
+                "Unsupported cell shape for solvent axis length: "
+                + str(cell_for_axis.shape)
             )
         if pb_solvent_data is not None:
             layer_mean = pb_solvent_data["layer_mean"].to(solv_center.dtype)
@@ -2406,9 +2538,8 @@ class PolarMACE(ScaleShiftMACE):
             pbc=data["pbc"].view(-1, 3),
             force_pbc_evaluator=use_pbc_evaluator,
         )
-        compensation_periodic_1d_energy = _slab_compensation_periodic_1d_energy_radial(
+        compensation_periodic_1d_energy = self._slab_periodic_1d_energy_ignored(
             radial_coefficients=charge_density_radial_coefficients,
-            atomic_density_sigmas=self.atomic_density_sigmas,
             total_charge=input_total_charge,
             center=solv_center,
             cell=cell.detach(),
@@ -2416,8 +2547,6 @@ class PolarMACE(ScaleShiftMACE):
             batch=data["batch"],
             positions=positions,
             num_graphs=num_graphs,
-            sigma_g=self.solvent_sigma_g,
-            axis=self.solvent_potential_axis,
             comp_profile=(
                 pb_solvent_data["profile_energy"]
                 if pb_solvent_data is not None

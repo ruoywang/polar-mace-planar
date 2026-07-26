@@ -520,7 +520,9 @@ def compute_total_charge_dipole_permuted(
         )
         # Match the real-space GTO density convention used by density losses:
         # the l=1 coefficients contribute directly to the first moment.
-        dipole = dipole + dipole_p[..., [2, 0, 1]]  # CS phase convention
+        dipole = dipole + torch.stack(
+            (dipole_p[..., 2], dipole_p[..., 0], dipole_p[..., 1]), dim=-1
+        )  # CS phase convention
 
     total_charge = scatter_sum(
         src=density_coefficients[:, 0], index=batch, dim=-1  # , dim_size=num_graphs
@@ -629,8 +631,11 @@ def prepare_graph(
         ikw = InteractionKwargs(data["lammps_class"], (n_real, n_ghost))
     else:
         is_compiling = False
-        if hasattr(torch, "compiler") and hasattr(torch.compiler, "is_compiling"):
-            is_compiling = torch.compiler.is_compiling()
+        if not torch.jit.is_scripting():
+            # torch.compiler probing is host-python only; the scripted path
+            # always takes the requires_grad_ branch below
+            if hasattr(torch, "compiler") and hasattr(torch.compiler, "is_compiling"):
+                is_compiling = torch.compiler.is_compiling()
         if not is_compiling:
             data["positions"].requires_grad_(True)
         positions = data["positions"]

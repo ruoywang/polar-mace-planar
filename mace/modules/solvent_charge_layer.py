@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Tuple, Optional
 
 import torch
 
@@ -12,7 +12,7 @@ POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2 = (
 def _gaussian_1d(
     z_grid: torch.Tensor, centers: torch.Tensor, sigma: float
 ) -> torch.Tensor:
-    sigma_t = z_grid.new_tensor(float(max(sigma, 1.0e-12)))
+    sigma_t = torch.full((), float(max(sigma, 1.0e-12)), dtype=z_grid.dtype, device=z_grid.device)
     dz = z_grid[:, None] - centers[None, :]
     return torch.exp(-0.5 * torch.square(dz / sigma_t)) / (
         math.sqrt(2.0 * math.pi) * sigma_t
@@ -23,7 +23,7 @@ def _gaussian_d1_1d(
     z_grid: torch.Tensor, centers: torch.Tensor, sigma: float
 ) -> torch.Tensor:
     g = _gaussian_1d(z_grid, centers, sigma)
-    sigma_t = z_grid.new_tensor(float(max(sigma, 1.0e-12)))
+    sigma_t = torch.full((), float(max(sigma, 1.0e-12)), dtype=z_grid.dtype, device=z_grid.device)
     dz = z_grid[:, None] - centers[None, :]
     return -(dz / (sigma_t * sigma_t)) * g
 
@@ -32,7 +32,7 @@ def _gaussian_d2_1d(
     z_grid: torch.Tensor, centers: torch.Tensor, sigma: float
 ) -> torch.Tensor:
     g = _gaussian_1d(z_grid, centers, sigma)
-    sigma_t = z_grid.new_tensor(float(max(sigma, 1.0e-12)))
+    sigma_t = torch.full((), float(max(sigma, 1.0e-12)), dtype=z_grid.dtype, device=z_grid.device)
     dz = z_grid[:, None] - centers[None, :]
     sigma2 = sigma_t * sigma_t
     return ((dz * dz) / (sigma2 * sigma2) - 1.0 / sigma2) * g
@@ -81,8 +81,8 @@ def _residual_plane_density_from_radial_coefficients(
 def _interp_crossing(
     z_grid: torch.Tensor, values_01: torch.Tensor, level: float
 ) -> torch.Tensor:
-    level_t = values_01.new_tensor(float(level))
-    below = torch.nonzero(values_01 <= level_t, as_tuple=False).view(-1)
+    level_t = torch.full((), float(level), dtype=values_01.dtype, device=values_01.device)
+    below = torch.nonzero(values_01 <= level_t).view(-1)
     if below.numel() == 0:
         idx = torch.argmin(torch.abs(values_01 - level_t))
         return z_grid[idx]
@@ -106,9 +106,9 @@ def _interp_crossing(
 def _interp_last_descending_crossing(
     z_grid: torch.Tensor, values_01: torch.Tensor, level: float
 ) -> torch.Tensor:
-    level_t = values_01.new_tensor(float(level))
+    level_t = torch.full((), float(level), dtype=values_01.dtype, device=values_01.device)
     cond = (values_01[:-1] >= level_t) & (values_01[1:] < level_t)
-    idx = torch.nonzero(cond, as_tuple=False).view(-1)
+    idx = torch.nonzero(cond).view(-1)
     if idx.numel() == 0:
         return _interp_crossing(z_grid, values_01, level)
     i = int(idx[-1].item())
@@ -130,7 +130,7 @@ def _truncated_gaussian_mean(
     lower: torch.Tensor,
     upper: torch.Tensor,
 ) -> torch.Tensor:
-    sigma_t = center.new_tensor(float(max(sigma, 1.0e-12)))
+    sigma_t = torch.full((), float(max(sigma, 1.0e-12)), dtype=center.dtype, device=center.device)
     inv_sqrt2 = 1.0 / math.sqrt(2.0)
     a = (lower - center) / sigma_t
     b = (upper - center) / sigma_t
@@ -194,7 +194,12 @@ def _atomic_dipole_xyz_from_density_coefficients(
     density_coefficients: torch.Tensor, positions: torch.Tensor
 ) -> torch.Tensor:
     if density_coefficients.shape[1] > 1:
-        return density_coefficients[:, 1:4][:, [2, 0, 1]]
+        return density_coefficients[:, 1:4].index_select(
+            1,
+            torch.tensor(
+                [2, 0, 1], dtype=torch.long, device=density_coefficients.device
+            ),
+        )
     return torch.zeros_like(positions)
 
 
@@ -213,7 +218,7 @@ def _compute_density_crossings_from_mace_multipoles(
     width_delta: float = 0.2,
     density_threshold: Optional[float] = None,
     width_density_threshold: Optional[float] = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
     charges = density_coefficients[:, 0]
     atomic_dipole = _atomic_dipole_xyz_from_density_coefficients(
@@ -222,13 +227,14 @@ def _compute_density_crossings_from_mace_multipoles(
     nelec = node_valence_electrons - charges
     centers = []
     widths = []
-    low_level = max(float(normalized_level or 0.0) - float(width_delta), 0.01)
+    _nl = 0.0 if normalized_level is None else float(normalized_level)
+    low_level = max(_nl - float(width_delta), 0.01)
     for g in range(num_graphs):
         mask = batch == g
         pos_g = positions[mask]
         if pos_g.numel() == 0:
-            centers.append(charges.new_tensor(0.0))
-            widths.append(charges.new_tensor(0.0))
+            centers.append(torch.zeros((), dtype=charges.dtype, device=charges.device))
+            widths.append(torch.zeros((), dtype=charges.dtype, device=charges.device))
             continue
         cell_g = cell[g] if cell.dim() == 3 else cell.view(-1, 3, 3)[g]
         area_g = _cell_cross_section_area(cell_g, axis)
@@ -251,7 +257,7 @@ def _compute_density_crossings_from_mace_multipoles(
         win = (z_grid >= z_lo) & (z_grid <= z_hi)
         if int(win.sum().item()) < 2:
             centers.append(z_top)
-            widths.append(charges.new_tensor(0.0))
+            widths.append(torch.zeros((), dtype=charges.dtype, device=charges.device))
             continue
         z_win = z_grid[win]
         rho_win = rho[win]
@@ -260,7 +266,8 @@ def _compute_density_crossings_from_mace_multipoles(
             rho_max = torch.max(rho_win)
             span = torch.clamp(rho_max - rho_min, min=1.0e-12)
             rho_01 = (rho_win - rho_min) / span
-            z_level = _interp_crossing(z_win, rho_01, float(normalized_level or 0.5))
+            _nl2 = 0.5 if normalized_level is None else float(normalized_level)
+            z_level = _interp_crossing(z_win, rho_01, _nl2)
             z_low = _interp_crossing(z_win, rho_01, low_level)
         else:
             z_level = _interp_last_descending_crossing(
@@ -290,7 +297,7 @@ def compute_ze_crossing_from_mace_multipoles(
     outward: float = 5.0,
     axis: int = 2,
     n_grid: int = 512,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     return _compute_density_crossings_from_mace_multipoles(
         density_coefficients=density_coefficients,
         positions=positions,
@@ -322,7 +329,7 @@ def compute_density_threshold_crossing_from_mace_multipoles(
     outward: float = 5.0,
     axis: int = 2,
     n_grid: int = 512,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     return _compute_density_crossings_from_mace_multipoles(
         density_coefficients=density_coefficients,
         positions=positions,
@@ -354,7 +361,7 @@ def compute_density_threshold_crossing_from_baseline_profile(
     inward: float,
     outward: float,
     axis: int = 2,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     if axis != 2:
         raise NotImplementedError("baseline center density currently supports axis=2")
     centers = []
@@ -364,8 +371,8 @@ def compute_density_threshold_crossing_from_baseline_profile(
         mask = batch == g
         pos_g = positions[mask]
         if pos_g.numel() == 0:
-            centers.append(positions.new_tensor(0.0))
-            widths.append(positions.new_tensor(0.0))
+            centers.append(torch.zeros((), dtype=positions.dtype, device=positions.device))
+            widths.append(torch.zeros((), dtype=positions.dtype, device=positions.device))
             continue
         cell_g = cell[g] if cell.dim() == 3 else cell.view(-1, 3, 3)[g]
         area_g = _cell_cross_section_area(cell_g, axis).to(dtype=positions.dtype)
@@ -375,7 +382,7 @@ def compute_density_threshold_crossing_from_baseline_profile(
         )
         if z_grid.numel() < 2:
             centers.append(torch.max(pos_g[:, axis]))
-            widths.append(positions.new_tensor(0.0))
+            widths.append(torch.zeros((), dtype=positions.dtype, device=positions.device))
             continue
         dz = torch.abs(z_grid[1] - z_grid[0])
         height = torch.clamp(dz * float(z_grid.numel()), min=1.0e-12)
@@ -396,7 +403,7 @@ def compute_density_threshold_crossing_from_baseline_profile(
         win = (z_grid >= z_lo) & (z_grid <= z_hi)
         if int(win.sum().item()) < 2:
             centers.append(z_top)
-            widths.append(positions.new_tensor(0.0))
+            widths.append(torch.zeros((), dtype=positions.dtype, device=positions.device))
             continue
         z_win = z_grid[win]
         rho_win = rho[win]
@@ -414,6 +421,59 @@ def compute_density_threshold_crossing_from_baseline_profile(
     return torch.stack(centers, dim=0), torch.stack(widths, dim=0)
 
 
+def _oh_species_crossing(
+    z_graph: torch.Tensor,
+    species_mask_g: torch.Tensor,
+    z_grid: torch.Tensor,
+    sigma: float,
+    level: float,
+    low_level: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    z_species = z_graph[species_mask_g]
+    if z_species.numel() == 0:
+        z_top = torch.max(z_graph)
+        return z_top, torch.zeros((), dtype=z_graph.dtype, device=z_graph.device)
+    gprof = torch.exp(
+        -0.5
+        * torch.square(
+            (z_grid[:, None] - z_species[None, :])
+            / torch.full(
+                (),
+                float(max(sigma, 1.0e-12)),
+                dtype=z_grid.dtype,
+                device=z_grid.device,
+            )
+        )
+    ).sum(dim=1)
+    gmax = torch.max(gprof)
+    if float(gmax.detach().cpu().item()) <= 1.0e-12:
+        z_top = torch.max(z_species)
+        return z_top, torch.zeros((), dtype=z_graph.dtype, device=z_graph.device)
+    gprof = gprof / gmax
+    z_level = _interp_last_descending_crossing(z_grid, gprof, level)
+    z_low = _interp_last_descending_crossing(z_grid, gprof, low_level)
+    return z_level, torch.clamp(z_low - z_level, min=0.0)
+
+
+def _interface_weighted_sum(
+    z_atom: torch.Tensor,
+    q_atom: torch.Tensor,
+    m_atom: torch.Tensor,
+    species_mask: torch.Tensor,
+    anchor: torch.Tensor,
+    lam: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    if int(species_mask.sum().item()) == 0:
+        zero = torch.zeros((), dtype=q_atom.dtype, device=q_atom.device)
+        return zero, zero
+    weights = torch.exp(
+        (z_atom[species_mask] - anchor) / float(max(lam, 1.0e-12))
+    )
+    qsum = torch.sum(weights * q_atom[species_mask])
+    msum = torch.sum(weights * m_atom[species_mask])
+    return qsum, msum
+
+
 def compute_oh_structure_crossings(
     positions: torch.Tensor,
     node_attrs: torch.Tensor,
@@ -426,7 +486,7 @@ def compute_oh_structure_crossings(
     width_delta: float = 0.2,
     axis: int = 2,
     n_grid: int = 1024,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
     element_index = torch.argmax(node_attrs, dim=-1)
     z_per_node = atomic_numbers[element_index]
@@ -441,7 +501,7 @@ def compute_oh_structure_crossings(
         mask_g = batch == g
         pos_g = positions[mask_g]
         if pos_g.numel() == 0:
-            zero = positions.new_tensor(0.0)
+            zero = torch.zeros((), dtype=positions.dtype, device=positions.device)
             z_o_all.append(zero)
             w_o_all.append(zero)
             z_h_all.append(zero)
@@ -457,30 +517,12 @@ def compute_oh_structure_crossings(
             device=positions.device,
         )
         z_graph = pos_g[:, axis]
-
-        def _cross(mask_species: torch.Tensor, sigma: float) -> tuple[torch.Tensor, torch.Tensor]:
-            z_species = z_graph[mask_species[mask_g]]
-            if z_species.numel() == 0:
-                z_top = torch.max(z_graph)
-                return z_top, positions.new_tensor(0.0)
-            gprof = torch.exp(
-                -0.5
-                * torch.square(
-                    (z_grid[:, None] - z_species[None, :])
-                    / z_grid.new_tensor(float(max(sigma, 1.0e-12)))
-                )
-            ).sum(dim=1)
-            gmax = torch.max(gprof)
-            if float(gmax.detach().cpu().item()) <= 1.0e-12:
-                z_top = torch.max(z_species)
-                return z_top, positions.new_tensor(0.0)
-            gprof = gprof / gmax
-            z_level = _interp_last_descending_crossing(z_grid, gprof, level)
-            z_low = _interp_last_descending_crossing(z_grid, gprof, low_level)
-            return z_level, torch.clamp(z_low - z_level, min=0.0)
-
-        z_o, w_o = _cross(is_o, sigma_o)
-        z_h, w_h = _cross(is_h, sigma_h)
+        z_o, w_o = _oh_species_crossing(
+            z_graph, is_o[mask_g], z_grid, sigma_o, level, low_level
+        )
+        z_h, w_h = _oh_species_crossing(
+            z_graph, is_h[mask_g], z_grid, sigma_h, level, low_level
+        )
         z_o_all.append(z_o)
         w_o_all.append(w_o)
         z_h_all.append(z_h)
@@ -505,7 +547,7 @@ def compute_interface_qm_summaries(
     axis: int = 2,
     lambda_o: float = 0.6,
     lambda_h: float = 1.5,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
     element_index = torch.argmax(node_attrs, dim=-1)
     z_per_node = atomic_numbers[element_index]
@@ -523,19 +565,12 @@ def compute_interface_qm_summaries(
         is_o_g = is_o[mask_g]
         is_h_g = is_h[mask_g]
 
-        def _weighted_sum(
-            mask_species: torch.Tensor, anchor: torch.Tensor, lam: float
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-            if int(mask_species.sum().item()) == 0:
-                zero = charges.new_tensor(0.0)
-                return zero, zero
-            weights = torch.exp((z_atom[mask_species] - anchor) / float(max(lam, 1.0e-12)))
-            qsum = torch.sum(weights * q_atom[mask_species])
-            msum = torch.sum(weights * m_atom[mask_species])
-            return qsum, msum
-
-        qsum_o, msum_o = _weighted_sum(is_o_g, z_o_anchor[g], lambda_o)
-        qsum_h, msum_h = _weighted_sum(is_h_g, z_h_anchor[g], lambda_h)
+        qsum_o, msum_o = _interface_weighted_sum(
+            z_atom, q_atom, m_atom, is_o_g, z_o_anchor[g], lambda_o
+        )
+        qsum_h, msum_h = _interface_weighted_sum(
+            z_atom, q_atom, m_atom, is_h_g, z_h_anchor[g], lambda_h
+        )
         qsum_o_all.append(qsum_o)
         qsum_h_all.append(qsum_h)
         msum_o_all.append(msum_o)
@@ -559,7 +594,7 @@ def periodic_gaussian_layer_potential_field_nodes(
     receiver_sigma: float = 0.0,
     axis: int = 2,
     num_grid: int = 1024,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Periodic G!=0 potential/field of the truncated-Gaussian compensation
     layer at the node positions.
 
@@ -593,7 +628,7 @@ def periodic_gaussian_layer_potential_field_nodes(
     sigma_t = float(max(sigma_g, 1.0e-12))
     sqrt_2pi = math.sqrt(2.0 * math.pi)
     inv_sqrt2 = 1.0 / math.sqrt(2.0)
-    k_const = float(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
+    k_const = 180.9512816816869  # 4*pi*27.211386245988/1.8897261258369282
     for g in range(num_graphs):
         atom_mask = batch == g
         if not torch.any(atom_mask) or not bool(slab_mask[g].item()):
@@ -650,7 +685,7 @@ def periodic_profile_layer_potential_field_nodes(
     positions: torch.Tensor,
     receiver_sigma: float = 0.0,
     axis: int = 2,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Periodic G!=0 potential/field of an arbitrary laterally uniform
     charge profile rho(z) at the node positions.
 
@@ -676,7 +711,7 @@ def periodic_profile_layer_potential_field_nodes(
     num_grid = int(profile.shape[1])
     phi = positions.new_zeros(positions.shape[0])
     field = positions.new_zeros(positions.shape)
-    k_const = float(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
+    k_const = 180.9512816816869  # 4*pi*27.211386245988/1.8897261258369282
     for g in range(num_graphs):
         atom_mask = batch == g
         if not torch.any(atom_mask) or not bool(slab_mask[g].item()):
@@ -720,7 +755,7 @@ def predict_potential_from_dipole_and_solvent_mu(
     cell: torch.Tensor,
     axis: int = 2,
     potential_sign: float = 1.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Same observable as predict_potential_from_dipole_and_solvent_layer,
     with the solvent dipole moment supplied directly (e.g. the first moment
     of a PB ionic charge profile) instead of a truncated-Gaussian layer."""
@@ -738,8 +773,15 @@ def predict_potential_from_dipole_and_solvent_mu(
         torch.linalg.norm(torch.cross(v1, v2, dim=-1), dim=-1), min=1.0e-12
     )
     explicit_mu = dipoles[:, axis]
-    scale = dipoles.new_tensor(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
-    sign = dipoles.new_tensor(float(potential_sign))
+    scale = torch.full(
+        (),
+        180.9512816816869,  # 4*pi*27.211386245988/1.8897261258369282
+        dtype=dipoles.dtype,
+        device=dipoles.device,
+    )
+    sign = torch.full(
+        (), float(potential_sign), dtype=dipoles.dtype, device=dipoles.device
+    )
     explicit_potential = sign * scale * explicit_mu / area
     solvent_potential = sign * scale * solvent_mu.view(-1).to(dipoles.dtype) / area
     total_potential = explicit_potential + solvent_potential
@@ -754,7 +796,7 @@ def predict_potential_from_dipole_and_solvent_layer(
     sigma_g: float = 0.85,
     axis: int = 2,
     potential_sign: float = 1.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     cells = cell
     if cells.dim() == 2 and cells.shape[1] == 3:
         cells = cells.view(-1, 3, 3)
@@ -780,8 +822,15 @@ def predict_potential_from_dipole_and_solvent_layer(
     solvent_charge = -total_charge.view(-1)
     explicit_mu = dipoles[:, axis]
     solvent_mu = solvent_charge * layer_mean
-    scale = dipoles.new_tensor(POTENTIAL_FROM_DIPOLE_SCALE_EV_PER_EANG_A2)
-    sign = dipoles.new_tensor(float(potential_sign))
+    scale = torch.full(
+        (),
+        180.9512816816869,  # 4*pi*27.211386245988/1.8897261258369282
+        dtype=dipoles.dtype,
+        device=dipoles.device,
+    )
+    sign = torch.full(
+        (), float(potential_sign), dtype=dipoles.dtype, device=dipoles.device
+    )
     explicit_potential = sign * scale * explicit_mu / area
     solvent_potential = sign * scale * solvent_mu / area
     total_potential = explicit_potential + solvent_potential
