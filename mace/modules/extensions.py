@@ -885,6 +885,11 @@ class PolarMACE(ScaleShiftMACE):
             "fermi_level_baseline",
             torch.tensor(float(fermi_level_baseline), dtype=torch.get_default_dtype()),
         )
+        # learnable fermi-reference offset for unsolvated (vacuum-referenced)
+        # frames; multiplied by (1 - solvated) so it is inert on solvated data
+        self.fermi_vacuum_offset = torch.nn.Parameter(
+            torch.zeros((), dtype=torch.get_default_dtype())
+        )
         self.center_density_baselines = (
             _load_center_density_baselines_npz(potential_1d_profile_file)
             if potential_1d_profile_file is not None
@@ -1369,6 +1374,7 @@ class PolarMACE(ScaleShiftMACE):
         if sample_ids is not None:
             sample_ids = sample_ids.view(-1)
 
+        solvated_rows = data.get("solvated")
         q_ion = positions.new_zeros(num_graphs)
         solvent_mu = positions.new_zeros(num_graphs)
         layer_mean = positions.new_zeros(num_graphs)
@@ -1384,6 +1390,8 @@ class PolarMACE(ScaleShiftMACE):
             atom_mask = data["batch"] == g
             if not bool(slab_mask[g].item()) or not bool(torch.any(atom_mask).item()):
                 continue
+            if solvated_rows is not None and float(solvated_rows.view(-1)[g].item()) < 0.5:
+                continue  # unsolvated frame: no solvent anywhere (all rows stay zero)
             sid = (
                 int(sample_ids[g].detach().cpu().item())
                 if sample_ids is not None else None
@@ -2363,10 +2371,16 @@ class PolarMACE(ScaleShiftMACE):
         explicit_potential = explicit_potential_base
         total_potential = explicit_potential + solvent_potential
         fermi_level_residual = self.fermi_level_residual(graph_feats_global).view(-1)
+        solvated_flag = data.get("solvated")
+        if solvated_flag is None:
+            solvated_flag = torch.ones_like(total_potential)
+        else:
+            solvated_flag = solvated_flag.view(-1).to(dtype=total_potential.dtype)
         fermi_level_pred = (
             self.fermi_level_baseline.to(dtype=total_potential.dtype)
             - total_potential
             + fermi_level_residual.to(dtype=total_potential.dtype)
+            + (1.0 - solvated_flag) * self.fermi_vacuum_offset.to(dtype=total_potential.dtype)
         )
         electro_energy = self.coulomb_energy(
             k_vectors=k_vectors,

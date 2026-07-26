@@ -19,6 +19,7 @@ class DefaultKeys(Enum):
     TOTAL_CHARGE = "total_charge"
     TOTAL_SPIN = "total_spin"
     SAMPLE_ID = "sample_id"
+    SOLVATED = "solvated"
     ELEC_TEMP = "elec_temp"
 
     @staticmethod

@@ -949,6 +949,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=DefaultKeys.SAMPLE_ID.value,
     )
     parser.add_argument(
+        "--solvated_key",
+        help="Key of the 0/1 solvated flag in training xyz (missing key = 1)",
+        type=str,
+        default=DefaultKeys.SOLVATED.value,
+    )
+    parser.add_argument(
         "--embedding_specs",
         help=(
             "Dict of feature‐spec dictionaries. "

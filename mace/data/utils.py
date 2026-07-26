@@ -62,6 +62,7 @@ def update_keyspec_from_kwargs(
         "elec_temp_key",
         "total_charge_key",
         "sample_id_key",
+        "solvated_key",
         "polarizability_key",
         "total_spin_key",
     ]
