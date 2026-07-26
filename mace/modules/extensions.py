@@ -890,6 +890,15 @@ class PolarMACE(ScaleShiftMACE):
         self.fermi_vacuum_offset = torch.nn.Parameter(
             torch.zeros((), dtype=torch.get_default_dtype())
         )
+
+    def __setstate__(self, state):
+        # legacy checkpoints predate fermi_vacuum_offset; register a zero
+        # parameter so the forward's direct attribute access keeps working
+        self.__dict__.update(state)
+        if "fermi_vacuum_offset" not in self._parameters:
+            self.fermi_vacuum_offset = torch.nn.Parameter(
+                torch.zeros((), dtype=torch.get_default_dtype())
+            )
         self.center_density_baselines = (
             _load_center_density_baselines_npz(potential_1d_profile_file)
             if potential_1d_profile_file is not None

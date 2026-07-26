@@ -407,6 +407,16 @@ class SparseUvuTensorProduct(torch.nn.Module):
             )
             w_offset += w_size
 
+    def _to_mul_ir(self, block: torch.Tensor, batch: int, mul: int, dim: int) -> torch.Tensor:
+        if self.layout == "mul_ir":
+            return block.view(batch, mul, dim)
+        return block.view(batch, dim, mul).transpose(1, 2)
+
+    def _from_mul_ir(self, t: torch.Tensor, batch: int) -> torch.Tensor:
+        if self.layout == "mul_ir":
+            return t.reshape(batch, -1)
+        return t.transpose(1, 2).reshape(batch, -1)
+
     def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
         if x1.ndim != 2 or x2.ndim != 2:
             raise ValueError(
@@ -415,16 +425,6 @@ class SparseUvuTensorProduct(torch.nn.Module):
 
         batch = x1.shape[0]
         out = x1.new_zeros((batch, self.irreps_out.dim))
-
-        def to_mul_ir(block: torch.Tensor, mul: int, dim: int) -> torch.Tensor:
-            if self.layout == "mul_ir":
-                return block.view(batch, mul, dim)
-            return block.view(batch, dim, mul).transpose(1, 2)
-
-        def from_mul_ir(t: torch.Tensor) -> torch.Tensor:
-            if self.layout == "mul_ir":
-                return t.reshape(batch, -1)
-            return t.transpose(1, 2).reshape(batch, -1)
 
         for (
             in1_start,
@@ -450,23 +450,23 @@ class SparseUvuTensorProduct(torch.nn.Module):
             # mode_code determines whether out is scalar (d_out=1) or vector (d_out=d1).
             if mode_code == 0:
                 # (l x l -> 0): [B, mul1, d] · [B, mul2, d] -> [B, mul1]
-                x1v = to_mul_ir(in1_block, mul1, d1)
-                x2v = to_mul_ir(in2_block, mul2, d1)
+                x1v = self._to_mul_ir(in1_block, batch, mul1, d1)
+                x2v = self._to_mul_ir(in2_block, batch, mul2, d1)
                 w = self.weight[w_start:w_stop].view(mul1, mul2)
                 pair = torch.einsum("bud,bvd->buv", x1v, x2v) / math.sqrt(float(d1))
                 mixed = torch.einsum("buv,uv->bu", pair, w)
                 out[:, out_start:out_stop] = out_block + path_weight * mixed
             else:
                 # (l x 0 -> l): x1 scaled per channel by weighted scalar mixture from x2.
-                x1v = to_mul_ir(in1_block, mul1, d1)
+                x1v = self._to_mul_ir(in1_block, batch, mul1, d1)
                 scalars = in2_block.view(batch, mul2)
                 w = self.weight[w_start:w_stop].view(mul1, mul2)
                 mixed = torch.einsum("bv,uv->bu", scalars, w)
                 contrib = path_weight * (
                     x1v * mixed.unsqueeze(-1) / math.sqrt(float(d1))
                 )
-                out_block_mi = to_mul_ir(out_block, mul1, d1)
-                out[:, out_start:out_stop] = from_mul_ir(out_block_mi + contrib)
+                out_block_mi = self._to_mul_ir(out_block, batch, mul1, d1)
+                out[:, out_start:out_stop] = self._from_mul_ir(out_block_mi + contrib, batch)
 
         return out * self.output_mask
 
