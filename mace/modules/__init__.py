@@ -1,3 +1,4 @@
+from mace.tools import gl_jit_compat as _gl_jit_compat  # noqa: F401  (TorchScript shims)
 from typing import Callable, Dict, Optional, Type
 
 import torch

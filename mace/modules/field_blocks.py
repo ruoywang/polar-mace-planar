@@ -354,9 +354,9 @@ class SparseUvuTensorProduct(torch.nn.Module):
         in1_slices = self.irreps_in1.slices()
         in2_slices = self.irreps_in2.slices()
         out_slices = self.irreps_out.slices()
-        self._path_meta: List[
-            Tuple[int, int, int, int, int, int, int, int, float, int, int, int, int]
-        ] = []
+        self._path_meta = torch.jit.annotate(
+            List[Tuple[int, int, int, int, int, int, int, int, float, int, int, int, int]], []
+        )
         w_offset = 0
         for ins in self.instructions:
             if ins.connection_mode != "uvu":
@@ -424,7 +424,7 @@ class SparseUvuTensorProduct(torch.nn.Module):
             )
 
         batch = x1.shape[0]
-        out = x1.new_zeros((batch, self.irreps_out.dim))
+        out = x1.new_zeros((batch, self.output_mask.numel()))
 
         for (
             in1_start,

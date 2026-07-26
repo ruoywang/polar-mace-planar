@@ -2459,9 +2459,7 @@ class PolarMACE(ScaleShiftMACE):
         atomic_virials: Optional[torch.Tensor] = None
         atomic_stresses: Optional[torch.Tensor] = None
         if compute_atomic_stresses and edge_forces is not None:
-            from .utils import get_atomic_virials_stresses as _gav
-
-            atomic_virials, atomic_stresses = _gav(
+            atomic_virials, atomic_stresses = get_atomic_virials_stresses(
                 edge_forces=edge_forces,
                 edge_index=data["edge_index"],
                 vectors=vectors,
