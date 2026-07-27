@@ -1283,9 +1283,20 @@ class PolarMACE(ScaleShiftMACE):
         for value in sample_ids:
             sample_id = int(value.detach().cpu().item())
             if sample_id not in self.center_density_baselines:
-                raise KeyError(
-                    f"sample_id {sample_id} is missing from baseline density profile file"
-                )
+                if self.training:
+                    raise KeyError(
+                        f"sample_id {sample_id} is missing from baseline density profile file"
+                    )
+                # inference on structures outside the training set (e.g. MD):
+                # fall back to the multipole-based crossing for the whole batch
+                if not getattr(self, "_center_profile_fallback_warned", False):
+                    self._center_profile_fallback_warned = True
+                    print(
+                        "pb1d: sample_id "
+                        f"{sample_id} not in baseline profiles; using the "
+                        "multipole density crossing fallback (inference mode)"
+                    )
+                return None
             z_np, neutral_np = self.center_density_baselines[sample_id]
             z_values.append(torch.as_tensor(z_np, device=device, dtype=dtype))
             raw_neutral_values.append(
