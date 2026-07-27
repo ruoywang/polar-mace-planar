@@ -220,6 +220,9 @@ class MACECalculator(Calculator):
             self.models = models
             self.num_models = len(models)
 
+        for loaded_model in self.models:
+            loaded_model.eval()
+
         if self.num_models > 1:
             logging.info(f"Running committee mace with {self.num_models} models")
 
