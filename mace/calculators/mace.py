@@ -389,6 +389,8 @@ class MACECalculator(Calculator):
                     "interaction_energy": [],
                     "electrostatic_energy": [],
                     "electron_energy": [],
+                    "potential": [],
+                    "fermi_level_pred": [],
                     "spins": [num_atoms],
                     "density_coefficients": [num_atoms, self.density_dim],
                     "spin_charge_density": [num_atoms, 2, self.density_dim],

@@ -521,6 +521,15 @@ def apply() -> None:
     gl_features.GTOElectrostaticFeatures.forward = torch.jit.ignore(
         gl_features.GTOElectrostaticFeatures.forward
     )
+    # the jit-ignored boundary methods in extensions.py call these two on the
+    # SCRIPTED module at runtime; ignore keeps a python binding on the
+    # RecursiveScriptModule (plain undecorated methods are dropped).
+    gl_features.GTOElectrostaticFeatures.precompute_geometry = torch.jit.ignore(
+        gl_features.GTOElectrostaticFeatures.precompute_geometry
+    )
+    gl_features.GTOElectrostaticFeatures.forward_dynamic = torch.jit.ignore(
+        gl_features.GTOElectrostaticFeatures.forward_dynamic
+    )
     from graph_longrange import energy as gl_energy
     gl_energy.GTOElectrostaticEnergy.forward = torch.jit.ignore(
         gl_energy.GTOElectrostaticEnergy.forward
