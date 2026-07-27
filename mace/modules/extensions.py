@@ -708,6 +708,24 @@ def _permute_to_e3nn_convention(x: torch.Tensor) -> torch.Tensor:
     return torch.index_select(x, -1, idx)
 
 
+
+# k-space geometry caches shuttled through scripted code as opaque integer
+# handles: the cache dict is heterogeneous (ints, nested dicts) and cannot
+# cross a TorchScript boundary as a value. Ring-buffer keyed per process.
+_FIELD_GEOMETRY_CACHES: Dict[int, Any] = {}
+_FIELD_GEOMETRY_NEXT = [0]
+
+
+def _stash_field_cache(cache: Any) -> torch.Tensor:
+    handle = _FIELD_GEOMETRY_NEXT[0] = (_FIELD_GEOMETRY_NEXT[0] + 1) % 1024
+    _FIELD_GEOMETRY_CACHES[handle] = cache
+    return torch.tensor(handle, dtype=torch.long)
+
+
+def _fetch_field_cache(handle: torch.Tensor) -> Any:
+    return _FIELD_GEOMETRY_CACHES[int(handle.item())]
+
+
 class _ScriptedEagerProxy:
     """Run eager python methods of a class against a scripted submodule.
 
@@ -1243,10 +1261,12 @@ class PolarMACE(ScaleShiftMACE):
         volume: torch.Tensor,
         pbc: torch.Tensor,
         force_pbc_evaluator: bool,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> torch.Tensor:
         # graph_longrange's k-space cache API is not TorchScript-friendly;
-        # the whole descriptor family stays eager behind this boundary.
-        return _gto_descriptor_eager(
+        # the whole descriptor family stays eager behind this boundary. The
+        # heterogeneous cache dict is stashed python-side; scripted code only
+        # carries an opaque handle tensor.
+        return _stash_field_cache(_gto_descriptor_eager(
             self.electric_potential_descriptor
         ).precompute_geometry(
             k_vectors=k_vectors,
@@ -1258,18 +1278,22 @@ class PolarMACE(ScaleShiftMACE):
             volume=volume,
             pbc=pbc,
             force_pbc_evaluator=force_pbc_evaluator,
-        )
+        ))
 
     @torch.jit.ignore
     def _field_dynamic_ignored(
         self,
-        cache: Dict[str, torch.Tensor],
+        cache: torch.Tensor,
         source_feats: torch.Tensor,
         pbc: torch.Tensor,
     ) -> torch.Tensor:
         return _gto_descriptor_eager(
             self.electric_potential_descriptor
-        ).forward_dynamic(cache=cache, source_feats=source_feats, pbc=pbc)
+        ).forward_dynamic(
+            cache=_fetch_field_cache(cache),
+            source_feats=source_feats,
+            pbc=pbc,
+        )
 
     def set_element_charge_baseline(self, baseline: torch.Tensor) -> None:
         if baseline.shape != self.element_charge_baseline.shape:
