@@ -722,7 +722,10 @@ class _ScriptedEagerProxy:
     def __getattr__(self, name):
         scripted = object.__getattribute__(self, "_scripted")
         try:
-            return getattr(scripted, name)
+            value = getattr(scripted, name)
+            if isinstance(value, torch._C.ScriptModule):
+                value = torch.jit._recursive.wrap_cpp_module(value)
+            return value
         except AttributeError:
             eager_cls = object.__getattribute__(self, "_eager_cls")
             fn = getattr(eager_cls, name)
