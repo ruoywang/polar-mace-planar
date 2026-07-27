@@ -186,8 +186,11 @@ class RuntimeBaselineTables:
             if sel.shape[0] == 0:
                 continue
             s_el = torch.zeros(nk, dtype=torch.complex128, device=device)
-            for c0 in range(0, sel.shape[0], 16):
-                phase = H @ sel[c0:c0 + 16].T
+            # atom chunk: 16 fits the login node's 8 GB vmem; GPUs take 64
+            # (transient phase block 1.5e6 x 64 complex128 ~ 1.5 GiB)
+            chunk = 64 if device.type == "cuda" else 16
+            for c0 in range(0, sel.shape[0], chunk):
+                phase = H @ sel[c0:c0 + chunk].T
                 s_el += torch.exp(-2j * math.pi * phase).sum(dim=1)
             f_neutral_g += t["fn"][e_i] * s_el
             f_phi_g += t["fp"][e_i] * s_el
