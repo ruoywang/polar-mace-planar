@@ -73,13 +73,33 @@ def run(m, tag):
     return arrs, times
 
 
+from copy import deepcopy
+from e3nn.util import jit
+
+def attr_snapshot(m):
+    snap = {"": set(m.__dict__.keys())}
+    for name, sub in m.named_modules():
+        snap[name] = set(sub.__dict__.keys())
+    return snap
+
+snap0 = attr_snapshot(model)
+compiled = jit.compile(deepcopy(model))
+print("COMPILE-BEFORE-FORWARD OK")
+
 eager1, t_e1 = run(model, "eager pass 1")
 eager2, t_e2 = run(model, "eager pass 2")
 
-from copy import deepcopy
-from e3nn.util import jit
-compiled = jit.compile(deepcopy(model))
-print("COMPILE OK")
+snap1 = attr_snapshot(model)
+for name in snap1:
+    newk = snap1[name] - snap0.get(name, set())
+    if newk:
+        print(f"attrs added by forward on '{name or '<root>'}': {sorted(newk)}")
+try:
+    jit.compile(deepcopy(model))
+    print("COMPILE-AFTER-FORWARD OK")
+except Exception as e:
+    print(f"COMPILE-AFTER-FORWARD FAIL: {type(e).__name__}: {str(e)[:300]}")
+
 comp1, t_c1 = run(compiled, "compiled pass 1")
 comp2, t_c2 = run(compiled, "compiled pass 2")
 

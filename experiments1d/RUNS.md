@@ -27,6 +27,7 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 | exp_pb1d_prod150* | pmp-prod150 @ a68e44a | train-data (400) | — | 完成 |
 | exp_jit_verify | pb-1d @ HEAD(见作业日志) | NiN-mix val | dev 3321473 | 编译数值一致性+速度 |
 | exp_md_smoke | pb-1d @ HEAD(见作业日志) | NiN-mix val 帧40(中性) | dev 3321474 | 真空 Langevin 200 步 smoke |
+| exp_runtime_baseline | pb-1d @ HEAD | train-data/baseline_cache (400) | 登录节点 | 3a 完成:形状因子反解,盲验 neutral 1e-4 / dencor 4e-7 / phi 1.5e-4 |
 | exp_neutral_rerun (VASP) | 不涉及本仓库代码;VASP=$WORK/CEP-DIP 自编译 | 0-44_neutral | neu* 3318xxx;cal_194 normal 3318712 排队 | 4/5 收敛 |
 | 编译沙箱 exp_neutral_prep/jit_sandbox | 主仓库 pb-1d @ 2cf9ba8 | stub 缓存 | 登录节点 | COMPILE OK |
 

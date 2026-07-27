@@ -1,0 +1,22 @@
+400 geometries with cache rows
+elements: ['C', 'H', 'N', 'Ni', 'O']
+grid 100x100x300, rfft points 1510000, unique shells 770087
+fit on 48 sids, blind-validate on [56, 75, 81, 99, 136, 170, 263, 331, 352, 384]
+  accumulated 8/48
+  accumulated 16/48
+  accumulated 24/48
+  accumulated 32/48
+  accumulated 40/48
+  accumulated 48/48
+max imag/real of solution: 1.09e-02 (should be ~0)
+sid  56  neutral rel-rmse 8.94e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 4.35e-07  phi_base rel-rmse 1.36e-04
+sid  75  neutral rel-rmse 8.68e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 4.29e-07  phi_base rel-rmse 1.32e-04
+sid  81  neutral rel-rmse 9.87e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 4.10e-07  phi_base rel-rmse 1.48e-04
+sid  99  neutral rel-rmse 8.84e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 3.97e-07  phi_base rel-rmse 1.33e-04
+sid 136  neutral rel-rmse 9.69e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 3.84e-07  phi_base rel-rmse 1.42e-04
+sid 170  neutral rel-rmse 8.62e-05  e-count rec 659.9999 vs true 659.9999  dencor rel-rmse 4.09e-07  phi_base rel-rmse 1.30e-04
+sid 263  neutral rel-rmse 1.18e-04  e-count rec 1011.9999 vs true 1011.9999  dencor rel-rmse 3.95e-07  phi_base rel-rmse 1.71e-04
+sid 331  neutral rel-rmse 1.25e-04  e-count rec 1011.9999 vs true 1011.9999  dencor rel-rmse 4.39e-07  phi_base rel-rmse 1.80e-04
+sid 352  neutral rel-rmse 1.18e-04  e-count rec 1011.9999 vs true 1011.9999  dencor rel-rmse 4.79e-07  phi_base rel-rmse 1.75e-04
+sid 384  neutral rel-rmse 1.22e-04  e-count rec 1011.9999 vs true 1011.9999  dencor rel-rmse 4.13e-07  phi_base rel-rmse 1.78e-04
+wrote /scratch/08384/tg876840/tmp/c-MACEsol/2-1D_PB/exp_runtime_baseline/runtime_baseline_tables.npz
