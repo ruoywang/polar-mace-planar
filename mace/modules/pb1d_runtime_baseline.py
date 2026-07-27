@@ -32,6 +32,11 @@ class RuntimeBaselineTables:
         self.z_list = [int(_ase_atomic_numbers[el]) for el in self.elements]
         self.cell = np.asarray(d["cell"], dtype=float)
         self.shape = tuple(int(x) for x in d["pb_shape"])
+        self.f1d_neutral = None
+        self.f1d_phi = None
+        if "f1d_neutral_re" in d:
+            self.f1d_neutral = d["f1d_neutral_re"] + 1j * d["f1d_neutral_im"]
+            self.f1d_phi = d["f1d_phi_re"] + 1j * d["f1d_phi_im"]
         self._per_device: Dict[str, Dict[str, torch.Tensor]] = {}
 
     def matches(self, cell_np: np.ndarray, shape) -> bool:
@@ -78,6 +83,38 @@ class RuntimeBaselineTables:
         return self._per_device[key]
 
 
+
+    def _line_profiles(
+        self, frac_z: torch.Tensor, node_z: torch.Tensor, device: torch.device
+    ):
+        """(neutral, phi) plane profiles [nz] from the high-fidelity 1d fit."""
+        if self.f1d_neutral is None:
+            return None
+        nz = self.shape[2]
+        key = "f1d:" + str(device)
+        if key not in self._per_device:
+            self._per_device[key] = {
+                "fn": torch.tensor(self.f1d_neutral.T, dtype=torch.complex128, device=device),
+                "fp": torch.tensor(self.f1d_phi.T, dtype=torch.complex128, device=device),
+                "hz": torch.arange(nz // 2 + 1, dtype=torch.float64, device=device),
+            }
+        t = self._per_device[key]
+        pn = torch.zeros(nz // 2 + 1, dtype=torch.complex128, device=device)
+        pp = torch.zeros_like(pn)
+        z = node_z.view(-1).to(device)
+        fz = frac_z.to(device=device, dtype=torch.float64)
+        for e_i, z_el in enumerate(self.z_list):
+            uz = fz[z == z_el]
+            if uz.shape[0] == 0:
+                continue
+            s_line = torch.exp(
+                -2j * math.pi * t["hz"][:, None] * uz[None, :]
+            ).sum(dim=1)
+            pn += t["fn"][e_i] * s_line
+            pp += t["fp"][e_i] * s_line
+        return torch.fft.irfft(pn, n=nz), torch.fft.irfft(pp, n=nz)
+
+
     def profile_z(
         self, pos_frac: torch.Tensor, node_z: torch.Tensor, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -87,6 +124,15 @@ class RuntimeBaselineTables:
         convention as plane-averaging the 3-D neutral field (the crossing
         detector normalizes, so the overall scale is irrelevant anyway)."""
         nx, ny, nz = self.shape
+        if self.f1d_neutral is not None:
+            key0 = "f1dz:" + str(device)
+            if key0 not in self._per_device:
+                self._per_device[key0] = {
+                    "z": torch.arange(nz, dtype=torch.float64, device=device)
+                    * float(np.linalg.norm(self.cell[2])) / nz
+                }
+            prof_n, _ = self._line_profiles(pos_frac[:, 2], node_z, device)
+            return self._per_device[key0]["z"], prof_n
         key = "profile:" + str(device)
         if key not in self._per_device:
             inv_cell = np.linalg.inv(self.cell)
@@ -152,4 +198,12 @@ class RuntimeBaselineTables:
         phi_base = torch.fft.irfftn(
             f_phi_g.reshape(nx, ny, nz // 2 + 1), s=self.shape
         )
+        # pin the plane averages to the high-fidelity 1d fit: the 3-D shell
+        # fit is core-amplitude normalized and its plateau noise (~0.05 eV)
+        # is visible to the PB closure
+        line = self._line_profiles(frac[:, 2], node_z, device)
+        if line is not None:
+            prof_n, prof_p = line
+            neutral = neutral + (prof_n - neutral.mean(dim=(0, 1)))[None, None, :]
+            phi_base = phi_base + (prof_p - phi_base.mean(dim=(0, 1)))[None, None, :]
         return neutral, phi_base
