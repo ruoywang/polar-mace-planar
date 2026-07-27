@@ -1358,20 +1358,60 @@ class PolarMACE(ScaleShiftMACE):
                         f"sample_id {sample_id} is missing from baseline density profile file"
                     )
                 # inference on structures outside the training set (e.g. MD):
-                # fall back to the multipole-based crossing for the whole batch
+                # build the neutral plane profile from the runtime form-factor
+                # tables; fall back to the multipole crossing if unavailable
+                runtime = self._runtime_center_profiles(data, num_graphs, device, dtype)
                 if not getattr(self, "_center_profile_fallback_warned", False):
                     self._center_profile_fallback_warned = True
                     print(
                         "pb1d: sample_id "
                         f"{sample_id} not in baseline profiles; using the "
-                        "multipole density crossing fallback (inference mode)"
+                        + ("runtime-baseline plane profile"
+                           if runtime is not None else
+                           "multipole density crossing")
+                        + " fallback (inference mode)"
                     )
-                return None
+                return runtime
             z_np, neutral_np = self.center_density_baselines[sample_id]
             z_values.append(torch.as_tensor(z_np, device=device, dtype=dtype))
             raw_neutral_values.append(
                 torch.as_tensor(neutral_np, device=device, dtype=dtype)
             )
+        return z_values, raw_neutral_values
+
+
+    def _runtime_center_profiles(self, data, num_graphs, device, dtype):
+        """Per-graph neutral plane profiles from the runtime baseline tables.
+
+        Returns the same (z_values, raw_neutral_values) list pair as the
+        cached center_density_baselines path, or None when the tables are
+        unavailable (planar models / foreign cell)."""
+        try:
+            backend = self._get_pb1d_backend()
+            tables = backend._get_runtime_baseline()
+        except Exception:
+            return None
+        if tables is None:
+            return None
+        positions = data["positions"]
+        batch = data["batch"]
+        cells = data["cell"].view(-1, 3, 3)
+        node_z_all = self.atomic_numbers[
+            torch.argmax(data["node_attrs"], dim=-1)
+        ]
+        z_values: List[torch.Tensor] = []
+        raw_neutral_values: List[torch.Tensor] = []
+        for g in range(num_graphs):
+            cell_g = cells[g].detach().cpu().numpy().astype(float)
+            if not tables.matches(cell_g, tables.shape):
+                return None
+            mask = batch == g
+            pos_g = positions[mask].detach()
+            inv_cell = torch.linalg.inv(cells[g].detach().to(pos_g.dtype))
+            frac = torch.remainder(pos_g @ inv_cell, 1.0)
+            z_grid, prof = tables.profile_z(frac, node_z_all[mask], device)
+            z_values.append(z_grid.to(dtype=dtype))
+            raw_neutral_values.append(prof.to(dtype=dtype))
         return z_values, raw_neutral_values
 
     def _get_pb1d_backend(self):

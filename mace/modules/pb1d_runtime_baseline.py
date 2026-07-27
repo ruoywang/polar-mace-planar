@@ -77,6 +77,53 @@ class RuntimeBaselineTables:
             }
         return self._per_device[key]
 
+
+    def profile_z(
+        self, pos_frac: torch.Tensor, node_z: torch.Tensor, device: torch.device
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Plane-averaged neutral profile: only the (0,0,gz) reciprocal line.
+
+        Returns (z_grid [nz], profile [nz]) float64 on device; same values
+        convention as plane-averaging the 3-D neutral field (the crossing
+        detector normalizes, so the overall scale is irrelevant anyway)."""
+        nx, ny, nz = self.shape
+        key = "profile:" + str(device)
+        if key not in self._per_device:
+            inv_cell = np.linalg.inv(self.cell)
+            gzz = float((inv_cell @ inv_cell.T)[2, 2])
+            g2r = np.round((np.arange(nz // 2 + 1) ** 2) * gzz, 9)
+            sidx = np.clip(
+                np.searchsorted(self.g2_shells, g2r), 0, len(self.g2_shells) - 1
+            )
+            sidx_lo = np.clip(sidx - 1, 0, len(self.g2_shells) - 1)
+            use_lo = (np.abs(self.g2_shells[sidx_lo] - g2r)
+                      < np.abs(self.g2_shells[sidx] - g2r))
+            sidx = np.where(use_lo, sidx_lo, sidx)
+            self._per_device[key] = {
+                "fn_line": torch.tensor(
+                    self.f_neutral[sidx, :].T, dtype=torch.float64, device=device
+                ),
+                "hz": torch.arange(
+                    nz // 2 + 1, dtype=torch.float64, device=device
+                ),
+                "z": torch.arange(nz, dtype=torch.float64, device=device)
+                * float(np.linalg.norm(self.cell[2])) / nz,
+            }
+        t = self._per_device[key]
+        fk = torch.zeros(nz // 2 + 1, dtype=torch.complex128, device=device)
+        frac_z = pos_frac[:, 2].to(device=device, dtype=torch.float64)
+        z = node_z.view(-1).to(device)
+        for e_i, z_el in enumerate(self.z_list):
+            uz = frac_z[z == z_el]
+            if uz.shape[0] == 0:
+                continue
+            phase = t["hz"][:, None] * uz[None, :]
+            fk += t["fn_line"][e_i] * torch.exp(
+                -2j * math.pi * phase
+            ).sum(dim=1)
+        profile = torch.fft.irfft(fk, n=nz)
+        return t["z"], profile
+
     def fields(
         self, pos_frac: torch.Tensor, node_z: torch.Tensor, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor]:
