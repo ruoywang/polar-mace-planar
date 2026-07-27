@@ -175,6 +175,8 @@ class MACECalculator(Calculator):
             if kwargs.get("compute_atomic_stresses", False):
                 self.implemented_properties.extend(["stresses", "virials"])
                 self.compute_atomic_stresses = True
+        if model_type == "PolarMACE":
+            self.implemented_properties.extend(["potential", "fermi_level"])
         if model_type in ["EnergyDipoleMACE", "DipoleMACE", "DipolePolarizabilityMACE"]:
             self.implemented_properties.extend(["dipole"])
         if model_type == "DipolePolarizabilityMACE":
@@ -487,7 +489,7 @@ class MACECalculator(Calculator):
 
         # covert from ret_tensors to calculator results dict
         self.results = {}
-        scalar_tensors = set(["energy"])
+        scalar_tensors = set(["energy", "potential", "fermi_level_pred"])
         results_store_ensemble = set(["energy", "forces", "stress", "dipole"])
         results_map = [
             ("energy", "energy", self.energy_units_to_eV),
@@ -523,6 +525,8 @@ class MACECalculator(Calculator):
                         self.energy_units_to_eV,
                     ),
                     ("electron_energy", "electron_energy", self.energy_units_to_eV),
+                    ("potential", "potential", self.energy_units_to_eV),
+                    ("fermi_level", "fermi_level_pred", self.energy_units_to_eV),
                     ("spins", "spins", 1.0),
                     ("density_coefficients", "density_coefficients", 1.0),
                     ("spin_charge_density", "spin_charge_density", 1.0),
