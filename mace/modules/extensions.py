@@ -707,8 +707,6 @@ def _permute_to_e3nn_convention(x: torch.Tensor) -> torch.Tensor:
     return torch.index_select(x, -1, idx)
 
 
-@compile_mode("script")
-
 class _ScriptedEagerProxy:
     """Run eager python methods of a class against a scripted submodule.
 
@@ -744,6 +742,7 @@ def _gto_descriptor_eager(descriptor):
     return _ScriptedEagerProxy(descriptor, GTOElectrostaticFeatures)
 
 
+@compile_mode("script")
 class PolarMACE(ScaleShiftMACE):
     def __init__(
         self,
