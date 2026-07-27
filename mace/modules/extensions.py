@@ -1,3 +1,4 @@
+import inspect
 import math
 import os
 from pathlib import Path
@@ -728,6 +729,11 @@ class _ScriptedEagerProxy:
             return value
         except AttributeError:
             eager_cls = object.__getattribute__(self, "_eager_cls")
+            raw = inspect.getattr_static(eager_cls, name)
+            if isinstance(raw, staticmethod):
+                return raw.__func__
+            if isinstance(raw, classmethod):
+                return raw.__func__.__get__(eager_cls, type(eager_cls))
             fn = getattr(eager_cls, name)
             if callable(fn):
                 return fn.__get__(self, eager_cls)
