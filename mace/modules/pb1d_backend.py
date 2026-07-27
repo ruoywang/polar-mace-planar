@@ -113,6 +113,8 @@ class PB1DBackend:
         # kills the ~80 ms/graph disk re-read measured in real training
         # (3 ranks hammering one 14 GB file). ~24 MB/sample.
         self._bl_ram: Dict[int, torch.Tensor] = {}
+        self._rt_tables_path = None
+        self._rt_tables = None
         self._bl_ram_max = int(os.environ.get("MACE_PB1D_PRELOAD_MAX", "512"))
         if os.environ.get("MACE_PB1D_NO_PRELOAD"):
             self._bl_ram_max = 0
@@ -126,6 +128,15 @@ class PB1DBackend:
             self._bl_arr = np.load(
                 os.path.join(bl, "baseline_cache.npy"), mmap_mode="r"
             )
+            rt_path = os.path.join(bl, "runtime_baseline_tables.npz")
+            self._rt_tables_path = rt_path if os.path.exists(rt_path) else None
+
+    def _get_runtime_baseline(self):
+        if self._rt_tables is None and self._rt_tables_path is not None:
+            from .pb1d_runtime_baseline import RuntimeBaselineTables
+
+            self._rt_tables = RuntimeBaselineTables(self._rt_tables_path)
+        return self._rt_tables
 
     def __getstate__(self) -> Dict:
         return dict(self._init_kwargs)
@@ -272,6 +283,7 @@ class PB1DBackend:
         sample_id: Optional[int],
         radial_coeffs: torch.Tensor,
         sigmas,
+        node_z: Optional[torch.Tensor] = None,
         node_feats: Optional[torch.Tensor] = None,
         head=None,
         q_tot: Optional[torch.Tensor] = None,
@@ -293,18 +305,34 @@ class PB1DBackend:
                 and self._bl_shape == shape)
             else None
         )
+        use_runtime_baseline = False
         if bl_row is None:
-            raise RuntimeError(
-                f"pb1d requires the baseline cache for sample_id={sample_id} "
-                f"(shape {shape}); no Gaussian-surrogate fallback in v1"
-            )
+            rt = self._get_runtime_baseline()
+            if rt is None or node_z is None:
+                raise RuntimeError(
+                    f"pb1d baseline unavailable for sample_id={sample_id} "
+                    f"(shape {shape}): no cache row, and runtime tables "
+                    f"{'missing' if rt is None else 'need node_z'}"
+                )
+            if not rt.matches(cell_np, shape):
+                raise RuntimeError(
+                    "runtime baseline tables were built for a different "
+                    f"cell/grid (need shape {shape})"
+                )
+            use_runtime_baseline = True
 
         self.timing_calls += 1
         cell64 = torch.as_tensor(cell_np, device=device, dtype=dt)
         pos64 = positions.to(dt)
         pos_frac = torch.remainder(pos64 @ torch.linalg.inv(cell64), 1.0)
 
-        with self._Phase(self, "1_baseline", device):
+        if use_runtime_baseline:
+            with self._Phase(self, "1_baseline", device):
+                neutral_v, phi_base = self._rt_tables.fields(
+                    pos_frac.detach(), node_z, device
+                )
+        else:
+          with self._Phase(self, "1_baseline", device):
             ram = self._bl_ram.get(sample_id)
             if ram is None:
                 ram = torch.from_numpy(

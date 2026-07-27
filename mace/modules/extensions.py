@@ -1503,6 +1503,9 @@ class PolarMACE(ScaleShiftMACE):
         from .pb_solvent import resample_profile_periodic_torch
 
         backend = self._get_pb1d_backend()
+        node_z_all = self.atomic_numbers[
+            torch.argmax(data["node_attrs"], dim=-1)
+        ].detach()
         axis = self.solvent_potential_axis
         cells = cell.detach()
         if cells.dim() == 2 and cells.shape[1] == 3:
@@ -1597,6 +1600,7 @@ class PolarMACE(ScaleShiftMACE):
                     sample_id=sid,
                     radial_coeffs=coeffs_g,
                     sigmas=self.atomic_density_sigmas,
+                    node_z=node_z_all[atom_mask],
                     node_feats=feats_g,
                     head=self.pb1d_head if use_head else None,
                     q_tot=total_charge_g[g].detach(),
