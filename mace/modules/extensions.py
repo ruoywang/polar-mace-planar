@@ -708,6 +708,42 @@ def _permute_to_e3nn_convention(x: torch.Tensor) -> torch.Tensor:
 
 
 @compile_mode("script")
+
+class _ScriptedEagerProxy:
+    """Run eager python methods of a class against a scripted submodule.
+
+    Recursive scripting drops python-only methods from submodules; the
+    jit-ignored boundaries still need them at runtime. Attribute reads go
+    to the scripted module (parameters/buffers/typed attrs survive there),
+    method lookups fall back to the eager class, bound to this proxy."""
+
+    def __init__(self, scripted, eager_cls):
+        object.__setattr__(self, "_scripted", scripted)
+        object.__setattr__(self, "_eager_cls", eager_cls)
+
+    def __getattr__(self, name):
+        scripted = object.__getattribute__(self, "_scripted")
+        try:
+            return getattr(scripted, name)
+        except AttributeError:
+            eager_cls = object.__getattribute__(self, "_eager_cls")
+            fn = getattr(eager_cls, name)
+            if callable(fn):
+                return fn.__get__(self, eager_cls)
+            raise
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_scripted"), name, value)
+
+
+def _gto_descriptor_eager(descriptor):
+    if hasattr(descriptor, "precompute_geometry"):
+        return descriptor
+    from graph_longrange.features import GTOElectrostaticFeatures
+
+    return _ScriptedEagerProxy(descriptor, GTOElectrostaticFeatures)
+
+
 class PolarMACE(ScaleShiftMACE):
     def __init__(
         self,
@@ -1202,7 +1238,9 @@ class PolarMACE(ScaleShiftMACE):
     ) -> Dict[str, torch.Tensor]:
         # graph_longrange's k-space cache API is not TorchScript-friendly;
         # the whole descriptor family stays eager behind this boundary.
-        return self.electric_potential_descriptor.precompute_geometry(
+        return _gto_descriptor_eager(
+            self.electric_potential_descriptor
+        ).precompute_geometry(
             k_vectors=k_vectors,
             k_norm2=k_norm2,
             k_vector_batch=k_vector_batch,
@@ -1221,9 +1259,9 @@ class PolarMACE(ScaleShiftMACE):
         source_feats: torch.Tensor,
         pbc: torch.Tensor,
     ) -> torch.Tensor:
-        return self.electric_potential_descriptor.forward_dynamic(
-            cache=cache, source_feats=source_feats, pbc=pbc
-        )
+        return _gto_descriptor_eager(
+            self.electric_potential_descriptor
+        ).forward_dynamic(cache=cache, source_feats=source_feats, pbc=pbc)
 
     def set_element_charge_baseline(self, baseline: torch.Tensor) -> None:
         if baseline.shape != self.element_charge_baseline.shape:
