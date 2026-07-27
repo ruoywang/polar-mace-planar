@@ -717,8 +717,13 @@ _FIELD_GEOMETRY_NEXT = [0]
 
 
 def _stash_field_cache(cache: Any) -> torch.Tensor:
-    handle = _FIELD_GEOMETRY_NEXT[0] = (_FIELD_GEOMETRY_NEXT[0] + 1) % 1024
+    handle = _FIELD_GEOMETRY_NEXT[0] = _FIELD_GEOMETRY_NEXT[0] + 1
     _FIELD_GEOMETRY_CACHES[handle] = cache
+    # the cache tensors carry the force graph — evict aggressively (one
+    # producer + same-forward consumers only), else MD leaks ~0.2 GiB/step
+    for k in list(_FIELD_GEOMETRY_CACHES):
+        if k < handle - 2:
+            del _FIELD_GEOMETRY_CACHES[k]
     return torch.tensor(handle, dtype=torch.long)
 
 
