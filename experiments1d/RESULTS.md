@@ -69,3 +69,11 @@
 - cal_10/73/119/190 ← 各自收敛重算;cal_194 ← cal_194_e6(1e-6 严格版)
 - 覆盖前原未收敛输出已打包:exp_neutral_rerun/backup_orig_unconverged/(6.1 GB,$SCRATCH)
 - 覆盖后逐目录验证:5/5 含收敛标志,E0 与重算一致
+
+## 1-train_all 预检(2026-07-28,作业 3323912/3323913/3323980)
+
+- 第一轮败因:目录搬迁弄断 train-data 绝对符号链接(修复后全树断链清零)
+- 第二轮抓到真 bug:_charges_dim 预计算位于 charges_irreps 赋值之前,
+  从头构建必崩(反序列化被 __setstate__ 兜底,故一周未暴露)→ 43214d1 修复
+- 第三轮:身份探针 IDENTITY-OK(新代码 vs 3bfe707,抖动级)+ 5-epoch 试训过
+- 数据:2 场 baseline_cache 流式校验逐位一致,包 46G→41G;480/60/60
