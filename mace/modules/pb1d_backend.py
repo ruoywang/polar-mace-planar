@@ -125,6 +125,9 @@ class PB1DBackend:
             with open(os.path.join(bl, "baseline_meta.json")) as f:
                 meta = json.load(f)
             self._bl_shape = tuple(meta["pb_shape"])
+            fields = list(meta.get("fields", ["neutral_values", "dencor_values", "phi_base_eV"]))
+            self._bl_nfields = len(fields)
+            self._bl_take = [fields.index("neutral_values"), fields.index("phi_base_eV")]
             self._bl_arr = np.load(
                 os.path.join(bl, "baseline_cache.npy"), mmap_mode="r"
             )
@@ -336,7 +339,7 @@ class PB1DBackend:
             ram = self._bl_ram.get(sample_id)
             if ram is None:
                 ram = torch.from_numpy(
-                    np.ascontiguousarray(self._bl_arr[bl_row][[0, 2]])
+                    np.ascontiguousarray(self._bl_arr[bl_row][self._bl_take])
                 )
                 if len(self._bl_ram) < self._bl_ram_max:
                     if device.type == "cuda":
