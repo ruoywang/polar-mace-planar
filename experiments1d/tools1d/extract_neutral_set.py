@@ -28,14 +28,14 @@ N_WORKERS = 16
 
 
 def calc_dir(n):
-    """Prefer a converged rerun over the original calc."""
+    """Prefer the tightest converged rerun over the original calc."""
     import os
-    r = f"{RERUN}/cal_{n}"
-    try:
-        if "aborting loop because EDIFF is reached" in open(f"{r}/OUTCAR").read():
-            return r
-    except OSError:
-        pass
+    for r in (f"{RERUN}/cal_{n}_e6", f"{RERUN}/cal_{n}"):
+        try:
+            if "aborting loop because EDIFF is reached" in open(f"{r}/OUTCAR").read():
+                return r
+        except OSError:
+            pass
     return f"{BASE}/0-44_neutral/cal_{n}"
 
 

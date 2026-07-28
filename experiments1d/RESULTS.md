@@ -54,3 +54,12 @@
   potential_diff +3.617;几何=溶剂孪生
 - 回填:train.xyz 479→480(中性 160),potential1d 599→600,manifest 600;
   val/test 冻结保历史可比;mix150/mix400 训练时为 599(差一帧,重训不必要)
+
+## cal_194 1e-6 严格版与标签刷新(2026-07-28,作业 3323617/3323690)
+
+- 1e-5 停机步实际 dE 3e-7 但 d eps 2.3e-6(双条件未满足 1e-6)
+- e6 续算(ICHARG=1+ALGO=All):127 步双条件达标(dE 1.6e-7 / deps 5.9e-7)
+- 两版差异:能量 0.1 meV、LOCPOT 剖面 ≤1.4 meV(可忽略);**E-fermi 差 87 meV**
+  (晃荡体系近简并占据的特征)→ 标签采用 e6 版(Fermi_raw −5.5819)
+- 数据集刷新:train.xyz 480 帧原位换帧,potential1d/manifest 600 条目原位替换;
+  cal_194(1e-5)与 cal_194_e6 两个 VASP 目录均保留
