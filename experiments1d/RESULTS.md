@@ -63,3 +63,9 @@
   (晃荡体系近简并占据的特征)→ 标签采用 e6 版(Fermi_raw −5.5819)
 - 数据集刷新:train.xyz 480 帧原位换帧,potential1d/manifest 600 条目原位替换;
   cal_194(1e-5)与 cal_194_e6 两个 VASP 目录均保留
+
+## 原始 0-44_neutral 目录同步(2026-07-28)
+
+- cal_10/73/119/190 ← 各自收敛重算;cal_194 ← cal_194_e6(1e-6 严格版)
+- 覆盖前原未收敛输出已打包:exp_neutral_rerun/backup_orig_unconverged/(6.1 GB,$SCRATCH)
+- 覆盖后逐目录验证:5/5 含收敛标志,E0 与重算一致
