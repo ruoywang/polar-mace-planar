@@ -963,8 +963,6 @@ class PolarMACE(ScaleShiftMACE):
         self.fermi_vacuum_offset = torch.nn.Parameter(
             torch.zeros((), dtype=torch.get_default_dtype())
         )
-        self._charges_dim = int(self.charges_irreps.dim)
-        self._potential_dim = int(self.potential_irreps.dim)
         self.center_density_baselines = (
             _load_center_density_baselines_npz(potential_1d_profile_file)
             if potential_1d_profile_file is not None
@@ -1056,6 +1054,9 @@ class PolarMACE(ScaleShiftMACE):
         self.potential_irreps = (
             self.field_irreps * 2
         )  # 2 spin channels for the potential irreps
+        # TorchScript cannot call Irreps.dim at runtime; both irreps exist now
+        self._charges_dim = int(self.charges_irreps.dim)
+        self._potential_dim = int(self.potential_irreps.dim)
 
         self.electric_potential_descriptor = GTOElectrostaticFeatures(
             density_max_l=self.electrostatic_multipoles_max_l,
