@@ -15,7 +15,9 @@ import os
 import sys
 import time
 
-os.environ["MACE_PB1D_CACHE_READONLY"] = "1"
+WARM = len(sys.argv) > 6 and sys.argv[6] == "warm"
+if not WARM:
+    os.environ["MACE_PB1D_CACHE_READONLY"] = "1"
 
 import numpy as np
 import torch
@@ -41,6 +43,15 @@ ne0 = q_neutral - q0
 print(f"frame {IDX}: {len(atoms)} atoms, Q0 {q0:+.4f}, zval_sum {q_neutral}, "
       f"ne0 {ne0:.4f}, targetmu {TARGETMU}")
 atoms.info.pop("sample_id", None)
+if WARM:
+    # dummy sid: enables the scheme-C stage-1 profile reuse (training's
+    # lagged-SCF semantics); baselines and center profiles still take the
+    # runtime path because the sid is absent from every lookup table
+    atoms.info["sample_id"] = 990001
+    for stale in ("cache/prof1d_990001.npz",):
+        if os.path.exists(stale):
+            os.remove(stale)
+    print("WARM-START mode: stage-1 profile reuse across steps")
 atoms.info.pop("energy", None)
 atoms.arrays.pop("forces", None)
 
@@ -80,9 +91,24 @@ for i in range(NSTEPS):
     q = float(atoms.info["total_charge"])
     temp = atoms.get_kinetic_energy() / (1.5 * units.kB * len(atoms))
     hist.append((i, mu, q, temp, dt_step))
+    if WARM and (i + 1) % 100 == 0:
+        # in-flight correctness telemetry: cold single-point on the SAME
+        # geometry (no sid -> no profile reuse) vs the warm step values
+        probe = atoms.copy()
+        probe.info.pop("sample_id", None)
+        probe.calc = calc
+        f_warm = atoms.get_forces().copy()
+        e_warm, mu_warm = atoms.get_potential_energy(), mu
+        f_cold = probe.get_forces()
+        mu_cold = calc.results["fermi_level"]
+        print(f"  [cold-check step {i+1}] dmu {abs(mu_warm-mu_cold):.2e} "
+              f"dE {abs(e_warm-probe.get_potential_energy()):.2e} "
+              f"dF {np.abs(f_warm-f_cold).max():.2e}", flush=True)
     if (i + 1) % 10 == 0:
+        gb = torch.cuda.memory_allocated() / 2**30
         print(f"step {i+1:4d}  mu {mu:+.4f} (target {TARGETMU:+.2f})  "
-              f"Q {q:+.4f}  T {temp:5.0f} K  {dt_step*1e3:.0f} ms", flush=True)
+              f"Q {q:+.4f}  T {temp:5.0f} K  {dt_step*1e3:.0f} ms  "
+              f"gpu {gb:.1f} GiB", flush=True)
         write("gcmd_traj.xyz", atoms, append=(i > 10))
     assert np.isfinite(mu) and temp < 1500
 

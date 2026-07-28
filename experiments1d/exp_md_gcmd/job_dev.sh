@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --time=1:00:00
+#SBATCH --time=1:30:00
 #SBATCH --partition=gpu-a100-dev
 #SBATCH --exclude=c301-001,c301-002
 #SBATCH --account=DMR24028
@@ -14,9 +14,10 @@ BASE=/scratch/08384/tg876840/tmp/c-MACEsol/2-1D_PB
 cd "$BASE/exp_md_gcmd"
 echo "CODE VERSION: polar-mace-planar @ $(git -C $BASE/polar-mace-planar rev-parse HEAD)"
 PY=/scratch/08384/tg876840/tmp/c-MACEsol/.venv/bin/python
-export OMP_NUM_THREADS=16
+export OMP_NUM_THREADS=16 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export MACE_PB1D_TIMING=1 MACE_PB1D_TIMING_EVERY=200
 # 500 steps constant-potential MD at targetmu -3.36 (the example's setpoint)
 env PYTHONPATH="$BASE/polar-mace-planar:$BASE/exp_md_gcmd" $PY -u run_gcmd.py \
-  "$BASE/exp_pb1d_mix400/models/pb1d_mix400.model" ./data/val.xyz 0 500 -3.36 2>&1 \
+  "$BASE/exp_pb1d_mix400/models/pb1d_mix400.model" ./data/val.xyz 0 2000 -3.36 2>&1 \
   | grep -vE "cuequivariance|UserWarning|warnings.warn"
 echo "gcmd exit: $?"
