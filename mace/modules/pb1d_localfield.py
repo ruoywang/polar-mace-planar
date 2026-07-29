@@ -66,19 +66,31 @@ class _LocalFieldFactorFn(torch.autograd.Function):
         zero = x0 == 0.0
         import os as _os
         _dbg = bool(_os.environ.get("MACE_PB1D_LF_DEBUG"))
+        # convergence: the fixed-point iteration reaches an fp64 limit-cycle
+        # floor of ~5e-8 (measured; see experiments1d RESULTS 2026-07-29) —
+        # the historical 1e-10 criterion was unreachable and every call
+        # silently burned the full 80 sweeps. Reachable tolerance + stall
+        # detection; the old value can be forced via MACE_PB1D_LF_TOL.
+        tol = float(_os.environ.get("MACE_PB1D_LF_TOL", "1e-7")) * max(1.0, hi)
+        prev_diff = None
         with torch.no_grad():
             for it in range(80):
                 gx = _g_rot(f * x0)
                 new = 1.0 / (1.0 - (gx * alpha0_rot + alpha_pol) * nu)
                 new = torch.clamp(new, lo, hi)
                 if it % 8 == 7:
-                    diff = torch.max(torch.abs(new - f))
+                    diff = float(torch.max(torch.abs(new - f)))
                     f = new
                     if _dbg:
-                        print(f"LFDBG it={it+1} diff={float(diff):.3e} "
-                              f"tol={1.0e-10 * max(1.0, hi):.3e}", flush=True)
-                    if float(diff) <= 1.0e-10 * max(1.0, hi):
+                        print(f"LFDBG it={it+1} diff={diff:.3e} tol={tol:.3e}",
+                              flush=True)
+                    if diff <= tol:
                         break
+                    if prev_diff is not None and diff > 0.5 * prev_diff:
+                        # no geometric progress since the last check: the
+                        # iteration has hit its noise floor — stop
+                        break
+                    prev_diff = diff
                 else:
                     f = new
             f[zero] = hi
