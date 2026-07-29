@@ -1452,24 +1452,19 @@ class PolarMACE(ScaleShiftMACE):
         if not d:
             return mem.get(("pb1d", sid))
         path = os.path.join(d, f"prof1d_{sid}.npz")
-        try:
-            mtime = os.path.getmtime(path)
-            ram = mem.get(("pb1d_ram", sid))
-            if ram is not None and ram[0] == mtime:
-                return dict(ram[1])
-        except OSError:
-            return None
+        # no mtime-keyed RAM shortcut: Lustre mtime granularity is 1 s, so
+        # sub-second MD steps were served STALE profiles (timing-dependent,
+        # nondeterministic). The npz is a few KB; loading it every call is
+        # ~0.3 ms and always fresh.
         try:
             z = np.load(path)
-            entry = {
+            return {
                 "feat": torch.from_numpy(z["feat"]),
                 "energy": torch.from_numpy(z["energy"]),
                 "q": float(z["q"]), "mu": float(z["mu"]),
                 "layer_mean": float(z["lm"]),
                 "enc": int(z["enc"]) if "enc" in z else 0,
             }
-            mem[("pb1d_ram", sid)] = (mtime, dict(entry))
-            return entry
         except (OSError, ValueError, KeyError):
             return None
 
