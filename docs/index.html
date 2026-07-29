@@ -36,8 +36,14 @@
     text-transform: uppercase; color: var(--muted); border: 1px solid var(--grid);
     border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 1px; }
   .section { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--muted); margin: 34px 0 10px; border-bottom: 1px solid var(--grid);
+    color: var(--muted); margin: 34px 0 4px; border-bottom: 1px solid var(--grid);
     padding-bottom: 6px; }
+  .chlede { font-size: 13px; color: var(--ink-2); margin: 6px 0 12px; }
+  .report { padding: 12px 18px; margin-bottom: 10px; }
+  .report p { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; }
+  .pin { font-size: 13px; color: var(--ink-2); margin: -22px 0 30px; }
+  .pin a { color: var(--accent); }
   footer { margin-top: 44px; font-size: 12.5px; color: var(--muted); }
   footer a { color: var(--accent); }
 </style>
@@ -52,97 +58,97 @@
   <a href="https://ruoywang.github.io/cep-dip-python-pb/"
      style="color:var(--accent)">cep-dip-python-pb site</a>.</p>
 
-  <div class="section">1-D closure route (v1) — production model &amp; results</div>
+  <p class="pin">Current model: <b>pb1d_mix400</b> (599 structures) ·
+  jump to <a href="#mix400">its results</a> or the <a href="#md">MD run</a>.</p>
 
-  <a class="report" href="./pb1d-md-constant-potential.html">
-    <div class="date">2026-07-29<span class="tag">result &middot; 1-D</span></div>
-    <h2>Constant-Potential MD: Timing and the 20 ps Production Run</h2>
-    <p>Old CEP model vs pb1d before/after optimization in one bar chart, with the PB
-    segment expanded (238 ms/step production median; the 2.6&times; waste removed and how).
-    Plus the full 20 ps constant-potential run: Fermi held at &minus;3.36 eV (mean
-    &minus;3.3616), electron count fluctuating without drift, momentum conserved.</p>
-  </a>
-
-  <a class="report" href="./pb1d-mix400-pair-sid152.html">
-    <div class="date">2026-07-29<span class="tag">result &middot; 1-D</span></div>
-    <h2>mix400 (599 Structures): Training Record + Charged/Neutral Pair Report</h2>
-    <p>Adding 199 neutral twins to the training set: &Phi;1D/Fermi convergence against
-    the planar 4-grid baseline, per-structure charged/neutral DFT Fermi across the 200 NiN44
-    twin pairs (uniform +4.06 eV charging shift), then one geometry both ways (sid 152 / 552) &mdash;
-    charges, 1-D potentials, densities, the charged&minus;neutral density response vs DFT,
-    and solvent profiles.</p>
-  </a>
+  <div class="section">1 · Method — the 1-D closure route</div>
+  <p class="chlede">What pb1d is: a nonlinear Poisson&ndash;Boltzmann solvent collapsed
+  onto a 1-D closure inside PolarMACE. Start here.</p>
 
   <a class="report" href="./pb1d-v1-overview.html">
-    <div class="date">2026-07-15<span class="tag">overview &middot; 1-D</span></div>
+    <div class="date">2026-07-15<span class="tag">overview</span></div>
     <h2>The 1-D Closure Route (v1): Architecture, Training, Results</h2>
-    <p>One-page summary of the production model: the per-forward pipeline
-    (cached-profile SCF field, one fresh 1-D PB solve on the final density),
-    the planar warmup schedule, the measured per-step time before/after the
-    math-exact speed work (1261&rarr;784 ms), and 400-epoch Fermi/potential
-    convergence with endpoint metrics against the planar baseline and cp-MACE.</p>
-  </a>
-
-  <a class="report" href="./pb1d-rhob-supervision.html">
-    <div class="date">2026-07-22<span class="tag">result &middot; 1-D</span></div>
-    <h2>Supervising the 1-D Bound Charge Against DFT</h2>
-    <p>A weight-scanned RHOB supervision loss cuts the bound-charge error 4.3&times;
-    (RMSE 3.5&times;10&#8315;&#8308; &rarr; 0.83&times;10&#8315;&#8308; e/&Aring;&sup3;) at a
-    +9&ndash;16% potential-family cost. With the 50:1 term-cancellation mechanism, the
-    contribution-parity weight rule, final-model curves, and the warmup verdict.</p>
-  </a>
-
-  <a class="report" href="./pb1d-structure-sid152.html">
-    <div class="date">2026-07-15<span class="tag">result &middot; 1-D</span></div>
-    <h2>Single-Structure Report: sid 152 (training, NiN44)</h2>
-    <p>400-epoch pb1d model on one training snapshot: per-element charges, predicted
-    vs DFT 1-D potential (&phi; residual rms 0.021 eV), plane-averaged net density,
-    and ionic/bound solvent charge against the raw VASPsol RHOION/RHOB grids
-    (ionic 9.7%, bound 31%).</p>
-  </a>
-
-  <a class="report" href="./pb1d-structure-sid307.html">
-    <div class="date">2026-07-15<span class="tag">result &middot; 1-D</span></div>
-    <h2>Single-Structure Report: sid 307 (training, NiN88)</h2>
-    <p>Same analysis on the 88-water hydration level: &phi; residual rms 0.031 eV,
-    ionic layer 6.8% vs DFT with exact charge compensation (+1.157 e), bound-charge
-    inner lobe illustrating the known corrugation-covariance limit (56%).</p>
+    <p>The per-forward pipeline, planar warmup, speed work, and 400-epoch results
+    against the planar baseline and cp-MACE. The one-page summary.</p>
   </a>
 
   <a class="report" href="./v1-head-design.html">
     <div class="date">2026-07-13<span class="tag">design</span></div>
     <h2>The P<sub>z</sub> Residual Head: Where the Error Lives, and How v1 Predicts It</h2>
-    <p>Every closure error on cal_18 lives in the cavity's corrugated shell (96&ndash;99.9%);
-    an envelope from the live cavity &times; eight learned coefficients carries it
-    (&phi; ceiling 2.3&times;10&#8315;&sup3; eV). With the measured leverage profile,
-    &sigma;<sub>z</sub> floor, and the four-way proof that the remaining &rho;<sub>b</sub>
-    sharpness is irreducible.</p>
+    <p>Why a small learned correction on top of the physics prior carries the closure
+    error (&phi; ceiling 2.3&times;10&#8315;&sup3; eV), and what remains irreducible.</p>
   </a>
 
-  <div class="section">3-D nonlinear PB era — archived route</div>
+  <div class="section" id="prod400">2 · prod400 — first production model (400 charged structures)</div>
+  <p class="chlede">The 400-epoch model trained on charged NiN frames only: how well it
+  reproduces single structures, and a supervision study on its bound charge.</p>
+
+  <a class="report" href="./pb1d-structure-sid152.html">
+    <div class="date">2026-07-15<span class="tag">result</span></div>
+    <h2>Single-Structure Report: sid 152 (training, NiN44)</h2>
+    <p>Charges, 1-D potential (&phi; rms 0.021 eV), net density, and solvent profiles
+    against the raw VASPsol grids (ionic 9.7%, bound 31%).</p>
+  </a>
+
+  <a class="report" href="./pb1d-structure-sid307.html">
+    <div class="date">2026-07-15<span class="tag">result</span></div>
+    <h2>Single-Structure Report: sid 307 (training, NiN88)</h2>
+    <p>Same analysis at the 88-water hydration level: &phi; rms 0.031 eV, ionic layer
+    6.8% with exact charge compensation, and the corrugation-covariance limit (56%).</p>
+  </a>
+
+  <a class="report" href="./pb1d-rhob-supervision.html">
+    <div class="date">2026-07-22<span class="tag">study</span></div>
+    <h2>Supervising the 1-D Bound Charge Against DFT</h2>
+    <p>A weight-scanned RHOB loss cuts the bound-charge error 4.3&times; at a +9&ndash;16%
+    potential-family cost; mechanism and verdict included.</p>
+  </a>
+
+  <div class="section" id="mix400">3 · mix400 — adding the neutral twins (599 structures)</div>
+  <p class="chlede">The current model: 400 charged frames plus 199 neutral twins, giving it
+  both charge states of the same geometries.</p>
+
+  <a class="report" href="./pb1d-mix400-pair-sid152.html">
+    <div class="date">2026-07-29<span class="tag">result</span></div>
+    <h2>mix400: Training Record + Charged/Neutral Pair Report (sid 152 / 552)</h2>
+    <p>&Phi;1D/Fermi convergence vs the planar 4-grid baseline, DFT Fermi across the 200
+    twin pairs (+4.06 eV uniform shift), and one geometry in both charge states.</p>
+  </a>
+
+  <div class="section" id="md">4 · Dynamics — constant-potential MD</div>
+  <p class="chlede">The model driving 20 ps of constant-potential dynamics: what a step
+  costs and how the controller holds the target.</p>
+
+  <a class="report" href="./pb1d-md-constant-potential.html">
+    <div class="date">2026-07-29<span class="tag">result</span></div>
+    <h2>Constant-Potential MD: Timing and the 20 ps Production Run</h2>
+    <p>Old CEP vs pb1d before/after optimization with the PB segment expanded
+    (238 ms/step); Fermi held at &minus;3.36 eV, momentum conserved for 20 ps.</p>
+  </a>
+
+  <div class="section">5 · Archive — the 3-D nonlinear PB route</div>
+  <p class="chlede">The full 3-D solver era that preceded the 1-D closure: training
+  engineering, error attribution, and the exact-gradient machinery.</p>
 
   <a class="report" href="./pb-training-engineering.html">
     <div class="date">2026-07-08<span class="tag">training</span></div>
     <h2>Training with a Real Nonlinear PB Solvent</h2>
-    <p>Exact DFT baseline cache, warm-up/refresh schedule, health guard, and the
-    measured cost: 400 epochs in 12&thinsp;h&thinsp;05&thinsp;m with 43,961 PB solves and zero
-    fallbacks. Fermi/&Phi;<sub>1D</sub> convergence against the 9-final baselines.</p>
+    <p>Baseline cache, warmup/refresh schedule, health guard; 400 epochs, 43,961 PB
+    solves, zero fallbacks.</p>
   </a>
 
   <a class="report" href="./phi1d-attribution.html">
     <div class="date">2026-07-08<span class="tag">analysis</span></div>
     <h2>Where the 1-D Potential Error Comes From</h2>
-    <p>Five single-variable runs split the PB&ndash;planar &Phi;<sub>1D</sub> gap into three
-    effects &mdash; the PB representation itself, the static-shard sampler, and the
-    jellium feature convention &mdash; none of them a bug.</p>
+    <p>Five single-variable runs split the PB&ndash;planar &Phi;1D gap into three effects
+    &mdash; none of them a bug.</p>
   </a>
 
   <a class="report" href="./differentiable-pb.html">
     <div class="date">2026-07-08<span class="tag">method</span></div>
     <h2>Exact Gradients Through the Nonlinear PB Solve</h2>
-    <p>Implicit-function adjoint with charge-mode preconditioning and an exact
-    dipole-loop derivative, verified against finite differences to ratio 1.000
-    with the forward solution bit-identical. Infrastructure note.</p>
+    <p>Implicit-function adjoint verified against finite differences to ratio 1.000,
+    forward solution bit-identical.</p>
   </a>
 
   <footer>
