@@ -35,9 +35,17 @@
   .report .tag { display: inline-block; font: 11px var(--mono); letter-spacing: .06em;
     text-transform: uppercase; color: var(--muted); border: 1px solid var(--grid);
     border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 1px; }
-  .section { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--muted); margin: 34px 0 4px; border-bottom: 1px solid var(--grid);
-    padding-bottom: 6px; }
+  .section { display: flex; align-items: baseline; gap: 10px; width: 100%;
+    background: none; border: 0; border-bottom: 1px solid var(--grid);
+    font: 600 17px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink); text-align: left; cursor: pointer;
+    margin: 34px 0 4px; padding: 0 0 8px; }
+  .section:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .section .chev { margin-left: auto; color: var(--muted); font-size: 13px;
+    transition: transform .15s ease; }
+  .section .cnt { color: var(--muted); font-size: 13px; font-weight: 400; }
+  .chapter.closed .chev { transform: rotate(-90deg); }
+  .chapter.closed .chbody { display: none; }
   .chlede { font-size: 13px; color: var(--ink-2); margin: 6px 0 12px; }
   .report { padding: 12px 18px; margin-bottom: 10px; }
   .report p { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
@@ -59,9 +67,11 @@
      style="color:var(--accent)">cep-dip-python-pb site</a>.</p>
 
   <p class="pin">Current model: <b>pb1d_mix400</b> (599 structures) ·
-  jump to <a href="#mix400">its results</a> or the <a href="#md">MD run</a>.</p>
+  jump to <a href="#ch-mix400">its results</a> or the <a href="#ch-md">MD run</a>.</p>
 
-  <div class="section">1 · Method — the 1-D closure route</div>
+  <div class="chapter" id="ch-method">
+  <button class="section" aria-expanded="true">1 · Method — the 1-D closure route<span class="cnt">2 pages</span><span class="chev">&#9662;</span></button>
+  <div class="chbody">
   <p class="chlede">What pb1d is: a nonlinear Poisson&ndash;Boltzmann solvent collapsed
   onto a 1-D closure inside PolarMACE. Start here.</p>
 
@@ -79,7 +89,12 @@
     error (&phi; ceiling 2.3&times;10&#8315;&sup3; eV), and what remains irreducible.</p>
   </a>
 
-  <div class="section" id="prod400">2 · prod400 — first production model (400 charged structures)</div>
+  </div>
+  </div>
+
+  <div class="chapter" id="ch-prod400">
+  <button class="section" aria-expanded="true">2 · prod400 — first production model (400 charged structures)<span class="cnt">3 pages</span><span class="chev">&#9662;</span></button>
+  <div class="chbody">
   <p class="chlede">The 400-epoch model trained on charged NiN frames only: how well it
   reproduces single structures, and a supervision study on its bound charge.</p>
 
@@ -104,7 +119,12 @@
     potential-family cost; mechanism and verdict included.</p>
   </a>
 
-  <div class="section" id="mix400">3 · mix400 — adding the neutral twins (599 structures)</div>
+  </div>
+  </div>
+
+  <div class="chapter" id="ch-mix400">
+  <button class="section" aria-expanded="true">3 · mix400 — adding the neutral twins (599 structures)<span class="cnt">1 page</span><span class="chev">&#9662;</span></button>
+  <div class="chbody">
   <p class="chlede">The current model: 400 charged frames plus 199 neutral twins, giving it
   both charge states of the same geometries.</p>
 
@@ -115,7 +135,12 @@
     twin pairs (+4.06 eV uniform shift), and one geometry in both charge states.</p>
   </a>
 
-  <div class="section" id="md">4 · Dynamics — constant-potential MD</div>
+  </div>
+  </div>
+
+  <div class="chapter" id="ch-md">
+  <button class="section" aria-expanded="true">4 · Dynamics — constant-potential MD<span class="cnt">1 page</span><span class="chev">&#9662;</span></button>
+  <div class="chbody">
   <p class="chlede">The model driving 20 ps of constant-potential dynamics: what a step
   costs and how the controller holds the target.</p>
 
@@ -126,7 +151,12 @@
     (238 ms/step); Fermi held at &minus;3.36 eV, momentum conserved for 20 ps.</p>
   </a>
 
-  <div class="section">5 · Archive — the 3-D nonlinear PB route</div>
+  </div>
+  </div>
+
+  <div class="chapter" id="ch-archive">
+  <button class="section" aria-expanded="true">5 · Archive — the 3-D nonlinear PB route<span class="cnt">3 pages</span><span class="chev">&#9662;</span></button>
+  <div class="chbody">
   <p class="chlede">The full 3-D solver era that preceded the 1-D closure: training
   engineering, error attribution, and the exact-gradient machinery.</p>
 
@@ -151,8 +181,35 @@
     forward solution bit-identical.</p>
   </a>
 
+  </div>
+  </div>
+
   <footer>
     Repository: <a href="https://github.com/ruoywang/polar-mace-planar">ruoywang/polar-mace-planar</a>
     (private) · companion solver: <a href="https://ruoywang.github.io/cep-dip-python-pb/">cep-dip-python-pb reports</a>
   </footer>
 </div>
+
+<script>
+const KEY = 'pmp-docs-closed';
+let closed = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+document.querySelectorAll('.chapter').forEach(ch => {
+  if (closed.has(ch.id)) { ch.classList.add('closed'); }
+  const btn = ch.querySelector('.section');
+  btn.setAttribute('aria-expanded', String(!closed.has(ch.id)));
+  btn.addEventListener('click', () => {
+    ch.classList.toggle('closed');
+    const isClosed = ch.classList.contains('closed');
+    btn.setAttribute('aria-expanded', String(!isClosed));
+    if (isClosed) closed.add(ch.id); else closed.delete(ch.id);
+    localStorage.setItem(KEY, JSON.stringify([...closed]));
+  });
+});
+if (location.hash) {
+  const t = document.querySelector(location.hash);
+  if (t && t.classList.contains('chapter') && t.classList.contains('closed')) {
+    t.querySelector('.section').click();
+  }
+}
+</script>
+
