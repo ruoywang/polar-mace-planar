@@ -112,7 +112,20 @@ def closure_from_fields(
     ez_scr = ez / eps3
 
     # consistent pairing: saturation of the response at the screened field
-    a3_scr = response_a3(emag_scr, s_diel3, params, tp)
+    if _os.environ.get("MACE_PB1D_LF_WARM"):
+        # warm-start the pointwise local-field fixed point from the previous
+        # step's converged field (stashed on the per-cell grid object;
+        # single-structure MD only). Same tolerance, same fixed point.
+        from .pb1d_localfield import local_field_factor as _lff
+        _f0 = getattr(grid, "_pb1d_lf_warm", None)
+        f_loc = _lff(emag_scr, params, _f0)
+        grid._pb1d_lf_warm = f_loc.detach()
+        y = float(params["PBETA"]) * emag_scr * f_loc
+        g = langevin_g_torch(y) if bool(params["LNLDIEL"]) else torch.ones_like(y)
+        poe = float(params["alpha0_rot"]) / EDEPS * g + float(params["alpha_pol"]) / EDEPS
+        a3_scr = f_loc * float(params["N_MOL"]) * s_diel3 * poe
+    else:
+        a3_scr = response_a3(emag_scr, s_diel3, params, tp)
     if _tm:
         torch.cuda.synchronize(); print(f"CLOSURE response {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
 

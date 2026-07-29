@@ -44,7 +44,7 @@ def _g_rot_prime(u: torch.Tensor) -> torch.Tensor:
 
 class _LocalFieldFactorFn(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, e_mag, params):
+    def forward(ctx, e_mag, params, f0=None):
         alpha_pol = float(params["alpha_pol"])
         alpha0_rot = float(params["alpha0_rot"])
         nu = float(params["invalpha_sic"])
@@ -57,7 +57,12 @@ class _LocalFieldFactorFn(torch.autograd.Function):
         lo = 1.0 / (1.0 - alpha_pol * nu)
         hi = (1.0 / (1.0 - (alpha_pol + alpha0_rot) * nu)) * (1.0 + 1.0e-8)
         x0 = beta * e_mag
-        f = torch.full_like(e_mag, hi)
+        # warm start: previous converged field (same clamp window, same
+        # tolerance -> same fixed point, fewer sweeps)
+        if f0 is not None and f0.shape == e_mag.shape:
+            f = torch.clamp(f0.detach().to(e_mag.dtype), lo, hi)
+        else:
+            f = torch.full_like(e_mag, hi)
         zero = x0 == 0.0
         with torch.no_grad():
             for it in range(80):
@@ -92,8 +97,8 @@ class _LocalFieldFactorFn(torch.autograd.Function):
         eps = 1.0e-12 * hi
         active = (f > lo + eps) & (f < hi * (1.0 - 1.0e-12)) & (e_mag != 0.0)
         dfde = torch.where(active, dfde, torch.zeros_like(dfde))
-        return grad_f * dfde, None
+        return grad_f * dfde, None, None
 
 
-def local_field_factor(e_mag: torch.Tensor, params: dict) -> torch.Tensor:
-    return _LocalFieldFactorFn.apply(e_mag, params)
+def local_field_factor(e_mag: torch.Tensor, params: dict, f0=None) -> torch.Tensor:
+    return _LocalFieldFactorFn.apply(e_mag, params, f0)
