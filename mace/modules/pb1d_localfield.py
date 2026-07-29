@@ -64,6 +64,8 @@ class _LocalFieldFactorFn(torch.autograd.Function):
         else:
             f = torch.full_like(e_mag, hi)
         zero = x0 == 0.0
+        import os as _os
+        _dbg = bool(_os.environ.get("MACE_PB1D_LF_DEBUG"))
         with torch.no_grad():
             for it in range(80):
                 gx = _g_rot(f * x0)
@@ -72,6 +74,9 @@ class _LocalFieldFactorFn(torch.autograd.Function):
                 if it % 8 == 7:
                     diff = torch.max(torch.abs(new - f))
                     f = new
+                    if _dbg:
+                        print(f"LFDBG it={it+1} diff={float(diff):.3e} "
+                              f"tol={1.0e-10 * max(1.0, hi):.3e}", flush=True)
                     if float(diff) <= 1.0e-10 * max(1.0, hi):
                         break
                 else:
