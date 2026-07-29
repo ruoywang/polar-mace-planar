@@ -1395,7 +1395,13 @@ class PolarMACE(ScaleShiftMACE):
         try:
             backend = self._get_pb1d_backend()
             tables = backend._get_runtime_baseline()
-        except Exception:
+        except (ImportError, OSError, RuntimeError) as exc:
+            # expected reasons: planar model without a pb backend, missing
+            # tables file. Anything else should surface, not degrade silently.
+            if not getattr(self, "_runtime_profile_err_warned", False):
+                self._runtime_profile_err_warned = True
+                print(f"pb1d: runtime center profile unavailable ({exc!r}); "
+                      "falling back to the multipole crossing", flush=True)
             return None
         if tables is None:
             return None

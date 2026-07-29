@@ -1638,7 +1638,7 @@ def run(args) -> None:
                         _extra_files=extra_files,
                     )
                 except Exception as e:  # pylint: disable=W0718
-                    pass
+                    logging.warning(f"TorchScript export failed (python .model unaffected): {e}")
             else:
                 torch.save(model_to_save, Path(args.model_dir) / (args.name + ".model"))
                 try:
@@ -1653,7 +1653,7 @@ def run(args) -> None:
                         _extra_files=extra_files,
                     )
                 except Exception as e:  # pylint: disable=W0718
-                    pass
+                    logging.warning(f"TorchScript export failed (python .model unaffected): {e}")
 
         logging.info("Computing metrics for training, validation, and test sets")
         for param in model.parameters():
