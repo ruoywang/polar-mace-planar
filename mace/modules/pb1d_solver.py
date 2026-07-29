@@ -225,6 +225,11 @@ class Solver1D:
                     break
                 alpha *= 0.5
             self._last_rms = float(rms)
+        import os as _os
+        if _os.environ.get("MACE_PB1D_SOLVE_DEBUG"):
+            print(f"SOLVEDBG n_outer={n_outer}/{max_outer} rms={float(rms):.3e} "
+                  f"tol={tol:.1e} exit={'tol' if float(rms) < tol else 'CAP'}",
+                  flush=True)
         return phi, n_b, n_ion, n_outer
 
     # -- full solve with the fixsol dipole loop -----------------------------
