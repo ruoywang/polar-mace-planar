@@ -427,6 +427,11 @@ class PB1DBackend:
         center_z = 0.5 * (cell_np[0, 2] + cell_np[1, 2] + cell_np[2, 2])
         nouth = nz_s // 2
         indmin = int((nouth + int(0.5 * nz_s) + 10 * nz_s) % nz_s + 1)
+        phi_init = None
+        if os.environ.get("MACE_PB1D_PHI_WARM") and sample_id is not None:
+            stash = getattr(self, "_phi_warm_stash", None)
+            if stash is not None and stash[0] == (sample_id, nz_s):
+                phi_init = stash[1]
         with self._Phase(self, "5_solve1d", device):
             out = solver.solve(
                 cvhar_z=cvhar_s, s_ion=s_ion_s, a1=a_s, p_off=p_off, q_sol=q_sol,
@@ -434,7 +439,10 @@ class PB1DBackend:
                 center_z=center_z, indmin=indmin,
                 fixsol_steps=self.fixsol_steps, tol=self.tol, max_outer=self.max_outer,
                 grad_passes=int(os.environ.get("MACE_PB1D_GRAD_PASSES", "1")),
+                phi_init=phi_init,
             )
+        if os.environ.get("MACE_PB1D_PHI_WARM") and sample_id is not None:
+            self._phi_warm_stash = ((sample_id, nz_s), out["phi"].detach().clone())
 
         rho_ion_z = -(out["n_ion"] / volume)
         rho_bound_z = -(out["n_b"] / volume)

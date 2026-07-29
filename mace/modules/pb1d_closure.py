@@ -75,7 +75,14 @@ def closure_from_fields(
     grid:        torch_pb.TorchGrid
     tp:          the torch_pb module
     """
+    import os as _os
+    import time as _time
+    _tm = bool(_os.environ.get("MACE_PB1D_CLOSURE_TIMING"))
+    if _tm:
+        torch.cuda.synchronize(); _t0 = _time.perf_counter()
     s_ion3, s_diel3, _ = tp.create_cavity_torch(n_e_density, grid, params)
+    if _tm:
+        torch.cuda.synchronize(); print(f"CLOSURE cavity {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
 
     sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
     cached = getattr(grid, "_pb1d_wb_kernel", None)
@@ -95,13 +102,19 @@ def closure_from_fields(
     eps3 = 1.0 + EDEPS * a3_zero
 
     # screened vacuum field: E = -(w_b * grad phi_sol) / eps(r)
+    if _tm:
+        torch.cuda.synchronize(); print(f"CLOSURE resp0 {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
     phi_g = grid.fft(phi_sol)
     ex, ey, ez, emag = grid.grad_from_recip(-torch.conj(w_b) * phi_g)
+    if _tm:
+        torch.cuda.synchronize(); print(f"CLOSURE fft+grad {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
     emag_scr = emag / eps3
     ez_scr = ez / eps3
 
     # consistent pairing: saturation of the response at the screened field
     a3_scr = response_a3(emag_scr, s_diel3, params, tp)
+    if _tm:
+        torch.cuda.synchronize(); print(f"CLOSURE response {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
 
     A_scr = plane_mean(a3_scr)
     S_ion_z = plane_mean(s_ion3)
@@ -113,6 +126,8 @@ def closure_from_fields(
     u = torch.cumsum(w_env, dim=0)
     u = u / torch.clamp(u[-1], min=1.0e-30)
 
+    if _tm:
+        torch.cuda.synchronize(); print(f"CLOSURE reductions {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True)
     return {
         "A_scr": A_scr,
         "S_ion_z": S_ion_z,
