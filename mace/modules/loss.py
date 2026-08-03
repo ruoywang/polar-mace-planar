@@ -2434,10 +2434,11 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_solvent_rhob_1d is not None:
-                # normalised by the dataset signal variance (weight 1.0 = unit
-                # contribution at 100% relative error), same as charge_density_1d
+                # normalised by the dataset signal variance and a per-term
+                # reference coefficient so that weight 1.0 is the sensible
+                # default (0.1 ~ the historical 3e5 un-normalised setting)
                 rhob_ms = float(self.solvent_rhob_1d_targets.get("signal_ms", 1.0))
-                loss = loss + self.solvent_rhob_1d_weight * (
+                loss = loss + self.solvent_rhob_1d_weight * 0.1 * (
                     loss_solvent_rhob_1d / max(rhob_ms, 1.0e-30)
                 )
         if self.charge_density_1d_weight > 1e-12:
@@ -2450,9 +2451,11 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_charge_density_1d is not None:
+                # signal-variance normalised + per-term reference coefficient:
+                # weight 1.0 ~ measured contribution parity (probe 2026-08-03)
                 signal_ms = float(self.charge_density_1d_targets.get("signal_ms", 1.0)) \
                     if isinstance(self.charge_density_1d_targets, dict) else 1.0
-                loss = loss + self.charge_density_1d_weight * (
+                loss = loss + self.charge_density_1d_weight * 0.3 * (
                     loss_charge_density_1d / max(signal_ms, 1.0e-30)
                 )
         if self.solvent_center_weight > 1e-12:
