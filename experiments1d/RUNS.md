@@ -37,3 +37,16 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 
 - prod150/prod400 之前的探索性 exp_pb1d_* 目录:当时未记版本,只能按
   工作树指针近似;此后不再发生(启动即写版本)。
+
+## 2026-08-03 charge_density_1d supervision (3-train_add1Dcharge)
+- Code: pb-1d-charge1d @ 369176e (new loss: plane-averaged 1-D net density
+  vs density_3d grid plane average, valid-window masked; metric rmse_charge_density_1d).
+- Reference cache: density1d_net_cache.npz (600 sids, nz=500; signal rms
+  0.0194 e/A^3 in-window; z grids asserted identical to potential cache).
+- Weight derivation (contribution parity, rho_b methodology; probe.o3334372):
+  trained train_all model on val split -> rms 1.7408e-3 e/A^3, mse 3.030e-6;
+  converged potential-family contributions: fermi 2.70e-3 / Phi1D 2.40e-3 /
+  rho3d 1.64e-3 / rho_b 3.12e-3, median 2.553e-3;
+  weight = 2.553e-3 / 3.030e-6 = 842 -> 800.
+- Gate: 8-epoch dev run, job 3334406 (exp_add1dq/gate).
+- Production dir: 3-train_add1Dcharge (config ready, weight 800, 400 epochs).
