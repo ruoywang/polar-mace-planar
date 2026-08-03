@@ -912,6 +912,8 @@ class MACELoss(Metric):
                     device=self.SolventRhob1D_computed.device,
                 )
         cd1d_targets = getattr(self.loss_fn, "charge_density_1d_targets", None)
+        if isinstance(cd1d_targets, dict) and "targets" in cd1d_targets:
+            cd1d_targets = cd1d_targets["targets"]
         if cd1d_targets:
             cd1d_res = charge_density_1d_residuals(
                 ref=batch,

@@ -1984,7 +1984,8 @@ def _load_solvent_rhob_1d_npz(path: Union[str, Path]) -> dict:
     w = u - np.floor(u)
     rb512 = rb[:, i0] * (1.0 - w) + rb[:, i1] * w
     targets = {int(s): rb512[k] for k, s in enumerate(sids)}
-    return {"targets": targets, "lz_A": lz}
+    signal_ms = float(np.mean(rb512 ** 2)) if rb512.size else 1.0
+    return {"targets": targets, "lz_A": lz, "signal_ms": signal_ms}
 
 
 def _gaussian_smear_periodic_1d(x: torch.Tensor, sigma_A: float, lz_A: float) -> torch.Tensor:
@@ -2100,10 +2101,15 @@ def _load_charge_density_1d_npz(path: Union[str, Path]) -> dict[int, dict[str, n
         raise ValueError(
             f"charge_density_1d_file {path}: inconsistent array shapes"
         )
-    return {
+    targets = {
         int(s): {"z_A": z[k], "nbar_e": nbar[k], "valid_mask": mask[k]}
         for k, s in enumerate(sids)
     }
+    inside = mask > 0.5
+    signal_ms = float(np.mean(nbar[inside] ** 2)) if np.any(inside) else 1.0
+    # loss is normalised by this dataset signal variance so that a config
+    # weight of 1.0 means "unit contribution at 100% relative error"
+    return {"targets": targets, "signal_ms": signal_ms}
 
 
 def charge_density_1d_residuals(
@@ -2122,6 +2128,8 @@ def charge_density_1d_residuals(
         raise KeyError(
             "charge_density_1d loss requires PolarMACE charge_density_radial_coefficients"
         )
+    if isinstance(density1d_targets, dict) and "targets" in density1d_targets:
+        density1d_targets = density1d_targets["targets"]
     if _batch_get(ref, "sample_id") is None or not density1d_targets:
         return None
     num_graphs = int(ref.ptr.numel() - 1)
@@ -2161,6 +2169,9 @@ def mean_squared_error_charge_density_1d(
 ) -> Optional[torch.Tensor]:
     coeffs = pred.get("charge_density_radial_coefficients")
     if coeffs is None or not density1d_targets:
+        return None
+    if isinstance(density1d_targets, dict) and "targets" in density1d_targets \
+            and not density1d_targets["targets"]:
         return None
     residuals = charge_density_1d_residuals(
         ref, pred, density1d_targets, density_smearing_width, axis
@@ -2211,6 +2222,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         solvent_rhob_1d_file=None,
         solvent_rhob_1d_sigma=0.25,
         solvent_rhob_1d_smear_ref=True,
+        solvent_rhob_1d_normalized=False,
         charge_density_1d_weight=0.0,
         charge_density_1d_file=None,
         potential_axis=2,
@@ -2271,6 +2283,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.solvent_rhob_1d_file = solvent_rhob_1d_file
         self.solvent_rhob_1d_sigma = float(solvent_rhob_1d_sigma)
         self.solvent_rhob_1d_smear_ref = bool(solvent_rhob_1d_smear_ref)
+        self.solvent_rhob_1d_normalized = bool(solvent_rhob_1d_normalized)
         self.register_buffer(
             "charge_density_1d_weight",
             torch.tensor(charge_density_1d_weight, dtype=torch.get_default_dtype()),
@@ -2423,6 +2436,9 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_solvent_rhob_1d is not None:
+                if self.solvent_rhob_1d_normalized:
+                    rhob_ms = float(self.solvent_rhob_1d_targets.get("signal_ms", 1.0))
+                    loss_solvent_rhob_1d = loss_solvent_rhob_1d / max(rhob_ms, 1.0e-30)
                 loss = loss + self.solvent_rhob_1d_weight * loss_solvent_rhob_1d
         if self.charge_density_1d_weight > 1e-12:
             loss_charge_density_1d = mean_squared_error_charge_density_1d(
@@ -2434,7 +2450,11 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_charge_density_1d is not None:
-                loss = loss + self.charge_density_1d_weight * loss_charge_density_1d
+                signal_ms = float(self.charge_density_1d_targets.get("signal_ms", 1.0)) \
+                    if isinstance(self.charge_density_1d_targets, dict) else 1.0
+                loss = loss + self.charge_density_1d_weight * (
+                    loss_charge_density_1d / max(signal_ms, 1.0e-30)
+                )
         if self.solvent_center_weight > 1e-12:
             loss_solvent_layer_mean, pred_solvent_layer_mean = (
                 weighted_mean_squared_error_solvent_layer_mean(
