@@ -2078,6 +2078,114 @@ def mean_squared_error_solvent_rhob_1d(
     return sq_sum / float(n_local)
 
 
+def _load_charge_density_1d_npz(path: Union[str, Path]) -> dict[int, dict[str, np.ndarray]]:
+    """Plane-averaged net charge density references (density1d_net_cache.npz).
+
+    Rows are plane averages of the density_3d net grids (electron-negative
+    physics convention, e/A^3) on each structure's own uniform z grid;
+    valid_mask marks the z window covered by the DFT grid reference.
+    """
+    arrays = np.load(path)
+    required = {"sample_ids", "z_A", "nbar_e", "valid_mask"}
+    missing = required.difference(arrays.files)
+    if missing:
+        raise ValueError(
+            f"Missing arrays in charge_density_1d_file {path}: {sorted(missing)}"
+        )
+    sids = np.asarray(arrays["sample_ids"], dtype=np.int64)
+    z = np.asarray(arrays["z_A"], dtype=np.float64)
+    nbar = np.asarray(arrays["nbar_e"], dtype=np.float64)
+    mask = np.asarray(arrays["valid_mask"], dtype=np.float64)
+    if not (z.shape == nbar.shape == mask.shape and z.shape[0] == sids.shape[0]):
+        raise ValueError(
+            f"charge_density_1d_file {path}: inconsistent array shapes"
+        )
+    return {
+        int(s): {"z_A": z[k], "nbar_e": nbar[k], "valid_mask": mask[k]}
+        for k, s in enumerate(sids)
+    }
+
+
+def charge_density_1d_residuals(
+    ref: Batch,
+    pred: TensorDict,
+    density1d_targets: dict[int, dict[str, np.ndarray]],
+    density_smearing_width,
+    axis: int = 2,
+) -> Optional[torch.Tensor]:
+    """Per-point residuals (model plane-averaged net density - DFT, e/A^3)
+    inside each structure's valid z window. The model profile is the same
+    analytic plane reduction of the GTO radial coefficients used by the
+    potential_1d_profile loss."""
+    density_coefficients = pred.get("charge_density_radial_coefficients")
+    if density_coefficients is None:
+        raise KeyError(
+            "charge_density_1d loss requires PolarMACE charge_density_radial_coefficients"
+        )
+    if _batch_get(ref, "sample_id") is None or not density1d_targets:
+        return None
+    num_graphs = int(ref.ptr.numel() - 1)
+    cells = _cells_from_batch(ref, num_graphs)
+    rows = []
+    for graph_idx in range(num_graphs):
+        sample_id = int(_batch_get(ref, "sample_id").view(-1)[graph_idx].detach().cpu().item())
+        if sample_id not in density1d_targets:
+            raise KeyError(f"sample_id {sample_id} is missing from charge_density_1d_file")
+        target = density1d_targets[sample_id]
+        z_ref = ref["positions"].new_tensor(target["z_A"])
+        nbar_ref = ref["positions"].new_tensor(target["nbar_e"])
+        valid = ref["positions"].new_tensor(target["valid_mask"]) > 0.5
+        start = int(ref.ptr[graph_idx].item())
+        stop = int(ref.ptr[graph_idx + 1].item())
+        rho_model = _residual_plane_density_from_radial_coefficients(
+            z_ref=z_ref,
+            density_coefficients=density_coefficients[start:stop],
+            positions=ref["positions"][start:stop],
+            cell=cells[graph_idx].to(ref["positions"].dtype),
+            sigma=density_smearing_width,
+            axis=axis,
+        )
+        rows.append((rho_model - nbar_ref)[valid])
+    if not rows:
+        return None
+    return torch.cat(rows, dim=0)
+
+
+def mean_squared_error_charge_density_1d(
+    ref: Batch,
+    pred: TensorDict,
+    density1d_targets: dict[int, dict[str, np.ndarray]],
+    density_smearing_width,
+    axis: int = 2,
+    ddp: Optional[bool] = None,
+) -> Optional[torch.Tensor]:
+    coeffs = pred.get("charge_density_radial_coefficients")
+    if coeffs is None or not density1d_targets:
+        return None
+    residuals = charge_density_1d_residuals(
+        ref, pred, density1d_targets, density_smearing_width, axis
+    )
+    # point counts are data-dependent (valid windows differ per structure),
+    # so mirror the rhob loss's DDP-safe reduction
+    if residuals is None:
+        sq_sum = coeffs.sum() * 0.0
+        n_local = 0
+    else:
+        sq = torch.square(residuals)
+        sq_sum = sq.sum()
+        n_local = int(sq.numel())
+    ddp_flag = is_ddp_enabled() if ddp is None else ddp
+    if ddp_flag and dist.is_initialized():
+        total = torch.tensor(float(n_local), device=coeffs.device, dtype=coeffs.dtype)
+        dist.all_reduce(total, op=dist.ReduceOp.SUM)
+        if float(total.item()) < 0.5:
+            return None
+        return sq_sum * dist.get_world_size() / total
+    if n_local == 0:
+        return None
+    return sq_sum / float(n_local)
+
+
 class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
     def __init__(
         self,
@@ -2103,6 +2211,8 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         solvent_rhob_1d_file=None,
         solvent_rhob_1d_sigma=0.25,
         solvent_rhob_1d_smear_ref=True,
+        charge_density_1d_weight=0.0,
+        charge_density_1d_file=None,
         potential_axis=2,
         potential_sign=1.0,
         solvent_sigma_g=0.85,
@@ -2161,6 +2271,17 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.solvent_rhob_1d_file = solvent_rhob_1d_file
         self.solvent_rhob_1d_sigma = float(solvent_rhob_1d_sigma)
         self.solvent_rhob_1d_smear_ref = bool(solvent_rhob_1d_smear_ref)
+        self.register_buffer(
+            "charge_density_1d_weight",
+            torch.tensor(charge_density_1d_weight, dtype=torch.get_default_dtype()),
+        )
+        self.charge_density_1d_file = charge_density_1d_file
+        self.charge_density_1d_targets = (
+            _load_charge_density_1d_npz(charge_density_1d_file)
+            if charge_density_1d_file is not None
+            and float(charge_density_1d_weight) > 1.0e-12
+            else {}
+        )
         self.solvent_rhob_1d_targets = (
             _load_solvent_rhob_1d_npz(solvent_rhob_1d_file)
             if solvent_rhob_1d_file is not None
@@ -2303,6 +2424,17 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             )
             if loss_solvent_rhob_1d is not None:
                 loss = loss + self.solvent_rhob_1d_weight * loss_solvent_rhob_1d
+        if self.charge_density_1d_weight > 1e-12:
+            loss_charge_density_1d = mean_squared_error_charge_density_1d(
+                ref=ref,
+                pred=pred,
+                density1d_targets=self.charge_density_1d_targets,
+                density_smearing_width=self.density_3d_sigma,
+                axis=self.potential_axis,
+                ddp=ddp,
+            )
+            if loss_charge_density_1d is not None:
+                loss = loss + self.charge_density_1d_weight * loss_charge_density_1d
         if self.solvent_center_weight > 1e-12:
             loss_solvent_layer_mean, pred_solvent_layer_mean = (
                 weighted_mean_squared_error_solvent_layer_mean(

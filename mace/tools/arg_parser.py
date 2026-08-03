@@ -1158,6 +1158,20 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=0.0,
     )
     parser.add_argument(
+        "--charge_density_1d_weight",
+        help="weight of the plane-averaged 1-D net charge density loss "
+        "(model GTO plane profile vs density_3d grid plane average)",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--charge_density_1d_file",
+        help="npz with sample_ids, z_A, nbar_e, valid_mask (build with "
+        "tools1d/build_density1d_cache.py)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
         "--solvent_rhob_1d_weight",
         help="weight of the 1-D bound-charge profile loss (pb1d solvent only)",
         type=float,

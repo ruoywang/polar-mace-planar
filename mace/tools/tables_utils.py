@@ -29,6 +29,7 @@ def _extra_metric_specs(table_type: str) -> List[Tuple[str, str, float, str]]:
             ("rmse_fermi_level", "RMSE Fermi / eV", 1.0, "8.4f"),
             ("rmse_density_3d", "RMSE Density3D / e/A^3", 1.0, "8.5f"),
             ("rmse_potential_1d_profile", "RMSE Phi1D / eV", 1.0, "8.5f"),
+            ("rmse_charge_density_1d", "RMSE Rho1D / e/A^3", 1.0, "8.5f"),
             ("rmse_solvent_center", "RMSE Solv Center / A", 1.0, "8.4f"),
         ]
     if "MAE" in table_type:

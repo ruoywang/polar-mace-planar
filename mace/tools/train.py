@@ -30,6 +30,7 @@ from mace.modules.loss import (
     potential_1d_profile_residuals,
     predict_potential_from_dipole,
     solvent_layer_mean_residuals,
+    charge_density_1d_residuals,
     solvent_rhob_1d_residuals,
 )
 
@@ -91,6 +92,10 @@ def valid_err_log(
     if eval_metrics.get("rmse_solvent_rhob_1d") is not None:
         density_msg += (
             f", RMSE_rhob_1d={eval_metrics['rmse_solvent_rhob_1d']:.6f} e/A^3"
+        )
+    if eval_metrics.get("rmse_charge_density_1d") is not None:
+        density_msg += (
+            f", RMSE_rho1d={eval_metrics['rmse_charge_density_1d']:.6f} e/A^3"
         )
     if eval_metrics.get("rmse_solvent_layer_mean") is not None:
         density_msg += (
@@ -726,6 +731,10 @@ class MACELoss(Metric):
         )
         self.add_state("delta_solvent_rhob_1d", default=[], dist_reduce_fx="cat")
         self.add_state(
+            "ChargeDensity1D_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_charge_density_1d", default=[], dist_reduce_fx="cat")
+        self.add_state(
             "SolventLayerMean_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
         self.add_state("delta_solvent_layer_mean", default=[], dist_reduce_fx="cat")
@@ -902,6 +911,22 @@ class MACELoss(Metric):
                     dtype=self.SolventRhob1D_computed.dtype,
                     device=self.SolventRhob1D_computed.device,
                 )
+        cd1d_targets = getattr(self.loss_fn, "charge_density_1d_targets", None)
+        if cd1d_targets:
+            cd1d_res = charge_density_1d_residuals(
+                ref=batch,
+                pred=output,
+                density1d_targets=cd1d_targets,
+                density_smearing_width=getattr(self.loss_fn, "density_3d_sigma", 0.25),
+                axis=int(getattr(self.loss_fn, "potential_axis", 2)),
+            )
+            if cd1d_res is not None and cd1d_res.numel() > 0:
+                self.delta_charge_density_1d.append(cd1d_res.detach())
+                self.ChargeDensity1D_computed += torch.tensor(
+                    1.0,
+                    dtype=self.ChargeDensity1D_computed.dtype,
+                    device=self.ChargeDensity1D_computed.device,
+                )
         if getattr(self.loss_fn, "solvent_center_weight", 0.0) > 1.0e-12:
             solvent_layer_res, pred_layer_mean, target_layer_mean = (
                 solvent_layer_mean_residuals(
@@ -1042,6 +1067,10 @@ class MACELoss(Metric):
             delta_solvent_rhob_1d = self.convert(self.delta_solvent_rhob_1d)
             aux["mae_solvent_rhob_1d"] = compute_mae(delta_solvent_rhob_1d)
             aux["rmse_solvent_rhob_1d"] = compute_rmse(delta_solvent_rhob_1d)
+        if self.ChargeDensity1D_computed:
+            delta_charge_density_1d = self.convert(self.delta_charge_density_1d)
+            aux["mae_charge_density_1d"] = compute_mae(delta_charge_density_1d)
+            aux["rmse_charge_density_1d"] = compute_rmse(delta_charge_density_1d)
         if self.SolventLayerMean_computed:
             delta_solvent_layer_mean = self.convert(self.delta_solvent_layer_mean)
             aux["mae_solvent_layer_mean"] = compute_mae(delta_solvent_layer_mean)
