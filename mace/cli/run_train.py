@@ -403,9 +403,20 @@ def _fit_train_solvent_center_mean_shift(
     use_density_shift = float(getattr(args, "density_3d_weight", 0.0)) > 1.0e-12
     use_partition_shift = float(getattr(args, "charges_weight", 0.0)) > 1.0e-12
     if use_density_shift and use_partition_shift:
+        configured_shift = float(getattr(args, "solvent_center_mean_shift", 0.0))
+        if configured_shift != 0.0:
+            # both center definitions active: the ambiguity is resolved by an
+            # explicitly configured shift (no fitting)
+            logging.info(
+                "density_3d and charges losses both enabled; using configured "
+                "solvent_center_mean_shift=%.6f Å (no fit).",
+                configured_shift,
+            )
+            return configured_shift
         raise ValueError(
             "Cannot fit solvent_center_mean_shift with both density_3d_weight and "
-            "charges_weight enabled; choose one center definition."
+            "charges_weight enabled; set solvent_center_mean_shift explicitly "
+            "or choose one center definition."
         )
     if use_density_shift:
         fitted = _fit_density_solvent_center_mean_shift(args, head_configs)
