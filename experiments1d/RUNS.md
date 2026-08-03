@@ -50,3 +50,19 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   weight = 2.553e-3 / 3.030e-6 = 842 -> 800.
 - Gate: 8-epoch dev run, job 3334406 (exp_add1dq/gate).
 - Production dir: 3-train_add1Dcharge (config ready, weight 800, 400 epochs).
+
+## 2026-08-03 Bader supervision (4-bader)
+- Labels: critic2 YT on CHGCAR (ref AECCAR0+AECCAR2); REF_charges = ZVAL-Ne,
+  atomic_dipole = -M_electron (a.u.->eA, critic2 x,z,y order handled).
+  Charged 400: reused 3-partition critic2 cache (copied, originals untouched).
+  Neutral 200: computed fresh (inputs copied into 4-bader, zero writes to
+  source dirs; job 3335225 on gpu-a100 CPUs).
+- Verification battery (all PASS): coverage 600/600; charge closure
+  max 5e-5 e; geometry identity < 1e-5 A; charged labels identical to
+  3-partition originals (5e-9); element stats physical; neutral closure 0.
+- Package: 4-bader/data = full copy (splits identical to 1-train_all,
+  + REF_charges/atomic_dipole arrays).
+- Config: train_all recipe + charges_weight 1.0 + atomic_dipole_weight 1.0
+  (3-partition precedent); rhob weight 1.0 (new normalised semantics);
+  NO charge_density_1d (single-variable). 500 epochs.
+- Code: pb-1d-charge1d @ 71c26b9 (same as add1Dcharge experiment).
