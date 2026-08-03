@@ -2222,7 +2222,6 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         solvent_rhob_1d_file=None,
         solvent_rhob_1d_sigma=0.25,
         solvent_rhob_1d_smear_ref=True,
-        solvent_rhob_1d_normalized=False,
         charge_density_1d_weight=0.0,
         charge_density_1d_file=None,
         potential_axis=2,
@@ -2283,7 +2282,6 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.solvent_rhob_1d_file = solvent_rhob_1d_file
         self.solvent_rhob_1d_sigma = float(solvent_rhob_1d_sigma)
         self.solvent_rhob_1d_smear_ref = bool(solvent_rhob_1d_smear_ref)
-        self.solvent_rhob_1d_normalized = bool(solvent_rhob_1d_normalized)
         self.register_buffer(
             "charge_density_1d_weight",
             torch.tensor(charge_density_1d_weight, dtype=torch.get_default_dtype()),
@@ -2436,10 +2434,12 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_solvent_rhob_1d is not None:
-                if self.solvent_rhob_1d_normalized:
-                    rhob_ms = float(self.solvent_rhob_1d_targets.get("signal_ms", 1.0))
-                    loss_solvent_rhob_1d = loss_solvent_rhob_1d / max(rhob_ms, 1.0e-30)
-                loss = loss + self.solvent_rhob_1d_weight * loss_solvent_rhob_1d
+                # normalised by the dataset signal variance (weight 1.0 = unit
+                # contribution at 100% relative error), same as charge_density_1d
+                rhob_ms = float(self.solvent_rhob_1d_targets.get("signal_ms", 1.0))
+                loss = loss + self.solvent_rhob_1d_weight * (
+                    loss_solvent_rhob_1d / max(rhob_ms, 1.0e-30)
+                )
         if self.charge_density_1d_weight > 1e-12:
             loss_charge_density_1d = mean_squared_error_charge_density_1d(
                 ref=ref,

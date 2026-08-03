@@ -1158,13 +1158,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=0.0,
     )
     parser.add_argument(
-        "--solvent_rhob_1d_normalized",
-        help="normalise the rhob 1-D loss by its dataset signal variance "
-        "(weight becomes O(1): old_weight * signal_ms)",
-        type=lambda x: str(x).lower() in ("1", "true", "yes"),
-        default=False,
-    )
-    parser.add_argument(
         "--charge_density_1d_weight",
         help="weight of the plane-averaged 1-D net charge density loss "
         "(model GTO plane profile vs density_3d grid plane average)",
