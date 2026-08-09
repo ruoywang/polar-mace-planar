@@ -356,7 +356,7 @@ def _build_model(
             probe3d_window_margin=getattr(args, "probe3d_window_margin", 3.0),
             probe3d_window_exclude_z=getattr(args, "probe3d_window_exclude_z", "28"),
             probe3d_edge_width=getattr(args, "probe3d_edge_width", 1.0),
-            probe3d_grid_chunk=getattr(args, "probe3d_grid_chunk", 16384),
+            probe3d_grid_chunk=getattr(args, "probe3d_grid_chunk", 131072),
             probe3d_profile_nxy=getattr(args, "probe3d_profile_nxy", 8),
             solvent_pb_repo=getattr(args, "solvent_pb_repo", None),
             solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.15),

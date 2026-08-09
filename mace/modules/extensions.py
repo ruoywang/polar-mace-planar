@@ -827,7 +827,7 @@ class PolarMACE(ScaleShiftMACE):
         probe3d_window_margin: float = 3.0,
         probe3d_window_exclude_z: str = "28",
         probe3d_edge_width: float = 1.0,
-        probe3d_grid_chunk: int = 16384,
+        probe3d_grid_chunk: int = 131072,
         probe3d_profile_nxy: int = 8,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
@@ -1704,7 +1704,7 @@ class PolarMACE(ScaleShiftMACE):
                         self.probe3d_head if probe_window_g is not None else None
                     ),
                     probe_window=probe_window_g,
-                    probe_chunk=getattr(self, "probe3d_grid_chunk", 16384),
+                    probe_chunk=getattr(self, "probe3d_grid_chunk", 131072),
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1870,7 +1870,7 @@ class PolarMACE(ScaleShiftMACE):
                     cells[g].to(positions.dtype),
                     pts[m_p].to(positions.dtype),
                     win,
-                    chunk=getattr(self, "probe3d_grid_chunk", 16384),
+                    chunk=getattr(self, "probe3d_grid_chunk", 131072),
                 ).to(res_pts.dtype)
 
         if pb_solvent_data is not None and "probe_prof_512" in pb_solvent_data:
@@ -1896,7 +1896,7 @@ class PolarMACE(ScaleShiftMACE):
                 win,
                 nz=512,
                 nxy=getattr(self, "probe3d_profile_nxy", 8),
-                chunk=getattr(self, "probe3d_grid_chunk", 16384),
+                chunk=getattr(self, "probe3d_grid_chunk", 131072),
             )
             prof[g] = prof_g.to(prof.dtype)
             mask[g] = 1.0

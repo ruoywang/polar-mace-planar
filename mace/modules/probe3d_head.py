@@ -121,18 +121,28 @@ class Probe3DResidualHead(torch.nn.Module):
         return oh
 
     # -- core chunk evaluation ------------------------------------------
+    # The whole edge-level computation runs in float32 (the residual is
+    # O(1e-2) e/A^3; f32 relative precision 1e-7 is far below the model
+    # error), weights cast per call from the f64 masters so gradients flow
+    # back to them. Output is cast to the caller's dtype; the electrostatics
+    # stay float64. Zero-init identity is exact in any dtype.
     def _eval_chunk(
         self,
-        pts: torch.Tensor,          # [P, 3] cartesian
-        proj_flat: torch.Tensor,    # [N, n_inv * ...] flattened projected feats
+        pts: torch.Tensor,          # [P, 3] cartesian, compute dtype
+        proj_flat: torch.Tensor,    # [N, sum_l proj*(2l+1)] compute dtype
         species_oh: torch.Tensor,   # [N, S]
         frac_atoms: torch.Tensor,   # [N, 3]
         cell: torch.Tensor,         # [3, 3]
         inv_cell: torch.Tensor,     # [3, 3]
         z_lo: torch.Tensor,
         z_hi: torch.Tensor,
+        w_gate1: torch.Tensor, b_gate1: torch.Tensor,
+        w_gate2: torch.Tensor, b_gate2: torch.Tensor,
+        w_out1: torch.Tensor, b_out1: torch.Tensor,
+        w_out2: torch.Tensor, b_out2: torch.Tensor,
+        w_out3: torch.Tensor, b_out3: torch.Tensor,
     ) -> torch.Tensor:
-        dt = pts.dtype
+        F = torch.nn.functional
         frac_p = pts @ inv_cell
         d = frac_p[:, None, :] - frac_atoms[None, :, :]
         d = torch.cat([d[..., 0:2] - torch.round(d[..., 0:2]), d[..., 2:3]], dim=-1)
@@ -148,7 +158,6 @@ class Probe3DResidualHead(torch.nn.Module):
         sh = o3.spherical_harmonics(
             list(range(len(self.blocks_by_l))), ev, normalize=True, normalization="component"
         )
-        # unflatten projected feats per l and contract with Ylm
         invs = []
         col = 0
         for l in range(len(self.blocks_by_l)):
@@ -159,8 +168,9 @@ class Probe3DResidualHead(torch.nn.Module):
             col += width
         inv_all = torch.cat(invs, dim=-1)  # [E, n_inv]
 
-        rbf = torch.exp(-self.rbf_gamma * (r[:, None] - self.rbf_centers.to(dt)[None, :]) ** 2)
-        gate = self.gate_mlp(torch.cat([rbf, species_oh[ea]], dim=-1).to(self.gate_mlp[0].weight.dtype)).to(dt)
+        rbf = torch.exp(-self.rbf_gamma * (r[:, None] - self.rbf_centers.to(r.dtype)[None, :]) ** 2)
+        g_in = torch.cat([rbf, species_oh[ea]], dim=-1)
+        gate = F.linear(F.silu(F.linear(g_in, w_gate1, b_gate1)), w_gate2, b_gate2)
         msg = inv_all * gate * env[:, None]
 
         probe = pts.new_zeros((pts.shape[0], self.n_inv))
@@ -168,16 +178,17 @@ class Probe3DResidualHead(torch.nn.Module):
         coord = pts.new_zeros((pts.shape[0],))
         coord.index_add_(0, ep, env)
 
-        raw = self.out_mlp(
-            torch.cat([probe, coord[:, None]], dim=-1).to(self.out_mlp[0].weight.dtype)
-        ).squeeze(-1).to(dt)
+        h = torch.cat([probe, coord[:, None]], dim=-1)
+        h = F.silu(F.linear(h, w_out1, b_out1))
+        h = F.silu(F.linear(h, w_out2, b_out2))
+        raw = F.linear(h, w_out3, b_out3).squeeze(-1)
 
         # smooth z-window
         z = pts[:, 2]
         w_lo = torch.clamp((z - z_lo) / self.edge_width, 0.0, 1.0)
         w_hi = torch.clamp((z_hi - z) / self.edge_width, 0.0, 1.0)
         wz = 0.5 * (1.0 - torch.cos(torch.pi * w_lo)) * 0.5 * (1.0 - torch.cos(torch.pi * w_hi))
-        return raw * self.y_scale.to(dt) * wz
+        return raw * self.y_scale.to(raw.dtype) * wz
 
     # -- public evaluators ------------------------------------------------
     def points_residual(
@@ -188,35 +199,44 @@ class Probe3DResidualHead(torch.nn.Module):
         cell: torch.Tensor,         # [3, 3]
         points: torch.Tensor,       # [P, 3] cartesian
         z_window: Tuple[float, float],
-        chunk: int = 16384,
+        chunk: int = 131072,
         use_ckpt: bool = False,
     ) -> torch.Tensor:
-        dt = node_feats.dtype
-        cell = cell.to(dt)
-        inv_cell = torch.linalg.inv(cell)
-        frac_atoms = positions.to(dt) @ inv_cell
-        proj_blocks = self.project_feats(node_feats)
+        dt_out = node_feats.dtype
+        ct = torch.float32  # edge-level compute dtype (see _eval_chunk note)
+        cell_c = cell.to(ct)
+        inv_cell = torch.linalg.inv(cell.to(torch.float64)).to(ct)
+        frac_atoms = (positions.to(torch.float64) @ torch.linalg.inv(cell.to(torch.float64))).to(ct)
+        proj_blocks = self.project_feats(node_feats.to(ct))
         proj_flat = torch.cat([b.reshape(b.shape[0], -1) for b in proj_blocks], dim=-1)
-        species_oh = self.species_onehot(node_z, dt)
-        z_lo = cell.new_tensor(float(z_window[0]))
-        z_hi = cell.new_tensor(float(z_window[1]))
+        species_oh = self.species_onehot(node_z, ct)
+        z_lo = cell_c.new_tensor(float(z_window[0]))
+        z_hi = cell_c.new_tensor(float(z_window[1]))
+        wb = [t.to(ct) for t in (
+            self.gate_mlp[0].weight, self.gate_mlp[0].bias,
+            self.gate_mlp[2].weight, self.gate_mlp[2].bias,
+            self.out_mlp[0].weight, self.out_mlp[0].bias,
+            self.out_mlp[2].weight, self.out_mlp[2].bias,
+            self.out_mlp[4].weight, self.out_mlp[4].bias,
+        )]
 
         outs = []
         for c0 in range(0, points.shape[0], chunk):
-            pts = points[c0 : c0 + chunk].to(dt)
+            pts = points[c0 : c0 + chunk].to(ct)
             if use_ckpt and torch.is_grad_enabled():
                 from torch.utils.checkpoint import checkpoint as _ckpt
 
                 val = _ckpt(
                     self._eval_chunk, pts, proj_flat, species_oh, frac_atoms,
-                    cell, inv_cell, z_lo, z_hi, use_reentrant=False,
+                    cell_c, inv_cell, z_lo, z_hi, *wb, use_reentrant=False,
                 )
             else:
                 val = self._eval_chunk(
-                    pts, proj_flat, species_oh, frac_atoms, cell, inv_cell, z_lo, z_hi
+                    pts, proj_flat, species_oh, frac_atoms, cell_c, inv_cell,
+                    z_lo, z_hi, *wb,
                 )
             outs.append(val)
-        return torch.cat(outs, dim=0)
+        return torch.cat(outs, dim=0).to(dt_out)
 
     def profile_z(
         self,

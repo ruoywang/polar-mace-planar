@@ -293,7 +293,7 @@ class PB1DBackend:
         ckpt_closure: bool = True,
         probe_head=None,
         probe_window: Optional[tuple] = None,
-        probe_chunk: int = 16384,
+        probe_chunk: int = 131072,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device

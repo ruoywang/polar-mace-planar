@@ -550,7 +550,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="probe3d: smooth window edge width (A)",
     )
     parser.add_argument(
-        "--probe3d_grid_chunk", type=int, default=16384,
+        "--probe3d_grid_chunk", type=int, default=131072,
         help="probe3d: points per evaluation chunk (memory bound)",
     )
     parser.add_argument(
