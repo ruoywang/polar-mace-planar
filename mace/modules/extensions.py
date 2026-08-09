@@ -1677,6 +1677,15 @@ class PolarMACE(ScaleShiftMACE):
                 probe_window_g = self._probe3d_window(
                     node_z_all[atom_mask], pos_g[:, 2]
                 )
+            if os.environ.get("MACE_PROBE3D_DEBUG"):
+                print(
+                    f"PROBE3DDBG sid={sid} use_probe={use_probe} probe_on={probe_on} "
+                    f"use_head={use_head} want_grad={want_grad} "
+                    f"feats={'None' if feats_g is None else tuple(feats_g.shape)} "
+                    f"feats_rg={None if feats_g is None else feats_g.requires_grad} "
+                    f"window={probe_window_g}",
+                    flush=True,
+                )
             try:
                 result = backend.solve_graph(
                     positions=pos_g,

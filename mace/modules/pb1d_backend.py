@@ -372,6 +372,14 @@ class PB1DBackend:
         # potential all see the composite density consistently.
         residual_prof_phys_z = None
         probe_stats = {}
+        if os.environ.get("MACE_PROBE3D_DEBUG"):
+            print(
+                f"PROBE3DDBG-BACKEND sid={sample_id} "
+                f"probe_head={'set' if probe_head is not None else 'None'} "
+                f"node_feats={'set' if node_feats is not None else 'None'} "
+                f"window={probe_window} want_grad={want_grad}",
+                flush=True,
+            )
         if probe_head is not None and node_feats is not None and probe_window is not None:
             with self._Phase(self, "2b_probe", device):
                 cart = getattr(grid, "_probe3d_cart", None)
