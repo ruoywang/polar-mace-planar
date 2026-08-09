@@ -291,6 +291,9 @@ class PB1DBackend:
         head=None,
         q_tot: Optional[torch.Tensor] = None,
         ckpt_closure: bool = True,
+        probe_head=None,
+        probe_window: Optional[tuple] = None,
+        probe_chunk: int = 16384,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -362,6 +365,36 @@ class PB1DBackend:
                 net_g = _ckpt(_assemble, radial_coeffs, use_reentrant=False)
             else:
                 net_g = _assemble(radial_coeffs)
+
+        # probe3d residual: net = GTO + residual. Evaluated on the PB grid,
+        # windowed to the solvent region, mean-subtracted (zero net charge),
+        # then added spectrally so the electron density, cavity, dipole and
+        # potential all see the composite density consistently.
+        residual_prof_phys_z = None
+        probe_stats = {}
+        if probe_head is not None and node_feats is not None and probe_window is not None:
+            with self._Phase(self, "2b_probe", device):
+                cart = getattr(grid, "_probe3d_cart", None)
+                if cart is None:
+                    fx = torch.arange(nx, device=device, dtype=dt) / nx
+                    fy = torch.arange(ny, device=device, dtype=dt) / ny
+                    fz = torch.arange(nz, device=device, dtype=dt) / nz
+                    gxf, gyf, gzf = torch.meshgrid(fx, fy, fz, indexing="ij")
+                    frac_pts = torch.stack([gxf, gyf, gzf], dim=-1).reshape(-1, 3)
+                    cart = frac_pts @ cell64
+                    grid._probe3d_cart = cart
+                res_phys = probe_head.points_residual(
+                    node_feats.to(dt), node_z, pos64.detach(), cell64, cart,
+                    probe_window, chunk=probe_chunk, use_ckpt=want_grad,
+                ).view(nx, ny, nz)
+                res_values = res_phys * volume
+                res_values = res_values - res_values.mean()
+                net_g = net_g + grid.fft(res_values)
+                residual_prof_phys_z = res_phys.mean(dim=(0, 1))
+                probe_stats = {
+                    "probe_rms": float(res_phys.detach().pow(2).mean().sqrt()),
+                    "probe_absmax": float(res_phys.detach().abs().max()),
+                }
         with self._Phase(self, "3_poisson", device):
             net_values = grid.ifft_real(net_g)
             n_e_values = neutral_v - net_values
@@ -462,6 +495,7 @@ class PB1DBackend:
             "layer_mean": float(layer_mean_t.detach()),
             "mu_bound": float(mu_bound_t.detach()),
             **delta_stats,
+            **probe_stats,
         }
         if self._timing_on:
             every = int(os.environ.get("MACE_PB1D_TIMING_EVERY", "100"))
@@ -488,4 +522,5 @@ class PB1DBackend:
             "rms_last": float(out["rms_last"]),
             "prior_solve": prior_s,
             "delta_p": delta_p,
+            "residual_prof_phys_z": residual_prof_phys_z,
         }

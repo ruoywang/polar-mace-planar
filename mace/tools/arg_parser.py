@@ -517,6 +517,47 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="pb1d: Newton max outer iterations per fixsol step",
     )
     parser.add_argument(
+        "--probe3d_enabled", type=str2bool, default=False,
+        help="probe3d: flexible residual on the GTO net density "
+        "(net = GTO + residual, enters the PB electrostatics)",
+    )
+    parser.add_argument(
+        "--probe3d_rc", type=float, default=6.0,
+        help="probe3d: atom->point aggregation cutoff (A)",
+    )
+    parser.add_argument(
+        "--probe3d_nrbf", type=int, default=16,
+        help="probe3d: radial basis size",
+    )
+    parser.add_argument(
+        "--probe3d_proj", type=int, default=32,
+        help="probe3d: per-l projected channels",
+    )
+    parser.add_argument(
+        "--probe3d_hidden", type=int, default=256,
+        help="probe3d: output MLP hidden width",
+    )
+    parser.add_argument(
+        "--probe3d_window_margin", type=float, default=3.0,
+        help="probe3d: z-window margin around non-excluded atoms (A)",
+    )
+    parser.add_argument(
+        "--probe3d_window_exclude_z", type=str, default="28",
+        help="probe3d: comma-separated Z excluded from the window rule (slab metal)",
+    )
+    parser.add_argument(
+        "--probe3d_edge_width", type=float, default=1.0,
+        help="probe3d: smooth window edge width (A)",
+    )
+    parser.add_argument(
+        "--probe3d_grid_chunk", type=int, default=16384,
+        help="probe3d: points per evaluation chunk (memory bound)",
+    )
+    parser.add_argument(
+        "--probe3d_profile_nxy", type=int, default=8,
+        help="probe3d: xy lattice per z for plane-average profiles",
+    )
+    parser.add_argument(
         "--solvent_pb_config",
         help=(
             "JSON file with the PB 'solvation' parameter block "

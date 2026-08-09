@@ -819,6 +819,16 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb1d_c_max: float = 0.25,
         solvent_pb1d_upsample: int = 2,
         solvent_pb1d_max_outer: int = 12,
+        probe3d_enabled: bool = False,
+        probe3d_rc: float = 6.0,
+        probe3d_nrbf: int = 16,
+        probe3d_proj: int = 32,
+        probe3d_hidden: int = 256,
+        probe3d_window_margin: float = 3.0,
+        probe3d_window_exclude_z: str = "28",
+        probe3d_edge_width: float = 1.0,
+        probe3d_grid_chunk: int = 16384,
+        probe3d_profile_nxy: int = 8,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -1207,6 +1217,26 @@ class PolarMACE(ScaleShiftMACE):
                 sigma_z=self.solvent_pb1d_sigma_z,
                 c_max=self.solvent_pb1d_c_max,
             )
+        # probe3d: flexible residual on the GTO net density (net = GTO + probe)
+        self.probe3d_head = None
+        self.probe3d_window_margin = float(probe3d_window_margin)
+        self.probe3d_window_exclude_z = [
+            int(z) for z in str(probe3d_window_exclude_z).split(",") if str(z).strip()
+        ]
+        self.probe3d_grid_chunk = int(probe3d_grid_chunk)
+        self.probe3d_profile_nxy = int(probe3d_profile_nxy)
+        if solvent_model == "pb1d" and bool(probe3d_enabled):
+            from .probe3d_head import Probe3DResidualHead
+
+            self.probe3d_head = Probe3DResidualHead(
+                irreps_per_layer=[str(hidden_irreps)] * int(num_interactions),
+                zs=[int(z) for z in self.atomic_numbers.tolist()],
+                rc=float(probe3d_rc),
+                n_rbf=int(probe3d_nrbf),
+                proj=int(probe3d_proj),
+                hidden=int(probe3d_hidden),
+                edge_width=float(probe3d_edge_width),
+            )
         self.solvent_center_residual = torch.nn.Sequential(
             torch.nn.Linear(
                 hidden_irreps.dim * num_interactions * 2
@@ -1540,6 +1570,7 @@ class PolarMACE(ScaleShiftMACE):
         prev_data=None,
         write_cache=True,
         use_cache_rows=False,
+        use_probe=False,
     ):
         """Shared per-graph loop for the pb1d stages.
 
@@ -1575,6 +1606,9 @@ class PolarMACE(ScaleShiftMACE):
         prof_feat_grad = positions.new_zeros(num_graphs, 1024) if want_grad else None
         rho_bound_prof = positions.new_zeros(num_graphs, 512)
         rho_bound_mask = positions.new_zeros(num_graphs)
+        probe_on = bool(use_probe) and getattr(self, "probe3d_head", None) is not None
+        probe_prof = positions.new_zeros(num_graphs, 512)
+        probe_prof_mask = positions.new_zeros(num_graphs)
 
         for g in range(num_graphs):
             cell_g = cells[g]
@@ -1638,6 +1672,11 @@ class PolarMACE(ScaleShiftMACE):
                     node_feats_mixed[atom_mask]
                     if want_grad else node_feats_mixed[atom_mask].detach()
                 )
+            probe_window_g = None
+            if probe_on and feats_g is not None:
+                probe_window_g = self._probe3d_window(
+                    node_z_all[atom_mask], pos_g[:, 2]
+                )
             try:
                 result = backend.solve_graph(
                     positions=pos_g,
@@ -1652,6 +1691,9 @@ class PolarMACE(ScaleShiftMACE):
                     head=self.pb1d_head if use_head else None,
                     q_tot=total_charge_g[g].detach(),
                     ckpt_closure=True,  # unckpt tested twice, OOMs both eval (retention) and train (PB step footprint) on 40 GB
+                    probe_head=self.probe3d_head if probe_window_g is not None else None,
+                    probe_window=probe_window_g,
+                    probe_chunk=self.probe3d_grid_chunk,
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1723,6 +1765,13 @@ class PolarMACE(ScaleShiftMACE):
                 rho_bound_prof[g] = resample_profile_periodic_torch(
                     rb_g, H_g, 512, False).detach()
             rho_bound_mask[g] = 1.0
+            rp = result.get("residual_prof_phys_z")
+            if rp is not None:
+                rp = resample_profile_periodic_torch(
+                    rp.to(positions.dtype), H_g, 512, False
+                )
+                probe_prof[g] = rp if prof_feat_grad is not None else rp.detach()
+                probe_prof_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
             if os.environ.get("MACE_PB_DEBUG"):
                 print(
@@ -1750,10 +1799,98 @@ class PolarMACE(ScaleShiftMACE):
             "solvent_mu": solvent_mu,
             "rho_bound_1d": rho_bound_prof,
             "rho_bound_1d_mask": rho_bound_mask,
+            "probe_prof_512": probe_prof,
+            "probe_prof_mask": probe_prof_mask,
         }
         if prof_feat_grad is not None:
             out["profile_features_grad"] = prof_feat_grad
         return out
+
+    @torch.jit.ignore
+    def _probe3d_window(self, node_z_graph, pos_z_graph):
+        """Supervised-window rule recovered from the training grids:
+        [min_z(non-excluded atoms) - margin, max_z(+margin)]. Ni (the slab
+        metal) is excluded by default; margin 3.0 A matches valid_iz to mA."""
+        keep = torch.ones_like(node_z_graph, dtype=torch.bool)
+        for z in self.probe3d_window_exclude_z:
+            keep &= node_z_graph != z
+        zs = pos_z_graph[keep] if bool(keep.any()) else pos_z_graph
+        return (
+            float(zs.min()) - self.probe3d_window_margin,
+            float(zs.max()) + self.probe3d_window_margin,
+        )
+
+    @torch.jit.ignore
+    def _probe3d_forward_extras(
+        self, data, positions, cell, node_feats_out, num_graphs, pb_solvent_data
+    ):
+        """Residual at the attached density-loss points (all graphs) plus a
+        plane-averaged residual profile for graphs the solvent loop did not
+        cover (unsolvated frames, fallbacks). Ensures the probe head
+        participates in every step (DDP) and the potential_1d loss sees the
+        same composite density the electrostatics saw."""
+        node_z_all = self.atomic_numbers[
+            torch.argmax(data["node_attrs"], dim=-1)
+        ].detach()
+        cells = cell.detach()
+        if cells.dim() == 2 and cells.shape[1] == 3:
+            cells = cells.view(-1, 3, 3)
+        elif cells.dim() == 2 and cells.shape[1] == 9:
+            cells = cells.view(-1, 3, 3)
+        elif cells.dim() == 1:
+            cells = cells.view(-1, 3, 3)
+
+        pts = data.get("density_probe_points")
+        gidx = data.get("density_probe_graph_index")
+        res_pts = None
+        if pts is not None and gidx is not None:
+            res_pts = positions.new_zeros(pts.shape[0])
+            for g in range(num_graphs):
+                m_p = gidx.view(-1) == g
+                if not bool(m_p.any()):
+                    continue
+                m_a = data["batch"] == g
+                win = self._probe3d_window(
+                    node_z_all[m_a], positions[m_a][:, 2].detach()
+                )
+                res_pts[m_p] = self.probe3d_head.points_residual(
+                    node_feats_out[m_a],
+                    node_z_all[m_a],
+                    positions[m_a].detach(),
+                    cells[g].to(positions.dtype),
+                    pts[m_p].to(positions.dtype),
+                    win,
+                    chunk=self.probe3d_grid_chunk,
+                ).to(res_pts.dtype)
+
+        if pb_solvent_data is not None and "probe_prof_512" in pb_solvent_data:
+            prof = pb_solvent_data["probe_prof_512"]
+            mask = pb_solvent_data["probe_prof_mask"]
+        else:
+            prof = positions.new_zeros(num_graphs, 512)
+            mask = positions.new_zeros(num_graphs)
+        for g in range(num_graphs):
+            if bool(mask[g] > 0.5):
+                continue
+            m_a = data["batch"] == g
+            if not bool(m_a.any()):
+                continue
+            win = self._probe3d_window(
+                node_z_all[m_a], positions[m_a][:, 2].detach()
+            )
+            prof_g = self.probe3d_head.profile_z(
+                node_feats_out[m_a],
+                node_z_all[m_a],
+                positions[m_a].detach(),
+                cells[g].to(positions.dtype),
+                win,
+                nz=512,
+                nxy=self.probe3d_profile_nxy,
+                chunk=self.probe3d_grid_chunk,
+            )
+            prof[g] = prof_g.to(prof.dtype)
+            mask[g] = 1.0
+        return res_pts, prof, mask
 
     @torch.jit.ignore
     def _pb1d_stage1(self, data: Dict[str, torch.Tensor], positions: torch.Tensor,
@@ -1788,6 +1925,7 @@ class PolarMACE(ScaleShiftMACE):
             node_feats_mixed=node_feats_mixed, use_head=True,
             want_grad=self.training or torch.is_grad_enabled(),
             use_cache_rows=freeze, write_cache=not freeze,
+            use_probe=True,
         )
         return out
 
@@ -2753,6 +2891,20 @@ class PolarMACE(ScaleShiftMACE):
             else positions.new_zeros(num_graphs)
         )
 
+        # probe3d residual: values at the attached density-loss points and
+        # plane-averaged profiles (net = GTO + residual everywhere).
+        probe_residual_points = None
+        probe_prof_512 = None
+        probe_prof_mask = None
+        if getattr(self, "probe3d_head", None) is not None:
+            (
+                probe_residual_points,
+                probe_prof_512,
+                probe_prof_mask,
+            ) = self._probe3d_forward_extras(
+                data, positions, cell, node_feats_out, num_graphs, pb_solvent_data
+            )
+
         return {
             "energy": total_energy,
             "node_energy": node_e0.clone().double() + node_inter_es.clone().double(),
@@ -2768,6 +2920,9 @@ class PolarMACE(ScaleShiftMACE):
             "node_feats": node_feats_out,
             "density_coefficients": charge_density_mul_ir,
             "charge_density_radial_coefficients": charge_density_radial_coefficients,
+            "probe_residual_points": probe_residual_points,
+            "probe_prof_512": probe_prof_512,
+            "probe_prof_mask": probe_prof_mask,
             "spin_density": spin_density_mul_ir,
             "charges_history": torch.stack(
                 [spin_charge_density_mul_ir.clone().detach()], dim=-1

@@ -744,6 +744,7 @@ def density_3d_residuals(
         attached_points = _batch_get(ref, "density_probe_points")
         attached_rho = _batch_get(ref, "density_probe_rho")
         attached_graph_index = _batch_get(ref, "density_probe_graph_index")
+        graph_mask = None
         if (
             attached_points is not None
             and attached_rho is not None
@@ -779,6 +780,15 @@ def density_3d_residuals(
             cell=cells[graph_idx].to(ref["positions"].dtype),
             sigma=density_smearing_width,
         )
+        # probe3d: the model's net density is GTO + residual; supervise the sum
+        probe_res = pred.get("probe_residual_points")
+        if probe_res is not None:
+            if graph_mask is None:
+                raise ValueError(
+                    "probe3d residual supervision requires attached density "
+                    "probe points (attach_density_3d_samples_to_batch)"
+                )
+            rho_pred = rho_pred + probe_res.view(-1)[graph_mask].to(rho_pred.dtype)
         losses.append(rho_pred - rho_ref)
     if not losses:
         return None
@@ -1037,6 +1047,12 @@ def potential_1d_profile_residuals(
             sigma=density_smearing_width,
             axis=axis,
         )
+        # probe3d: net = GTO + probe residual — the 1D profile must see the
+        # same composite density the electrostatics saw
+        probe_prof = pred.get("probe_prof_512")
+        if probe_prof is not None:
+            prof_g = probe_prof.view(num_graphs, -1)[graph_idx].to(dtype=z_ref.dtype)
+            rho_residual = rho_residual + _resample_profile_to_zref(prof_g, height, z_ref)
         total_charge = total_charge_ref.view(-1)[graph_idx]
         solvent_center = pred["solv_center"].view(-1)[graph_idx]
         rho_solvent = _solvent_profile_1d_torch(
