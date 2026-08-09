@@ -85,6 +85,13 @@ class Probe3DResidualHead(torch.nn.Module):
         self.register_buffer("rbf_centers", centers)
         self.rbf_gamma = (n_rbf / rc) ** 2
 
+        # held module: the o3.spherical_harmonics FUNCTIONAL builds a fresh
+        # ScriptModule per call — measurable per-chunk overhead on grid scans
+        self.sh_module = o3.SphericalHarmonics(
+            o3.Irreps.spherical_harmonics(max_l),
+            normalize=True,
+            normalization="component",
+        )
         self.gate_mlp = torch.nn.Sequential(
             torch.nn.Linear(n_rbf + len(self.zs), gate_hidden),
             torch.nn.SiLU(),
@@ -155,9 +162,7 @@ class Probe3DResidualHead(torch.nn.Module):
         r = dist[mask].clamp(min=1.0e-9)
 
         env = 0.5 * (torch.cos(torch.pi * torch.clamp(r / self.rc, max=1.0)) + 1.0)
-        sh = o3.spherical_harmonics(
-            list(range(len(self.blocks_by_l))), ev, normalize=True, normalization="component"
-        )
+        sh = self.sh_module(ev)
         invs = []
         col = 0
         for l in range(len(self.blocks_by_l)):
