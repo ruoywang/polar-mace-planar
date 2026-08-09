@@ -1228,6 +1228,14 @@ class PolarMACE(ScaleShiftMACE):
         if solvent_model == "pb1d" and bool(probe3d_enabled):
             from .probe3d_head import Probe3DResidualHead
 
+            # RNG isolation: building the head consumes global RNG draws and
+            # would shift the init of every later layer, breaking same-seed
+            # A/B against the probe-free baseline (measured: epoch-0 losses
+            # 167 vs 77). Save/restore so the backbone init is bit-identical.
+            _rng_state = torch.get_rng_state()
+            _rng_cuda = (
+                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            )
             self.probe3d_head = Probe3DResidualHead(
                 irreps_per_layer=[str(hidden_irreps)] * int(num_interactions),
                 zs=[int(z) for z in self.atomic_numbers.tolist()],
@@ -1237,6 +1245,9 @@ class PolarMACE(ScaleShiftMACE):
                 hidden=int(probe3d_hidden),
                 edge_width=float(probe3d_edge_width),
             )
+            torch.set_rng_state(_rng_state)
+            if _rng_cuda is not None:
+                torch.cuda.set_rng_state_all(_rng_cuda)
         self.solvent_center_residual = torch.nn.Sequential(
             torch.nn.Linear(
                 hidden_irreps.dim * num_interactions * 2
