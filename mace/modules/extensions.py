@@ -1691,9 +1691,11 @@ class PolarMACE(ScaleShiftMACE):
                     head=self.pb1d_head if use_head else None,
                     q_tot=total_charge_g[g].detach(),
                     ckpt_closure=True,  # unckpt tested twice, OOMs both eval (retention) and train (PB step footprint) on 40 GB
-                    probe_head=self.probe3d_head if probe_window_g is not None else None,
+                    probe_head=(
+                        self.probe3d_head if probe_window_g is not None else None
+                    ),
                     probe_window=probe_window_g,
-                    probe_chunk=self.probe3d_grid_chunk,
+                    probe_chunk=getattr(self, "probe3d_grid_chunk", 16384),
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1811,14 +1813,13 @@ class PolarMACE(ScaleShiftMACE):
         """Supervised-window rule recovered from the training grids:
         [min_z(non-excluded atoms) - margin, max_z(+margin)]. Ni (the slab
         metal) is excluded by default; margin 3.0 A matches valid_iz to mA."""
+        margin = float(getattr(self, "probe3d_window_margin", 3.0))
+        exclude = getattr(self, "probe3d_window_exclude_z", [28])
         keep = torch.ones_like(node_z_graph, dtype=torch.bool)
-        for z in self.probe3d_window_exclude_z:
+        for z in exclude:
             keep &= node_z_graph != z
         zs = pos_z_graph[keep] if bool(keep.any()) else pos_z_graph
-        return (
-            float(zs.min()) - self.probe3d_window_margin,
-            float(zs.max()) + self.probe3d_window_margin,
-        )
+        return (float(zs.min()) - margin, float(zs.max()) + margin)
 
     @torch.jit.ignore
     def _probe3d_forward_extras(
@@ -1860,7 +1861,7 @@ class PolarMACE(ScaleShiftMACE):
                     cells[g].to(positions.dtype),
                     pts[m_p].to(positions.dtype),
                     win,
-                    chunk=self.probe3d_grid_chunk,
+                    chunk=getattr(self, "probe3d_grid_chunk", 16384),
                 ).to(res_pts.dtype)
 
         if pb_solvent_data is not None and "probe_prof_512" in pb_solvent_data:
@@ -1885,8 +1886,8 @@ class PolarMACE(ScaleShiftMACE):
                 cells[g].to(positions.dtype),
                 win,
                 nz=512,
-                nxy=self.probe3d_profile_nxy,
-                chunk=self.probe3d_grid_chunk,
+                nxy=getattr(self, "probe3d_profile_nxy", 8),
+                chunk=getattr(self, "probe3d_grid_chunk", 16384),
             )
             prof[g] = prof_g.to(prof.dtype)
             mask[g] = 1.0
