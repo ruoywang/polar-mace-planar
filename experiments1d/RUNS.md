@@ -66,3 +66,14 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   (3-partition precedent); rhob weight 1.0 (new normalised semantics);
   NO charge_density_1d (single-variable). 500 epochs.
 - Code: pb-1d-charge1d @ 71c26b9 (same as add1Dcharge experiment).
+
+## 2026-08-09 probe3d 150-epoch trend run (claude/3-charge_probe/g150)
+- Code: probe3d branch @ bcd2556 (residual into PB electrostatics, sum-only
+  density supervision, RNG-isolated head init; NO cost optimizations yet —
+  trend attributable to the design alone).
+- Config: 6-larger_chargew production config + probe3d_enabled, seed 123,
+  150 epochs, from scratch. Jobs 3355009 + 3355010 (chained resume, 24h each).
+- Gate34 verdict for the record (jobs 3353384+3353636): mechanism healthy
+  (probe_rms ~1e-4, solves clean); PB-segment epoch ~1100 s vs baseline
+  ~105 s (10x); epoch-33 1D metrics ~2x behind baseline — inconclusive at
+  4 PB epochs, hence this run.
