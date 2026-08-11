@@ -2455,7 +2455,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 # weight 1.0 ~ measured contribution parity (probe 2026-08-03)
                 signal_ms = float(self.charge_density_1d_targets.get("signal_ms", 1.0)) \
                     if isinstance(self.charge_density_1d_targets, dict) else 1.0
-                loss = loss + self.charge_density_1d_weight * 0.3 * (
+                loss = loss + self.charge_density_1d_weight * 3.0 * (
                     loss_charge_density_1d / max(signal_ms, 1.0e-30)
                 )
         if self.solvent_center_weight > 1e-12:
