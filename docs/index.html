@@ -75,15 +75,6 @@
   <p class="chlede">What pb1d is: a nonlinear Poisson&ndash;Boltzmann solvent collapsed
   onto a 1-D closure inside PolarMACE. Start here.</p>
 
-  <a class="report" href="./pb1d-scf-convergence.html">
-    <div class="date">2026-08-07<span class="tag">analysis</span></div>
-    <h2>Convergence of the Lagged Solvent Field</h2>
-    <p>Three field states on 80 charged val/test frames: a brand-new structure costs
-    2&ndash;5 meV in one pass (rms deviation 8 meV from the converged field); one repeat
-    closes it to 0.5 meV rms &mdash; the fixed point converges in a single iteration.
-    Val/test need no special handling and cannot leak labels.</p>
-  </a>
-
   <a class="report" href="./pb1d-v1-overview.html">
     <div class="date">2026-07-15<span class="tag">overview</span></div>
     <h2>The 1-D Closure Route (v1): Architecture, Training, Results</h2>
@@ -132,10 +123,19 @@
   </div>
 
   <div class="chapter" id="ch-mix400">
-  <button class="section" aria-expanded="true">3 · train_all — adding the neutral twins (600 structures)<span class="cnt">1 page</span><span class="chev">&#9662;</span></button>
+  <button class="section" aria-expanded="true">3 · train_all — adding the neutral twins (600 structures)<span class="cnt">2 pages</span><span class="chev">&#9662;</span></button>
   <div class="chbody">
   <p class="chlede">The current model: 400 charged frames plus 200 neutral twins, giving it
   both charge states of the same geometries.</p>
+
+  <a class="report" href="./pb1d-scf-convergence.html">
+    <div class="date">2026-08-07<span class="tag">analysis</span></div>
+    <h2>Convergence of the Lagged Solvent Field</h2>
+    <p>Three field states on 80 charged val/test frames: a brand-new structure costs
+    2&ndash;5 meV in one pass (rms deviation 8 meV from the converged field); one repeat
+    closes it to 0.5 meV rms &mdash; the fixed point converges in a single iteration.
+    Val/test need no special handling and cannot leak labels.</p>
+  </a>
 
   <a class="report" href="./pb1d-trainall-pair-sid152.html">
     <div class="date">2026-08-04<span class="tag">result</span></div>
