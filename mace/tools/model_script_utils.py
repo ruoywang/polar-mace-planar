@@ -348,6 +348,7 @@ def _build_model(
             solvent_pb1d_c_max=getattr(args, "solvent_pb1d_c_max", 0.25),
             solvent_pb1d_upsample=getattr(args, "solvent_pb1d_upsample", 2),
             solvent_pb1d_max_outer=getattr(args, "solvent_pb1d_max_outer", 12),
+            solvent_pb1d_fresh_stage1=getattr(args, "solvent_pb1d_fresh_stage1", False),
             solvent_pb_repo=getattr(args, "solvent_pb_repo", None),
             solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.15),
             solvent_pb_fixsol_steps=getattr(args, "solvent_pb_fixsol_steps", 2),

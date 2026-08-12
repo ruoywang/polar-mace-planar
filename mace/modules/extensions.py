@@ -819,6 +819,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb1d_c_max: float = 0.25,
         solvent_pb1d_upsample: int = 2,
         solvent_pb1d_max_outer: int = 12,
+        solvent_pb1d_fresh_stage1: bool = False,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -953,6 +954,7 @@ class PolarMACE(ScaleShiftMACE):
         self.solvent_pb1d_c_max = float(solvent_pb1d_c_max)
         self.solvent_pb1d_upsample = int(solvent_pb1d_upsample)
         self.solvent_pb1d_max_outer = int(solvent_pb1d_max_outer)
+        self.solvent_pb1d_fresh_stage1 = bool(solvent_pb1d_fresh_stage1)
         self._pb1d_backend = None
         self.register_buffer(
             "fermi_level_baseline",
@@ -1588,7 +1590,17 @@ class PolarMACE(ScaleShiftMACE):
                 int(sample_ids[g].detach().cpu().item())
                 if sample_ids is not None else None
             )
-            cached = self._pb1d_cached_profile(sid) if sid is not None else None
+            # fresh_stage1 (2026-08-12): no cross-epoch profile cache — stage 1
+            # always does a fresh prior-only solve on the pre-recursion
+            # density (the former first-encounter path becomes the only
+            # path); the warm-up counter switches from cached per-sample
+            # encounters to the epoch number (identical under full-epoch
+            # training, and robust across restarts).
+            fresh = bool(getattr(self, "solvent_pb1d_fresh_stage1", False))
+            cached = (
+                self._pb1d_cached_profile(sid)
+                if (sid is not None and not fresh) else None
+            )
             if use_cache_rows and cached is not None:
                 prof_feat[g] = cached["feat"].to(positions.device, positions.dtype)
                 prof_energy[g] = cached["energy"].to(positions.device, positions.dtype)
@@ -1602,7 +1614,10 @@ class PolarMACE(ScaleShiftMACE):
             warmup = self.solvent_pb1d_warmup_encounters
             training_step = bool(getattr(self, "_pb1d_training_flag", False))
             if warmup > 0 and training_step and sid is not None:
-                enc = int(cached.get("enc", 0)) if cached is not None else 0
+                if fresh:
+                    enc = int(getattr(self, "_pb1d_epoch", 0))
+                else:
+                    enc = int(cached.get("enc", 0)) if cached is not None else 0
                 if enc < warmup:
                     fbw = self._pb1d_planar_result(
                         g, cell_g, H_g, planar_center, total_charge_g, positions)
@@ -1616,7 +1631,7 @@ class PolarMACE(ScaleShiftMACE):
                     layer_mean[g] = fbw["layer_mean"]
                     if prof_feat_grad is not None:
                         prof_feat_grad[g] = prof_feat[g]
-                    if write_cache and use_head:  # stage 2 counts the encounter
+                    if write_cache and use_head and not fresh:  # stage 2 counts the encounter
                         self._pb1d_store_profile(sid, {
                             "feat": prof_feat[g].detach().to(torch.float32).cpu(),
                             "energy": prof_energy[g].detach().to(torch.float32).cpu(),
@@ -1732,7 +1747,7 @@ class PolarMACE(ScaleShiftMACE):
                     f"diag={backend.last_diagnostics}",
                     flush=True,
                 )
-            if write_cache and sid is not None:
+            if write_cache and sid is not None and not fresh:
                 self._pb1d_store_profile(sid, {
                     "feat": prof_feat[g].detach().to(torch.float32).cpu(),
                     "energy": prof_energy[g].detach().to(torch.float32).cpu(),

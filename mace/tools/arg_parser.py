@@ -517,6 +517,21 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="pb1d: Newton max outer iterations per fixsol step",
     )
     parser.add_argument(
+        "--occ_aug_file", type=str, default=None,
+        help="npz of PAW augmentation-occupancy targets (extract_occ.py)",
+    )
+    parser.add_argument(
+        "--occ_aug_weight", type=float, default=0.0,
+        help="weight for the auxiliary augmentation-occupancy loss "
+        "(element-wise signal-ms normalized; 1.0 = sensible default)",
+    )
+    parser.add_argument(
+        "--solvent_pb1d_fresh_stage1", type=str2bool, default=False,
+        help="pb1d: stage 1 always does a fresh prior-only solve on the "
+        "pre-recursion density (no cross-epoch profile cache); warm-up "
+        "counts epochs instead of cached encounters",
+    )
+    parser.add_argument(
         "--solvent_pb_config",
         help=(
             "JSON file with the PB 'solvation' parameter block "

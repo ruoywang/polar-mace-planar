@@ -714,6 +714,88 @@ def _gto_density_at_points_axis2_pbc(
     return rho
 
 
+
+def _load_occ_aug_npz(path: Union[str, Path]):
+    """PAW augmentation-occupancy targets (see exp_occupancies/extract_occ.py).
+
+    Returns per-sid padded targets + masks (vectorized loss) and a per-element
+    signal mean-square for normalization (in-code convention, weight 1.0
+    stays the sensible default). Zero-variance channels (structural zeros in
+    the Ni blocks) stay in the loss under the element-level norm, so the head
+    learns to reproduce them and the output remains CHGCAR-recoverable.
+    """
+    import collections
+    import json as _json
+
+    d = np.load(path)
+    elem_len = _json.loads(bytes(d["elem_len_json"]).decode())
+    max_len = max(elem_len.values())
+    acc_s: dict = collections.defaultdict(float)
+    acc_n: dict = collections.Counter()
+    raw = {}
+    for k in d.files:
+        if not k.endswith("_occ"):
+            continue
+        sid = int(k[:-4])
+        occ, off, z = d[k], d[f"{sid}_off"], d[f"{sid}_z"]
+        raw[sid] = (occ, off, z)
+        for i in range(len(z)):
+            seg = occ[off[i] : off[i + 1]]
+            acc_s[int(z[i])] += float((seg**2).sum())
+            acc_n[int(z[i])] += len(seg)
+    z_ms = {zz: max(acc_s[zz] / acc_n[zz], 1.0e-12) for zz in acc_n}
+    targets = {}
+    for sid, (occ, off, z) in raw.items():
+        n = len(z)
+        pad = np.zeros((n, max_len), dtype=np.float32)
+        mask = np.zeros((n, max_len), dtype=bool)
+        norm = np.empty(n, dtype=np.float32)
+        for i in range(n):
+            L = off[i + 1] - off[i]
+            pad[i, :L] = occ[off[i] : off[i + 1]]
+            mask[i, :L] = True
+            norm[i] = z_ms[int(z[i])]
+        targets[sid] = {"pad": pad, "mask": mask, "norm": norm}
+    return {"targets": targets, "elem_len": elem_len, "z_ms": z_ms, "max_len": max_len}
+
+
+def occ_aug_residuals(
+    ref: Batch, pred: TensorDict, occ_targets, normalized: bool = True
+) -> Optional[torch.Tensor]:
+    occ_pred = pred.get("aug_occupancies")
+    if occ_pred is None or not occ_targets:
+        return None
+    if _batch_get(ref, "sample_id") is None:
+        return None
+    num_graphs = int(ref.ptr.numel() - 1)
+    rows = []
+    for graph_idx in range(num_graphs):
+        sid = int(_batch_get(ref, "sample_id").view(-1)[graph_idx].detach().cpu().item())
+        t = occ_targets["targets"].get(sid)
+        if t is None:
+            raise KeyError(f"sample_id {sid} is missing from occ_aug_file")
+        start = int(ref.ptr[graph_idx].item())
+        stop = int(ref.ptr[graph_idx + 1].item())
+        dev = occ_pred.device
+        pad = torch.as_tensor(t["pad"], device=dev, dtype=occ_pred.dtype)
+        mask = torch.as_tensor(t["mask"], device=dev)
+        norm = torch.as_tensor(t["norm"], device=dev, dtype=occ_pred.dtype)
+        pw = occ_pred[start:stop, : pad.shape[1]]
+        res = pw - pad
+        if normalized:
+            res = res / torch.sqrt(norm)[:, None]
+        rows.append(res[mask])
+    if not rows:
+        return None
+    return torch.cat(rows, dim=0)
+
+
+def mean_squared_error_occ_aug(ref, pred, occ_targets, ddp=None) -> Optional[torch.Tensor]:
+    r = occ_aug_residuals(ref, pred, occ_targets)
+    if r is None:
+        return None
+    return reduce_loss(torch.square(r), ddp)
+
 def density_3d_residuals(
     ref: Batch,
     pred: TensorDict,
@@ -2213,6 +2295,8 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         density_3d_sigma=0.5,
         density_3d_samples=0,
         density_3d_seed=12345,
+        occ_aug_weight=0.0,
+        occ_aug_file=None,
         potential_1d_profile_weight=0.0,
         potential_1d_profile_file=None,
         potential_1d_profile_align="mean",
@@ -2322,6 +2406,15 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         if dist.is_available() and dist.is_initialized():
             density_seed += int(dist.get_rank())
         self.density_3d_seed = density_seed
+        self.register_buffer(
+            "occ_aug_weight",
+            torch.tensor(occ_aug_weight, dtype=torch.get_default_dtype()),
+        )
+        self.occ_aug_targets = (
+            _load_occ_aug_npz(occ_aug_file)
+            if occ_aug_file is not None and float(occ_aug_weight) > 1.0e-12
+            else None
+        )
         self.density_3d_rng = random.Random(density_seed)
         self.potential_1d_profile_file = potential_1d_profile_file
         self.potential_1d_profile_targets = (
@@ -2410,6 +2503,10 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             )
             if loss_density_3d is not None:
                 loss = loss + self.density_3d_weight * loss_density_3d
+        if self.occ_aug_weight > 1e-12 and self.occ_aug_targets is not None:
+            loss_occ = mean_squared_error_occ_aug(ref, pred, self.occ_aug_targets, ddp=ddp)
+            if loss_occ is not None:
+                loss = loss + self.occ_aug_weight * loss_occ
         if self.potential_1d_profile_weight > 1e-12:
             loss_potential_1d_profile = mean_squared_error_potential_1d_profile(
                 ref=ref,

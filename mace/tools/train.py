@@ -32,6 +32,7 @@ from mace.modules.loss import (
     solvent_layer_mean_residuals,
     charge_density_1d_residuals,
     solvent_rhob_1d_residuals,
+    occ_aug_residuals,
 )
 
 from . import torch_geometric
@@ -84,6 +85,10 @@ def valid_err_log(
     if eval_metrics.get("rmse_density_3d") is not None:
         density_msg += (
             f", RMSE_density_3d={eval_metrics['rmse_density_3d']:.5f} e/A^3"
+        )
+    if eval_metrics.get("rmse_occ_aug") is not None:
+        density_msg += (
+            f", RMSE_occ_aug={eval_metrics['rmse_occ_aug']:.5f}"
         )
     if eval_metrics.get("rmse_potential_1d_profile") is not None:
         density_msg += (
@@ -269,6 +274,10 @@ def train(
         # Train
         if distributed:
             train_sampler.set_epoch(epoch)
+        # epoch-based pb1d warm-up counter (fresh_stage1 mode): with full-epoch
+        # training this equals the old per-sample encounter count exactly
+        _m = model.module if hasattr(model, "module") else model
+        _m._pb1d_epoch = int(epoch)
         if "ScheduleFree" in type(optimizer).__name__:
             optimizer.train()
         train_one_epoch(
@@ -723,6 +732,10 @@ class MACELoss(Metric):
         )
         self.add_state("delta_density_3d", default=[], dist_reduce_fx="cat")
         self.add_state(
+            "OccAug_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_occ_aug", default=[], dist_reduce_fx="cat")
+        self.add_state(
             "Potential1DProfile_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
         self.add_state("delta_potential_1d_profile", default=[], dist_reduce_fx="cat")
@@ -873,6 +886,18 @@ class MACELoss(Metric):
                     float(density_3d_res.numel()),
                     dtype=self.Density3D_computed.dtype,
                     device=self.Density3D_computed.device,
+                )
+        occ_targets = getattr(self.loss_fn, "occ_aug_targets", None)
+        if occ_targets:
+            occ_res = occ_aug_residuals(
+                ref=batch, pred=output, occ_targets=occ_targets, normalized=False
+            )
+            if occ_res is not None:
+                self.delta_occ_aug.append(occ_res.detach())
+                self.OccAug_computed += torch.tensor(
+                    float(occ_res.numel()),
+                    dtype=self.OccAug_computed.dtype,
+                    device=self.OccAug_computed.device,
                 )
         potential_1d_targets = getattr(self.loss_fn, "potential_1d_profile_targets", None)
         if potential_1d_targets:
@@ -1060,6 +1085,10 @@ class MACELoss(Metric):
             aux["mae_density_3d"] = compute_mae(delta_density_3d)
             aux["rmse_density_3d"] = compute_rmse(delta_density_3d)
             aux["q95_density_3d"] = compute_q95(delta_density_3d)
+        if self.OccAug_computed:
+            delta_occ_aug = self.convert(self.delta_occ_aug)
+            aux["mae_occ_aug"] = compute_mae(delta_occ_aug)
+            aux["rmse_occ_aug"] = compute_rmse(delta_occ_aug)
         if self.Potential1DProfile_computed:
             delta_potential_1d_profile = self.convert(self.delta_potential_1d_profile)
             aux["mae_potential_1d_profile"] = compute_mae(delta_potential_1d_profile)
