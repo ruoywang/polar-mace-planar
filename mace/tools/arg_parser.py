@@ -521,6 +521,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="npz of PAW augmentation-occupancy targets (extract_occ.py)",
     )
     parser.add_argument(
+        "--occ_aug_channel_spec", type=str, default=None,
+        help="per-element POTCAR partial-wave l lists, 'Z:l,l,...;Z:...' "
+        "(default: the NiN-mix PAW_PBE set)",
+    )
+    parser.add_argument(
         "--occ_aug_weight", type=float, default=0.0,
         help="weight for the auxiliary augmentation-occupancy loss "
         "(element-wise signal-ms normalized; 1.0 = sensible default)",

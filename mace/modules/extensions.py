@@ -820,6 +820,8 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb1d_upsample: int = 2,
         solvent_pb1d_max_outer: int = 12,
         solvent_pb1d_fresh_stage1: bool = False,
+        occ_aug_enabled: bool = False,
+        occ_aug_channel_spec: str = None,
         fermi_level_baseline: float = 0.0,
         atomic_valence_electrons: Optional[List[float]] = None,
         potential_1d_profile_file: Optional[str] = None,
@@ -1208,6 +1210,17 @@ class PolarMACE(ScaleShiftMACE):
                 n_zones=self.solvent_pb1d_zones,
                 sigma_z=self.solvent_pb1d_sigma_z,
                 c_max=self.solvent_pb1d_c_max,
+            )
+        # equivariant PAW augmentation-occupancy readout (auxiliary target;
+        # zero-init weights draw no RNG, so same-seed A/B stays bit-clean)
+        self.occ_head = None
+        if bool(occ_aug_enabled):
+            from .occ_head import OccAugHead, DEFAULT_CHANNEL_SPEC
+
+            self.occ_head = OccAugHead(
+                irreps_per_layer=[str(hidden_irreps)] * int(num_interactions),
+                zs=[int(z) for z in self.atomic_numbers.tolist()],
+                channel_spec=occ_aug_channel_spec or DEFAULT_CHANNEL_SPEC,
             )
         self.solvent_center_residual = torch.nn.Sequential(
             torch.nn.Linear(
@@ -2221,6 +2234,11 @@ class PolarMACE(ScaleShiftMACE):
         field_independent_spin_charge_density = spin_charge_density.clone()
         element_index = torch.argmax(data["node_attrs"], dim=-1)
         node_valence_electrons = self.atomic_valence_electrons[element_index]
+        aug_occupancies = None
+        if getattr(self, "occ_head", None) is not None:
+            aug_occupancies = self.occ_head(
+                node_feats_out, self.atomic_numbers[element_index]
+            )
         center_profile_inputs = self._center_profile_inputs(
             data=data,
             num_graphs=num_graphs,
@@ -2416,6 +2434,11 @@ class PolarMACE(ScaleShiftMACE):
             atomic_dipole = torch.zeros_like(positions)
         element_index = torch.argmax(data["node_attrs"], dim=-1)
         node_valence_electrons = self.atomic_valence_electrons[element_index]
+        aug_occupancies = None
+        if getattr(self, "occ_head", None) is not None:
+            aug_occupancies = self.occ_head(
+                node_feats_out, self.atomic_numbers[element_index]
+            )
         charge_density_radial_coefficients = self._radial_flat_to_blocks(
             charge_density_radial_mul_ir
         )
@@ -2783,6 +2806,7 @@ class PolarMACE(ScaleShiftMACE):
             "node_feats": node_feats_out,
             "density_coefficients": charge_density_mul_ir,
             "charge_density_radial_coefficients": charge_density_radial_coefficients,
+            "aug_occupancies": aug_occupancies,
             "spin_density": spin_density_mul_ir,
             "charges_history": torch.stack(
                 [spin_charge_density_mul_ir.clone().detach()], dim=-1

@@ -349,6 +349,8 @@ def _build_model(
             solvent_pb1d_upsample=getattr(args, "solvent_pb1d_upsample", 2),
             solvent_pb1d_max_outer=getattr(args, "solvent_pb1d_max_outer", 12),
             solvent_pb1d_fresh_stage1=getattr(args, "solvent_pb1d_fresh_stage1", False),
+            occ_aug_enabled=float(getattr(args, "occ_aug_weight", 0.0)) > 1.0e-12,
+            occ_aug_channel_spec=getattr(args, "occ_aug_channel_spec", None),
             solvent_pb_repo=getattr(args, "solvent_pb_repo", None),
             solvent_pb_grid_spacing=getattr(args, "solvent_pb_grid_spacing", 0.15),
             solvent_pb_fixsol_steps=getattr(args, "solvent_pb_fixsol_steps", 2),
