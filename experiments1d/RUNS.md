@@ -66,3 +66,14 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   (3-partition precedent); rhob weight 1.0 (new normalised semantics);
   NO charge_density_1d (single-variable). 500 epochs.
 - Code: pb-1d-charge1d @ 71c26b9 (same as add1Dcharge experiment).
+
+## 2026-08-12 4-TTF: corrected-pbc rerun of 3-train_add1Dcharge (COMPLETE)
+- Data: neutral 200 frames pbc TTT->TTF (surgical line edit, 160/19/21 lines);
+  config identical to 3-train_add1Dcharge except charge_density_1d weight 10->1
+  with the x10 baked into the code coefficient (c98a843, exactly equivalent).
+- Job 3357895, single 24h window (~16.5 h), 500 epochs, seed 123, code @c98a843.
+- vs 3-train_add1Dcharge at epoch 499 (valid): density 0.0442->0.0425 (-4%),
+  Phi1D 0.0402->0.0371 (-8%), rho_b 1.09e-4->0.95e-4 (-13%), F 17.9->16.8 (-6%),
+  potential 0.0629->0.0724 (+15%; test-set solvated frames -23% — mixed, noise-level).
+- Verdict: TTT impact real but modest; 4-TTF is the corrected-convention
+  reference baseline going forward.
