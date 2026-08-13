@@ -77,3 +77,24 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   potential 0.0629->0.0724 (+15%; test-set solvated frames -23% — mixed, noise-level).
 - Verdict: TTT impact real but modest; 4-TTF is the corrected-convention
   reference baseline going forward.
+
+## 2026-08-12 occ-aug head + fresh stage-1 gate (exp_occupancies/gate34, COMPLETE)
+- Two mainline switches under test vs 4-TTF (same data/config/seed 123, 34 ep,
+  3-GPU a100, job 3361829, code @74f364b + dc85e5e):
+  (1) OccAugHead: equivariant linear readout of CHGCAR PAW augmentation
+      occupancies (600-structure cache occ_aug_cache.npz), pure auxiliary
+      supervision, occ_aug_weight 1.0;
+  (2) solvent_pb1d_fresh_stage1: initial P_z from pre-SCF density every
+      forward, no cross-epoch cache (train/eval alike; cache/ = 0 files, verified).
+- rc=0, zero fallback/warning lines.
+- Timing: warmup 90 s/ep (4-TTF 75, +20%; eval-side fresh stage-1) with one
+  transient 330 s band (ep 11-14, no solver warnings, unattributed);
+  PB segment 164/155/184/197 s (mean ~175) vs 4-TTF ~105 s -> +67%,
+  dominated by per-step fresh stage-1 (occ head is linear; warmup would
+  show the same hit if it were the head).
+- Metrics ep30-33 avg (valid, vs 4-TTF same epochs): potential 0.218 vs 0.250,
+  fermi 0.130 vs 0.209, Phi1D 0.140 vs 0.164, density_3d ~-7%, F/E/rho_b par.
+  No degradation; PB entry visibly smoother (no stale-cache cold start).
+- RMSE_occ_aug 0.042 (ep0) -> 0.0094 (ep33), ~2% of signal RMS, still falling.
+- Decision pending (user): +67% PB-epoch cost vs "adopt if speed cost small";
+  500-ep production projects ~24 h (at the 24 h a100 wall).
