@@ -98,3 +98,21 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - RMSE_occ_aug 0.042 (ep0) -> 0.0094 (ep33), ~2% of signal RMS, still falling.
 - Decision pending (user): +67% PB-epoch cost vs "adopt if speed cost small";
   500-ep production projects ~24 h (at the 24 h a100 wall).
+
+## 2026-08-15 6-no_old: 500-ep production, occ-aug head + fresh stage-1 (COMPLETE)
+- User dir 6-no_old; gate34 config with max_num_epochs 500, seed 123,
+  3-GPU a100, job 3362946, code @6912832 (same modules as gate).
+- COMPLETED in 19h06m, rc=0, zero fallback lines, cache/ = 0 files (verified).
+- Timing (production log): warmup 86 s/ep (+15% vs 4-TTF 75), PB segment
+  mean 139 s/ep (+32% vs 105; max 303 s, only 12 ep > 250 s), total +16%
+  vs 4-TTF 16.5 h. Early-PB cost (gate saw +67%) relaxes as the model
+  converges and the fresh stage-1 initial guess improves.
+- Final error table (valid, vs 4-TTF): potential 0.0665 vs 0.0713 (-7%),
+  fermi 0.0359 vs 0.0369 (-3%), Phi1D 0.0360 vs 0.0374 (-4%),
+  density_3d 0.0431 vs 0.0425 (+1%), rho1d par, E 3.5 vs 4.2 meV,
+  F 17.1 vs 16.8. Epoch-499 rhob_1d 1.02e-4 vs 0.95e-4 (+7%).
+- Test: fermi better on all three systems, Phi1D better on all three,
+  potential better on 2/3; occ_aug 0.0045-0.0052 (no overfit vs valid 0.0049).
+- occ_aug RMSE 0.00491 ~ 1% of signal RMS.
+- Verdict: both switches adopted at production quality; 6-no_old supersedes
+  4-TTF as the reference model (fresh stage-1 = train/eval/MD path identical).
