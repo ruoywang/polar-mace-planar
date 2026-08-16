@@ -116,3 +116,28 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - occ_aug RMSE 0.00491 ~ 1% of signal RMS.
 - Verdict: both switches adopted at production quality; 6-no_old supersedes
   4-TTF as the reference model (fresh stage-1 = train/eval/MD path identical).
+
+## 2026-08-16 8-band: DFT vs fully-ML CHGCAR band comparison (COMPLETE)
+- 6 structures (median frame per config type, test+train), 3 variants each:
+  dft / ml_dftocc / ml_full. Non-SCF ICHARG=11, Gamma-M-K-Gamma 24 kpts,
+  explicit NBANDS (448/688), VASPsol+LDIPOL as source. Model 6-no_old.
+- Assembly (exp_band/): ml_electron = baseline - GTO residual on the full
+  168x168x500 grid; aug occupancies replaced per-atom (byte-identical
+  round-trip validated). Build checks: totals vs NELECT ~1e-4 e,
+  residual RMSE 0.039-0.045 (= training metric), occ RMSE ~1% of signal.
+- Result (window = 24 bands at fermi, each run self-fermi-aligned):
+  occ prediction HARMLESS (ml_full - ml_dftocc = 1-15 meV, slightly better);
+  train == test (no generalization gap); dispersion nearly exact
+  (k-residual 0.06 eV after per-band shift removal); errors are per-band
+  rigid shifts: window RMSE 0.42-0.46 (neutral) / 0.76-0.87 (charged),
+  fermi diff +0.9 to +2.3 eV. Au precedent: 0.10 / +0.45 with 2.6x better
+  3D density (0.017 vs 0.045 e/A^3) -> band quality is density-limited.
+- Root causes isolated: (1) 31% of grid points slightly negative (water/
+  cavity boundary worst, -0.069) distort the VASPsol density-based cavity;
+  clamping negatives + renorm fixes fermi diff 1.59 -> 0.48 but window
+  stays ~0.83; (2) remaining per-band shifts = local electrostatics from
+  atomic-scale density error. 1D plane-averaged electrostatics verified
+  fine (Poisson on delta-rho: +-0.15 eV). No-solvent diagnostic protocol
+  is unusable (charged slab non-SCF does not converge without LSOL).
+- Open (user): adopt clamping into the recipe + rerun ML variants; better
+  3D density (probe line?) as the route to band-quality parity.
