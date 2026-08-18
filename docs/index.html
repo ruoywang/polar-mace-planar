@@ -123,7 +123,7 @@
   </div>
 
   <div class="chapter" id="ch-mix400">
-  <button class="section" aria-expanded="true">3 · train_all — adding the neutral twins (600 structures)<span class="cnt">2 pages</span><span class="chev">&#9662;</span></button>
+  <button class="section" aria-expanded="true">3 · train_all — adding the neutral twins (600 structures)<span class="cnt">5 pages</span><span class="chev">&#9662;</span></button>
   <div class="chbody">
   <p class="chlede">The current model: 400 charged frames plus 200 neutral twins, giving it
   both charge states of the same geometries.</p>
@@ -135,6 +135,30 @@
     2&ndash;5 meV in one pass (rms deviation 8 meV from the converged field); one repeat
     closes it to 0.5 meV rms &mdash; the fixed point converges in a single iteration.
     Val/test need no special handling and cannot leak labels.</p>
+  </a>
+
+  <a class="report" href="./pb1d-bands-density-weight.html">
+    <div class="date">2026-08-18<span class="tag">result</span></div>
+    <h2>Bands vs Density Weight (1 / 50 / 200)</h2>
+    <p>Non-SCF band structures from the fully-ML CHGCAR (hard-clamp recipe) for two neutral
+    structures, across the density_3d loss-weight sweep: window RMSE, Fermi placement, and
+    full overlays against the DFT reference.</p>
+  </a>
+
+  <a class="report" href="./pb1d-w200-pair-sid168.html">
+    <div class="date">2026-08-18<span class="tag">result</span></div>
+    <h2>d3-w200: Pair Report sid 168 / 568 (train, low-Fermi end)</h2>
+    <p>The density-weight-200 model on a training twin pair at the low end of the Fermi
+    range (&minus;4.15 eV): scalars, per-atom charges, 1-D potentials, densities, and
+    solvent profiles.</p>
+  </a>
+
+  <a class="report" href="./pb1d-w200-pair-sid122.html">
+    <div class="date">2026-08-18<span class="tag">result</span></div>
+    <h2>d3-w200: Pair Report sid 122 / 522 (charged frame from TEST)</h2>
+    <p>The density-weight-200 model on a pair whose charged frame the model never saw
+    (test split, Fermi &minus;4.15 eV; neutral twin from train): the generalization view
+    of the same report.</p>
   </a>
 
   <a class="report" href="./pb1d-trainall-pair-sid152.html">
