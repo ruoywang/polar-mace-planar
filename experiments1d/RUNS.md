@@ -141,3 +141,29 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   is unusable (charged slab non-SCF does not converge without LSOL).
 - Open (user): adopt clamping into the recipe + rerun ML variants; better
   3D density (probe line?) as the route to band-quality parity.
+
+## 2026-08-18 9-larger_3d: density_3d weight sweep 10/50/200 + neutral band checks (COMPLETE)
+- Three 500-ep productions (jobs 3368866/67, 3370058), config = 6-no_old except
+  density_3d_weight (raw MSE term; w=1 is normalized-weight 1/215, signal_ms 0.00466).
+- Endpoints (valid, vs 6-no_old 0.0431/0.0643/0.0351/0.0353):
+  w10:  density 0.0359 (-17%) pot 0.0671 (+4%)  fermi 0.0335 (-5%)  Phi1D 0.0376 (+7%)
+  w50:  density 0.0317 (-26%) pot 0.0862 (+34%) fermi 0.0453 (+29%) Phi1D 0.0454 (+28%)
+  w200: density 0.0290 (-33%) pot 0.1180 (+84%) fermi 0.0444 (+26%) Phi1D 0.0610 (+73%)
+  -> 1D-metric balance point near w10 (near-free density gain).
+- Band checks (2 neutral cases sid486/454, fully-ML CHGCAR, DFT band refs reused
+  from 8-band). RECIPE INCIDENT: unclamped w50 CHGCAR made the non-SCF
+  eigensolver diverge (ghost wells at negative-density pockets, dE runaway);
+  a SOFT clamp with positive vacuum floor (eps/2 = 5e-5) also failed to
+  converge (floor >> physical vacuum density). HARD clamp max(rho,0) +
+  renormalize converges everywhere -- adopted for all variants incl. a
+  re-done w1 baseline (clamped-recipe-consistent table):
+  window RMSE (test44v/train44v): w1 0.297/0.191, w10 0.388/0.318,
+  w50 0.348/0.267, w200 0.345/0.170; fermi diff: w1 -0.33/-0.62,
+  w10 -0.48/-0.63, w50 -0.24/-0.35, w200 +0.02/-0.20.
+  Unclamped for reference: w1 0.452/0.418 (+0.88/+0.97), w10 0.266/0.311
+  (+0.24/+0.38).
+- Reading: clamping the w1 baseline captures most of the band-window gain;
+  after clamping there is no clean weight trend at 2-case statistics.
+  Weight helps absolute fermi placement monotonically (w200 best).
+  Band-level conclusions need more cases; 1D-level conclusion (w10 sweet
+  spot) is solid.
