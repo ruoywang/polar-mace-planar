@@ -71,5 +71,35 @@ penalty, or in two passes at full training-time fidelity. Validation and
 test structures during training are handled by the same mechanism and need
 no special treatment: their cached fields contain only the model's own
 outputs, so no label information leaks.</p>
+
+<h2>5 · Update: training without the lagged field at all (fresh stage 1)</h2>
+<p class="sub">2026-08-15 · 34-epoch A/B gate + 500-epoch production
+(6-no_old) against the lagged reference (4-TTF), same data and seed. The
+production run also carries the occupancy-head auxiliary supervision.</p>
+<p>The follow-up question to this page: if the first-encounter penalty is
+this small, can training drop the cross-epoch cache entirely? A switch
+(<code>solvent_pb1d_fresh_stage1</code>) now recomputes the stage-1 field
+from the pre-SCF density on <em>every</em> forward — training steps,
+evaluation, and MD run the identical path, and the cache directory stays
+empty (verified: 0 files over the full 500-epoch run).</p>
+<table class="kv">
+<tr><th>segment</th><th>lagged (4-TTF)</th><th>fresh (6-no_old)</th><th>change</th></tr>
+<tr><td>warm-up epoch (planar; PB only in eval)</td><td>75 s</td><td>86 s</td><td>+15%</td></tr>
+<tr><td>PB epoch, early (30–33)</td><td>~105 s</td><td>164–197 s</td><td>+67% at entry</td></tr>
+<tr><td>PB epoch, full-run mean</td><td>~105 s</td><td>139 s</td><td>+32%</td></tr>
+<tr><td>total, 500 epochs</td><td>16.5 h</td><td>19.1 h</td><td>+16%</td></tr>
+</table>
+<p class="note">The fresh solve is most expensive right after the PB loss
+switches on and relaxes as the model converges — the better the predicted
+density, the better the prior-only initial guess and the fewer solver
+iterations.</p>
+<p>Accuracy does not pay for this: the PB entry is visibly smoother without
+the stale-cache cold start (epochs 30–33 average, validation: Fermi 0.130
+vs 0.209 eV, Φ1D 0.140 vs 0.164 eV), and the 500-epoch endpoint comes out
+slightly ahead (potential 0.0665 vs 0.0713 eV, Fermi 0.0359 vs 0.0369 eV,
+Φ1D 0.0360 vs 0.0374 eV, validation). The lagged mechanism analysed above
+is therefore no longer used in production: every encounter is a
+"first encounter" by construction, and at the converged model the fresh
+solve reproduces the cached-field answers.</p>
 </div>
 </body></html>
