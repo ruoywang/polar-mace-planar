@@ -273,3 +273,31 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   ceiling is unreachable for any transferable model). Lever to close it:
   joint training (residual loss backprops into the trunk) = the planned
   stage-2 integration; or accept ~0.47 and integrate as-is.
+
+## 2026-08-31 NiN-mix800: 800-frame bundle + normalized density weight (train800 line)
+- New data: 200 neutral SOLVATED calcs (2-NiN_single/5-44_neutral_withsolv),
+  geometries bitwise == 1-44_GCE cal_N, INCAR == charged GCE minus NELECT.
+  All 200 converged (cal_104/189 rerun by user after a first pass left their
+  PHI right plateau at +0.95/+0.98 V; now 1e-5). Solvated conventions:
+  Fermi = raw E-fermi (PHI right plateau = 0), potential_diff = right-left
+  (+3.04 +/- 0.2 V), sid = 600+N, config_type NiN44neusol, solvated=1, TTF.
+- Fermi solvent effect (DFT, 200 neutral pairs): +0.159 +/- 0.099 eV vs the
+  vacuum twins, r=0.89, range [-0.14, +0.42] (temp artifact f91250ea).
+- Bundle c-MACEsol/data/NiN-mix800 (52 GB, full copies, no symlinks):
+  splits = frozen 600 splits + new 200 TWIN-ALIGNED with charged NiN44
+  (same cal -> same split; 640/80/80). potential1d 800 (baselines reused
+  from twins), dft_solvent1d_ref 600, grids+manifest 800 (net integral
+  |max| 1e-4 e), baseline_index aliases 601-800 -> twin rows, occ cache
+  800 (V1-V3 audits), cd1d cache 800.
+- Closure-check note: raw periodic 1-D check gives 3.84 (new) vs 2.55 eV
+  (charged twins) full-range; solvent-region gap traced to the LDIPOL
+  dipole-correction / dielectric-response entanglement (twin closes to
+  0.006 eV with the vacuum-gap sawtooth; neutral's 3.1 V step response is
+  inside RHOB). Not a label defect; the real gate is the training loss path.
+- Code @982468c: --density_3d_signal_ms normalizes the raw density MSE;
+  measured 0.004684 on the 800 train windows (300k voxels/frame; old-600
+  0.004693, new-200 0.004657). weight 1.0 == raw ~213.5 (w200 was 200).
+- Production 2-1D_PB/10-train_800: w200 config verbatim except name,
+  density weight 1.0 + signal_ms, bundle paths (occ/cd1d now in ./data).
+  rhob_1d_weight stays 1.0 (w200's actual value; NOT 1-train_all's 3e5).
+  Gate gate800 (dev, 2 ep, warmup 0, MACE_PB_DEBUG): job 3404091.
