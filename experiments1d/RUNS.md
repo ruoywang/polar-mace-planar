@@ -167,3 +167,33 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   Weight helps absolute fermi placement monotonically (w200 best).
   Band-level conclusions need more cases; 1D-level conclusion (w10 sweet
   spot) is solid.
+
+## 2026-08-30 exp_residual3d_probe: residual-3D solvent-charge representation probe (COMPLETE)
+- Question: can "1D-broadcast baseline + envelope x atom-centered-GTO residual"
+  represent the 3-D RHOB/RHOION labels? Model w200 (9-larger_3d), 9 frames
+  (val 28/62/394/208/401/433, train 1/202/403), 300k fit + 100k eval points,
+  per-frame lstsq ceilings (no training). Dir: claude/2-1D_PB/exp_residual3d_probe.
+- Labels pass all audits (CONTCAR match 1e-13, ion integral = q_tot, rb
+  integral ~0, plane avgs == dft_solvent1d_ref to 1e-10).
+- DATA GOTCHA: NiN-mix neutral frames (sid 401-600) are the VACUUM calcs:
+  solvated=0 AND pbc=TTT, so the model skips the solvent block twice over.
+  Probe forces solvated=1 + pbc=TTF -> runtime-baseline path solves cleanly
+  (rms ~1e-12, n_outer 7, q_ion=0). Geometries == 5-44_neutral_withsolv, so
+  the withsolv 3-D labels are valid for them. Future residual-3D training
+  must swap neutral frames to withsolv labels + solvated=1 + pbc TTF.
+- bound: plane average removes only 5-7% (lateral-dominated; region signal
+  2.6-3.6e-3, after 1D 2.5-3.5e-3 e/A^3); envelope fit ceiling leaves 21-28%
+  (gradS == s(1-s) envelopes; sigma .25-1 == .5-2 > 1-3; l=2 required:
+  l0/l1/l2 = 1.21/0.87/0.65e-3 on sid 28); bare-basis control 2-3x worse
+  (confirms envelope is essential); far (>6 A) content only 1-2%.
+- ion: 1D broadcast removes 60-65%; shape-mod s_ion/S_ion baseline adds
+  ~10-15% on NiN88 only; envelope fit leaves 27-40% of the remainder;
+  neutral-frame ion signal ~5e-5 (negligible, head should output ~0).
+- Ridge tradeoff: lam 1e-10 -> 1e-7 costs 2-4% rms while |c|max drops
+  1e4 -> 4e2-2e3 -> no 1D-era-style unlearnability; mild ridge tames it.
+- Energy scale: integral[bound residual x lateral cvhar3 fluctuation] =
+  +2.3..+3.4 eV (charged) / +0.9 eV (neutral); after best fit 0.3-0.7 /
+  -0.2 eV. Lateral solvent electrostatics is eV-scale -> supports the
+  stage-2 energy/force term.
+- Verdict: representation adequate; next level = frozen-trunk head training
+  (cross-structure learnability of the modulation coefficients).
