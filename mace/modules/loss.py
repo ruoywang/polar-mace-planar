@@ -2291,6 +2291,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         fermi_level_weight=0.0,
         fermi_residual_reg_weight=0.1,
         density_3d_weight=0.0,
+        density_3d_signal_ms=None,
         density_3d_file=None,
         density_3d_sigma=0.5,
         density_3d_samples=0,
@@ -2350,6 +2351,13 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.register_buffer(
             "density_3d_weight",
             torch.tensor(density_3d_weight, dtype=torch.get_default_dtype()),
+        )
+        # optional signal-ms normalization of the raw density MSE: with it,
+        # weight 1.0 puts the density term at parity with a unit-normalized
+        # loss (the constant = the dataset's mean squared target over the
+        # sampling windows, measured offline)
+        self.density_3d_signal_ms = (
+            float(density_3d_signal_ms) if density_3d_signal_ms else None
         )
         self.register_buffer(
             "potential_1d_profile_weight",
@@ -2502,6 +2510,8 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
                 ddp=ddp,
             )
             if loss_density_3d is not None:
+                if self.density_3d_signal_ms is not None:
+                    loss_density_3d = loss_density_3d / self.density_3d_signal_ms
                 loss = loss + self.density_3d_weight * loss_density_3d
         if self.occ_aug_weight > 1e-12 and self.occ_aug_targets is not None:
             loss_occ = mean_squared_error_occ_aug(ref, pred, self.occ_aug_targets, ddp=ddp)

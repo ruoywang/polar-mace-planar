@@ -517,6 +517,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="pb1d: Newton max outer iterations per fixsol step",
     )
     parser.add_argument(
+        "--density_3d_signal_ms", type=float, default=None,
+        help="normalize the raw density-3d MSE by this mean-squared signal "
+        "constant so weight 1.0 means parity with unit-normalized terms",
+    )
+    parser.add_argument(
         "--occ_aug_file", type=str, default=None,
         help="npz of PAW augmentation-occupancy targets (extract_occ.py)",
     )
