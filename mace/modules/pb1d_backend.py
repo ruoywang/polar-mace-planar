@@ -450,9 +450,19 @@ class PB1DBackend:
         area = volume / length_z
         z = solver.z
         q_ion_t = rho_ion_z.sum() * dz * area
-        denom = torch.where(torch.abs(q_ion_t) > 1.0e-12, q_ion_t,
-                            torch.full_like(q_ion_t, 1.0e-12))
-        layer_mean_t = (rho_ion_z * z).sum() * dz * area / denom
+        ion_dipole_t = (rho_ion_z * z).sum() * dz * area
+        # layer_mean = ionic-layer center. The charge-weighted mean
+        # (dipole/charge) is undefined at q_ion ~ 0 (neutral solvated
+        # frames: the +/- ion layers cancel), so switch to the
+        # |rho|-weighted center there; it always lies inside [0, H].
+        # mu must use ion_dipole_t directly, never q_ion*layer_mean.
+        q_abs_t = torch.abs(rho_ion_z).sum() * dz * area
+        if float(torch.abs(q_ion_t)) > 1.0e-3:
+            layer_mean_t = ion_dipole_t / q_ion_t
+        elif float(q_abs_t) > 1.0e-9:
+            layer_mean_t = (torch.abs(rho_ion_z) * z).sum() * dz * area / q_abs_t
+        else:
+            layer_mean_t = q_ion_t.detach() * 0.0 + 0.5 * length_z
         mu_bound_t = (rho_bound_z * z).sum() * dz * area
 
         self.last_diagnostics = {
@@ -484,6 +494,7 @@ class PB1DBackend:
             "mu_bound": float(mu_bound_t.detach()),
             "q_ion_t": q_ion_t,
             "layer_mean_t": layer_mean_t,
+            "ion_dipole_t": ion_dipole_t,
             "mu_bound_t": mu_bound_t,
             "rms_last": float(out["rms_last"]),
             "prior_solve": prior_s,
