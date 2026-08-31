@@ -2542,7 +2542,7 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
 
             loss_solvent3d = mean_squared_error_solvent3d(
                 ref, pred, self.solvent3d_targets.signal_ms,
-                self.solvent3d_sigmas, reduce_loss, ddp=ddp,
+                self.solvent3d_sigmas, ddp=ddp,
             )
             if loss_solvent3d is not None:
                 loss = loss + self.solvent3d_weight * loss_solvent3d

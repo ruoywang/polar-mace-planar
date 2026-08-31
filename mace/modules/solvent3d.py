@@ -302,11 +302,36 @@ def solvent3d_residuals(ref, pred, sigmas):
     return torch.cat(res_b), torch.cat(res_i)
 
 
-def mean_squared_error_solvent3d(ref, pred, signal_ms, sigmas, reduce_fn,
+def mean_squared_error_solvent3d(ref, pred, signal_ms, sigmas,
                                  ddp: Optional[bool] = None):
-    """Normalized two-channel MSE (weight 1.0 = parity), or None."""
+    """Per-channel signal-ms-normalized MSE (weight 1.0 = parity per channel).
+
+    DDP: the scoreable point count is DATA-dependent per rank (frames without
+    labels, fallback solves), so every rank joins the same collective and all
+    return None together only when the global count is zero — a rank-local
+    early return here deadlocks DDP (de84363 lesson). The zero-count branch
+    keeps a graph connection through the coefficients."""
+    import torch.distributed as dist
+
+    coeffs = pred.get("solvent3d_coeffs")
+    if coeffs is None:
+        return None  # config-level absence: identical on every rank
     res = solvent3d_residuals(ref, pred, sigmas)
     if res is None:
+        sq_sum = coeffs.sum() * 0.0
+        n_local = 0
+    else:
+        sq = (torch.square(res[0]) / signal_ms["b"]
+              + torch.square(res[1]) / signal_ms["i"])
+        sq_sum = sq.sum()
+        n_local = int(sq.numel())
+    ddp_flag = (dist.is_available() and dist.is_initialized()) if ddp is None else ddp
+    if ddp_flag and dist.is_initialized():
+        total = torch.tensor(float(n_local), device=coeffs.device, dtype=coeffs.dtype)
+        dist.all_reduce(total, op=dist.ReduceOp.SUM)
+        if float(total.item()) < 0.5:
+            return None  # global count is zero on every rank consistently
+        return sq_sum * dist.get_world_size() / total
+    if n_local == 0:
         return None
-    return (reduce_fn(torch.square(res[0]), ddp) / signal_ms["b"]
-            + reduce_fn(torch.square(res[1]), ddp) / signal_ms["i"])
+    return sq_sum / float(n_local)
