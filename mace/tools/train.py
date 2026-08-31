@@ -681,6 +681,15 @@ def evaluate(
     if density_rng is not None and hasattr(loss_fn, "density_3d_seed"):
         density_rng_state = density_rng.getstate()
         density_rng.seed(int(getattr(loss_fn, "density_3d_seed")))
+    # solvent3d eval sampling: fixed seed per eval pass so the metric is
+    # comparable across epochs (same convention as density_3d above)
+    s3d_rng = None
+    s3d_rng_state = None
+    if getattr(loss_fn, "solvent3d_targets", None) is not None:
+        s3d_rng = getattr(loss_fn, "solvent3d_rng", None)
+        if s3d_rng is not None:
+            s3d_rng_state = s3d_rng.getstate()
+            s3d_rng.seed(int(getattr(loss_fn, "solvent3d_seed")))
 
     try:
         with preserve_grad_state(model):
@@ -700,6 +709,8 @@ def evaluate(
     finally:
         if density_rng is not None and density_rng_state is not None:
             density_rng.setstate(density_rng_state)
+        if s3d_rng is not None and s3d_rng_state is not None:
+            s3d_rng.setstate(s3d_rng_state)
     avg_loss, aux = metrics.compute()
     aux["time"] = time.time() - start_time
     metrics.reset()
