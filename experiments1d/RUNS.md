@@ -316,3 +316,26 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   solve at 96.5% (1812 ok / 66 early-garbage fallbacks, self-healing).
 - Production: 2-1D_PB/10-train_800, job 3404125 (gpu-a100, 40 h,
   3 ranks, 500 ep, warmup 30), code @2b149d6, bundle NiN-mix800.
+
+## 2026-08-31 solvent3d stage 1: code + labels + smoke + gate pair (branch pb-solvent3d)
+- Code (independent clone claude/2-1D_PB/pmp-solvent3d, branch pb-solvent3d
+  @8279346, base 982468c): equivariant Solvent3DChargeHead (zero-init, ion
+  channel q-gated), backend probe (detached envelopes + 1-D baselines at
+  sampled points; cavity stashed detached by the closure), solvent3d loss
+  (per-channel signal-ms normalized, attach mirrors density_3d, DDP-safe per
+  the de84363 pattern — every rank joins the count collective), metrics
+  RMSE_solvent3d_b/_i, 5 config keys + misconfig guard. Unit tests: point
+  evaluator == density_3d evaluator to 1e-17; zero-init/q-gate verified.
+- Labels (job 3404111): data/NiN-mix800/solvent3d_grid, 600 frames, physics
+  convention f32; integrals pass; plane averages == dft_solvent1d_ref to
+  5.7e-12 (cross-validates the bundle's 1-D ref). signal_ms b=4.268e-6
+  i=7.914e-8; bundle density_3d signal_ms measured 4.6934e-3.
+- Smoke (job 3404120, dev, 3-GPU DDP, 2 ep, warmup 0): rc=0, no deadlock,
+  0 fallbacks, solvent3d metrics live and falling from epoch 0
+  (b 1.87e-3 -> 1.48e-3, i 3.7e-4 -> 1.45e-4). ~26 min/epoch on cold solves.
+- GATE PAIR submitted: 3-residual_3D/gate_w{0,1}, jobs 3404171/3404172,
+  34 ep, warmup 30, seed 123, 3-GPU a100; single variable = solvent3d_weight
+  0 vs 1 (head enabled in both for RNG parity). Base config = w200 recipe
+  with density_3d_weight 1.0 + signal_ms 4.6934e-3 (normalized w200-strength)
+  on the NiN-mix800 bundle. Pass criteria: w1 hurts no legacy metric vs w0
+  at equal epochs; solvent3d validation falling; memory/step-time measured.
