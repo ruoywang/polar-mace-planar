@@ -720,6 +720,15 @@ def get_loss_fn(
     dipole_only: bool,
     compute_dipole: bool,
 ) -> torch.nn.Module:
+    if float(getattr(args, "solvent3d_weight", 0.0)) > 1.0e-12:
+        # the loss silently skips graphs without predictions, so misconfigs
+        # (no head / no labels / wrong solvent model) must fail loudly here
+        if getattr(args, "solvent3d_file", None) is None:
+            raise ValueError("solvent3d_weight > 0 requires solvent3d_file")
+        if not bool(getattr(args, "solvent3d_head", False)):
+            raise ValueError("solvent3d_weight > 0 requires solvent3d_head=True")
+        if getattr(args, "solvent_model", "planar") != "pb1d":
+            raise ValueError("solvent3d supervision requires solvent_model=pb1d")
     if args.loss == "weighted":
         loss_fn = modules.WeightedEnergyForcesLoss(
             energy_weight=args.energy_weight,
@@ -821,6 +830,10 @@ def get_loss_fn(
             solvent_rhob_1d_smear_ref=getattr(args, "solvent_rhob_1d_smear_ref", True),
             charge_density_1d_weight=getattr(args, "charge_density_1d_weight", 0.0),
             charge_density_1d_file=getattr(args, "charge_density_1d_file", None),
+            solvent3d_weight=getattr(args, "solvent3d_weight", 0.0),
+            solvent3d_file=getattr(args, "solvent3d_file", None),
+            solvent3d_samples=getattr(args, "solvent3d_samples", 0),
+            solvent3d_sigmas=getattr(args, "solvent3d_sigmas", "[0.5, 1.0, 2.0]"),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),
             solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),
@@ -926,6 +939,10 @@ def get_swa(
             solvent_rhob_1d_smear_ref=getattr(args, "solvent_rhob_1d_smear_ref", True),
             charge_density_1d_weight=getattr(args, "charge_density_1d_weight", 0.0),
             charge_density_1d_file=getattr(args, "charge_density_1d_file", None),
+            solvent3d_weight=getattr(args, "solvent3d_weight", 0.0),
+            solvent3d_file=getattr(args, "solvent3d_file", None),
+            solvent3d_samples=getattr(args, "solvent3d_samples", 0),
+            solvent3d_sigmas=getattr(args, "solvent3d_sigmas", "[0.5, 1.0, 2.0]"),
             potential_axis=getattr(args, "potential_axis", 2),
             potential_sign=getattr(args, "potential_sign", 1.0),
             solvent_sigma_g=getattr(args, "solvent_sigma_g", 0.85),

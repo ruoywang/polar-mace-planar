@@ -820,6 +820,8 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb1d_upsample: int = 2,
         solvent_pb1d_max_outer: int = 12,
         solvent_pb1d_fresh_stage1: bool = False,
+        solvent3d_head: bool = False,
+        solvent3d_sigmas: str = "[0.5, 1.0, 2.0]",
         occ_aug_enabled: bool = False,
         occ_aug_channel_spec: str = None,
         fermi_level_baseline: float = 0.0,
@@ -1211,6 +1213,25 @@ class PolarMACE(ScaleShiftMACE):
                 sigma_z=self.solvent_pb1d_sigma_z,
                 c_max=self.solvent_pb1d_c_max,
             )
+        # residual-3D solvent charge readout (supervision-only stage): GTO
+        # coefficients from the mixed node feats; zero-init, so enabling the
+        # head without its loss leaves every observable unchanged
+        self.solvent3d_head = None
+        if solvent_model == "pb1d" and bool(solvent3d_head):
+            import ast as _ast
+
+            from .solvent3d import Solvent3DChargeHead
+
+            self.solvent3d_sigmas = [
+                float(s) for s in _ast.literal_eval(str(solvent3d_sigmas))
+            ]
+            self.solvent3d_head = Solvent3DChargeHead(
+                node_feats_irreps=o3.Irreps(
+                    "+".join([str(hidden_irreps)] * int(num_interactions))
+                ),
+                sigmas=self.solvent3d_sigmas,
+                cueq_config=cueq_config,
+            )
         # equivariant PAW augmentation-occupancy readout (auxiliary target;
         # zero-init weights draw no RNG, so same-seed A/B stays bit-clean)
         self.occ_head = None
@@ -1591,6 +1612,23 @@ class PolarMACE(ScaleShiftMACE):
         rho_bound_prof = positions.new_zeros(num_graphs, 512)
         rho_bound_mask = positions.new_zeros(num_graphs)
 
+        # residual-3D solvent charge: head coefficients for every solvated
+        # graph; envelopes/baselines only where the batch carries sampled
+        # label points (attach_solvent3d_samples_to_batch)
+        s3d_on = use_head and self.solvent3d_head is not None
+        s3d_points = data.get("solv3d_points") if s3d_on else None
+        s3d_gidx = data.get("solv3d_graph_index") if s3d_points is not None else None
+        n_s3d = int(s3d_points.shape[0]) if s3d_points is not None else 0
+        s3d_coeffs = (
+            positions.new_zeros(positions.shape[0], 2, len(self.solvent3d_sigmas), 9)
+            if s3d_on else None
+        )
+        s3d_env_b = positions.new_zeros(n_s3d)
+        s3d_env_i = positions.new_zeros(n_s3d)
+        s3d_base_b = positions.new_zeros(n_s3d)
+        s3d_base_i = positions.new_zeros(n_s3d)
+        s3d_valid = torch.zeros(n_s3d, dtype=torch.bool, device=positions.device)
+
         for g in range(num_graphs):
             cell_g = cells[g]
             H_g = float(_axis_box_length(cell_g, axis).item())
@@ -1666,6 +1704,14 @@ class PolarMACE(ScaleShiftMACE):
                     node_feats_mixed[atom_mask]
                     if want_grad else node_feats_mixed[atom_mask].detach()
                 )
+            s3d_pm = None
+            s3d_pts_g = None
+            if s3d_points is not None:
+                s3d_pm = s3d_gidx == g
+                if bool(s3d_pm.any()):
+                    s3d_pts_g = s3d_points[s3d_pm].detach()
+                else:
+                    s3d_pm = None
             try:
                 result = backend.solve_graph(
                     positions=pos_g,
@@ -1680,6 +1726,7 @@ class PolarMACE(ScaleShiftMACE):
                     head=self.pb1d_head if use_head else None,
                     q_tot=total_charge_g[g].detach(),
                     ckpt_closure=True,  # unckpt tested twice, OOMs both eval (retention) and train (PB step footprint) on 40 GB
+                    probe_points=s3d_pts_g,
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1752,6 +1799,21 @@ class PolarMACE(ScaleShiftMACE):
                     rb_g, H_g, 512, False).detach()
             rho_bound_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
+            if s3d_coeffs is not None and feats_g is not None:
+                # coefficients carry the ONLY gradient path of the solvent3d
+                # loss (head -> node feats -> trunk); ion channel gated by the
+                # frame's total charge (exactly zero on neutral frames)
+                q_gate = total_charge_g[g].detach().to(positions.dtype)
+                s3d_coeffs[atom_mask] = self.solvent3d_head(
+                    feats_g, q_gate.expand(int(atom_mask.sum().item()))
+                ).to(s3d_coeffs.dtype)
+                sv3 = result.get("solv3d")
+                if s3d_pm is not None and sv3 is not None:
+                    s3d_env_b[s3d_pm] = sv3["env_b"].to(positions.dtype)
+                    s3d_env_i[s3d_pm] = sv3["env_i"].to(positions.dtype)
+                    s3d_base_b[s3d_pm] = sv3["base_b"].to(positions.dtype)
+                    s3d_base_i[s3d_pm] = sv3["base_i"].to(positions.dtype)
+                    s3d_valid[s3d_pm] = True
             if os.environ.get("MACE_PB_DEBUG"):
                 print(
                     f"PB1DDBG sid={sid} q_ion={float(result['q_ion']):+.4f} "
@@ -1781,6 +1843,13 @@ class PolarMACE(ScaleShiftMACE):
         }
         if prof_feat_grad is not None:
             out["profile_features_grad"] = prof_feat_grad
+        if s3d_coeffs is not None:
+            out["solvent3d_coeffs"] = s3d_coeffs
+            out["solv3d_env_b"] = s3d_env_b
+            out["solv3d_env_i"] = s3d_env_i
+            out["solv3d_base_b"] = s3d_base_b
+            out["solv3d_base_i"] = s3d_base_i
+            out["solv3d_valid"] = s3d_valid
         return out
 
     @torch.jit.ignore
@@ -2790,8 +2859,16 @@ class PolarMACE(ScaleShiftMACE):
             if pb_solvent_data is not None and "rho_bound_1d_mask" in pb_solvent_data
             else positions.new_zeros(num_graphs)
         )
+        # residual-3D solvent charge outputs (present only when the head is
+        # enabled): coefficients (grad-carrying) + detached point fields
+        solvent3d_out = {}
+        if pb_solvent_data is not None and "solvent3d_coeffs" in pb_solvent_data:
+            for k in ("solvent3d_coeffs", "solv3d_env_b", "solv3d_env_i",
+                      "solv3d_base_b", "solv3d_base_i", "solv3d_valid"):
+                solvent3d_out[k] = pb_solvent_data[k]
 
         return {
+            **solvent3d_out,
             "energy": total_energy,
             "node_energy": node_e0.clone().double() + node_inter_es.clone().double(),
             "interaction_energy": inter_e,

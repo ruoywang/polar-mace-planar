@@ -522,6 +522,29 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "constant so weight 1.0 means parity with unit-normalized terms",
     )
     parser.add_argument(
+        "--solvent3d_head", type=str2bool, default=False,
+        help="pb1d: enable the residual-3D solvent-charge readout head "
+        "(equivariant GTO coefficients from the mixed node feats)",
+    )
+    parser.add_argument(
+        "--solvent3d_weight", type=float, default=0.0,
+        help="weight of the solvent3d charge supervision (1.0 = parity; the "
+        "loss is normalized by the manifest's per-channel signal_ms)",
+    )
+    parser.add_argument(
+        "--solvent3d_file", type=str, default=None,
+        help="solvent3d_grid_npy_v1 manifest with RHOB/RHOION labels "
+        "(build_solvent3d_labels.py)",
+    )
+    parser.add_argument(
+        "--solvent3d_samples", type=int, default=0,
+        help="sampled label points per graph per step for the solvent3d loss",
+    )
+    parser.add_argument(
+        "--solvent3d_sigmas", type=str, default="[0.5, 1.0, 2.0]",
+        help="GTO widths (A) of the solvent3d head basis",
+    )
+    parser.add_argument(
         "--occ_aug_file", type=str, default=None,
         help="npz of PAW augmentation-occupancy targets (extract_occ.py)",
     )

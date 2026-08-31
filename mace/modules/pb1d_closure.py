@@ -81,6 +81,10 @@ def closure_from_fields(
     if _tm:
         torch.cuda.synchronize(); _t0 = _time.perf_counter()
     s_ion3, s_diel3, _ = tp.create_cavity_torch(n_e_density, grid, params)
+    # detached cavity stash for the solvent3d probe (envelope evaluation at
+    # sampled points); ~24 MB constant on the cached grid object, refreshed
+    # every call so the last (final-solve) closure wins within a forward
+    grid._solv3d_cavity = (s_ion3.detach(), s_diel3.detach())
     if _tm:
         torch.cuda.synchronize(); print(f"CLOSURE cavity {(_time.perf_counter()-_t0)*1e3:.1f} ms", flush=True); _t0 = _time.perf_counter()
 

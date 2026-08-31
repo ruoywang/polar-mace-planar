@@ -34,6 +34,10 @@ from mace.modules.loss import (
     solvent_rhob_1d_residuals,
     occ_aug_residuals,
 )
+from mace.modules.solvent3d import (
+    attach_solvent3d_samples_to_batch,
+    solvent3d_residuals,
+)
 
 from . import torch_geometric
 from .checkpoint import CheckpointHandler, CheckpointState
@@ -89,6 +93,11 @@ def valid_err_log(
     if eval_metrics.get("rmse_occ_aug") is not None:
         density_msg += (
             f", RMSE_occ_aug={eval_metrics['rmse_occ_aug']:.5f}"
+        )
+    if eval_metrics.get("rmse_solvent3d_b") is not None:
+        density_msg += (
+            f", RMSE_solvent3d_b={eval_metrics['rmse_solvent3d_b']:.6f}"
+            f", RMSE_solvent3d_i={eval_metrics['rmse_solvent3d_i']:.6f} e/A^3"
         )
     if eval_metrics.get("rmse_potential_1d_profile") is not None:
         density_msg += (
@@ -486,6 +495,7 @@ def take_step(
     t0 = tick()
     batch = batch.to(device)
     attach_density_3d_samples_to_batch(batch, loss_fn)
+    attach_solvent3d_samples_to_batch(batch, loss_fn)
     batch_dict = batch.to_dict()
     t1 = tick()
 
@@ -587,6 +597,7 @@ def take_step_lbfgs(
         for batch in data_loader:
             batch = batch.to(device)
             attach_density_3d_samples_to_batch(batch, loss_fn)
+            attach_solvent3d_samples_to_batch(batch, loss_fn)
             batch_dict = batch.to_dict()
             output = model(
                 batch_dict,
@@ -676,6 +687,7 @@ def evaluate(
             for batch in data_loader:
                 batch = batch.to(device)
                 attach_density_3d_samples_to_batch(batch, loss_fn)
+                attach_solvent3d_samples_to_batch(batch, loss_fn)
                 batch_dict = batch.to_dict()
                 output = model(
                     batch_dict,
@@ -735,6 +747,11 @@ class MACELoss(Metric):
             "OccAug_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
         self.add_state("delta_occ_aug", default=[], dist_reduce_fx="cat")
+        self.add_state(
+            "Solvent3D_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state("delta_solvent3d_b", default=[], dist_reduce_fx="cat")
+        self.add_state("delta_solvent3d_i", default=[], dist_reduce_fx="cat")
         self.add_state(
             "Potential1DProfile_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
@@ -886,6 +903,19 @@ class MACELoss(Metric):
                     float(density_3d_res.numel()),
                     dtype=self.Density3D_computed.dtype,
                     device=self.Density3D_computed.device,
+                )
+        if getattr(self.loss_fn, "solvent3d_targets", None) is not None:
+            s3d_res = solvent3d_residuals(
+                ref=batch, pred=output,
+                sigmas=getattr(self.loss_fn, "solvent3d_sigmas", [0.5, 1.0, 2.0]),
+            )
+            if s3d_res is not None:
+                self.delta_solvent3d_b.append(s3d_res[0].detach())
+                self.delta_solvent3d_i.append(s3d_res[1].detach())
+                self.Solvent3D_computed += torch.tensor(
+                    float(s3d_res[0].numel()),
+                    dtype=self.Solvent3D_computed.dtype,
+                    device=self.Solvent3D_computed.device,
                 )
         occ_targets = getattr(self.loss_fn, "occ_aug_targets", None)
         if occ_targets:
@@ -1085,6 +1115,9 @@ class MACELoss(Metric):
             aux["mae_density_3d"] = compute_mae(delta_density_3d)
             aux["rmse_density_3d"] = compute_rmse(delta_density_3d)
             aux["q95_density_3d"] = compute_q95(delta_density_3d)
+        if self.Solvent3D_computed:
+            aux["rmse_solvent3d_b"] = compute_rmse(self.convert(self.delta_solvent3d_b))
+            aux["rmse_solvent3d_i"] = compute_rmse(self.convert(self.delta_solvent3d_i))
         if self.OccAug_computed:
             delta_occ_aug = self.convert(self.delta_occ_aug)
             aux["mae_occ_aug"] = compute_mae(delta_occ_aug)

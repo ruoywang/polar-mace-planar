@@ -2309,6 +2309,10 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         solvent_rhob_1d_smear_ref=True,
         charge_density_1d_weight=0.0,
         charge_density_1d_file=None,
+        solvent3d_weight=0.0,
+        solvent3d_file=None,
+        solvent3d_samples=0,
+        solvent3d_sigmas="[0.5, 1.0, 2.0]",
         potential_axis=2,
         potential_sign=1.0,
         solvent_sigma_g=0.85,
@@ -2424,6 +2428,22 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             else None
         )
         self.density_3d_rng = random.Random(density_seed)
+        # residual-3D solvent charge supervision (bound + ionic channels,
+        # normalized by the manifest's per-channel signal mean-squares:
+        # weight 1.0 = parity with the unit-normalized terms)
+        self.register_buffer(
+            "solvent3d_weight",
+            torch.tensor(solvent3d_weight, dtype=torch.get_default_dtype()),
+        )
+        self.solvent3d_targets = None
+        self.solvent3d_samples = int(solvent3d_samples)
+        self.solvent3d_sigmas = _parse_density_sigmas(solvent3d_sigmas)
+        self.solvent3d_rng = random.Random(density_seed + 777)
+        self.solvent3d_seed = density_seed + 777
+        if solvent3d_file is not None and float(solvent3d_weight) > 1.0e-12:
+            from .solvent3d import Solvent3DGridTargets
+
+            self.solvent3d_targets = Solvent3DGridTargets(solvent3d_file)
         self.potential_1d_profile_file = potential_1d_profile_file
         self.potential_1d_profile_targets = (
             _load_potential_1d_profiles_npz(potential_1d_profile_file)
@@ -2517,6 +2537,15 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
             loss_occ = mean_squared_error_occ_aug(ref, pred, self.occ_aug_targets, ddp=ddp)
             if loss_occ is not None:
                 loss = loss + self.occ_aug_weight * loss_occ
+        if self.solvent3d_weight > 1e-12 and self.solvent3d_targets is not None:
+            from .solvent3d import mean_squared_error_solvent3d
+
+            loss_solvent3d = mean_squared_error_solvent3d(
+                ref, pred, self.solvent3d_targets.signal_ms,
+                self.solvent3d_sigmas, reduce_loss, ddp=ddp,
+            )
+            if loss_solvent3d is not None:
+                loss = loss + self.solvent3d_weight * loss_solvent3d
         if self.potential_1d_profile_weight > 1e-12:
             loss_potential_1d_profile = mean_squared_error_potential_1d_profile(
                 ref=ref,

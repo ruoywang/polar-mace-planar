@@ -291,6 +291,7 @@ class PB1DBackend:
         head=None,
         q_tot: Optional[torch.Tensor] = None,
         ckpt_closure: bool = True,
+        probe_points: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -472,6 +473,20 @@ class PB1DBackend:
                 msg = " ".join(f"{k}={v:.1f}" for k, v in snap.items())
                 print(f"PB1DTIMING calls={self.timing_calls} "
                       f"fwd_total={total:.1f}ms/graph {msg}", flush=True)
+        # solvent3d probe: detached envelopes + 1-D baselines at the sampled
+        # label points (supervision only; no gradient path through the solve)
+        solv3d = None
+        if probe_points is not None:
+            cav = getattr(grid, "_solv3d_cavity", None)
+            if cav is not None:
+                from .solvent3d import solvent3d_probe_fields
+                with torch.no_grad():
+                    solv3d = solvent3d_probe_fields(
+                        s_ion3=cav[0], s_diel3=cav[1], cell=cell64,
+                        points=probe_points.to(dt),
+                        rho_bound_z=rho_bound_z.detach(),
+                        rho_ion_z=rho_ion_z.detach(),
+                    )
         return {
             "z": z,
             "phi_z": out["phi"],
@@ -488,4 +503,5 @@ class PB1DBackend:
             "rms_last": float(out["rms_last"]),
             "prior_solve": prior_s,
             "delta_p": delta_p,
+            "solv3d": solv3d,
         }

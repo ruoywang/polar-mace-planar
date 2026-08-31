@@ -348,6 +348,8 @@ def _build_model(
             solvent_pb1d_c_max=getattr(args, "solvent_pb1d_c_max", 0.25),
             solvent_pb1d_upsample=getattr(args, "solvent_pb1d_upsample", 2),
             solvent_pb1d_max_outer=getattr(args, "solvent_pb1d_max_outer", 12),
+            solvent3d_head=getattr(args, "solvent3d_head", False),
+            solvent3d_sigmas=getattr(args, "solvent3d_sigmas", "[0.5, 1.0, 2.0]"),
             solvent_pb1d_fresh_stage1=getattr(args, "solvent_pb1d_fresh_stage1", False),
             occ_aug_enabled=float(getattr(args, "occ_aug_weight", 0.0)) > 1.0e-12,
             occ_aug_channel_spec=getattr(args, "occ_aug_channel_spec", None),
