@@ -252,3 +252,24 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - Verdict: cross-structure learnability CONFIRMED; route is sound. Next
   levers to close the 2x gap: equivariant readout (invariant-MLP is the
   probe shortcut), bigger head/longer training, richer features.
+
+## 2026-08-31 exp_residual3d_head level 2b: head done properly (COMPLETE)
+- Two architectures, same protocol (25k steps x 4 frames x 8192 pts, AdamW
+  cosine, ion output gated by q_tot; jobs 3403715/3403716):
+  (a) equi: structured readout from the irreps blocks of the mixed feats
+      (scalars+block norms -> gate MLP; l=1/2 coefficients = gated linear
+      channel mixes of the matching blocks);
+  (b) mlp: plain MLP control, 1152-1024-512-256-54.
+- HELD-OUT (59 val): bound rms/res1d equi 0.464 / mlp 0.471 / level-2 small
+  mlp 0.473 -> FLAT. head/ceiling(bound) ~2.0 both. Architecture, capacity
+  (2-4x), and sample count (3.3x) all move nothing on bound.
+- ion (charged) improved 0.584 -> 0.489 (equi) / 0.464 (mlp); neutral ion
+  ratio exactly 1.00 by the q gate (level-2's 2x degradation eliminated).
+- Energy diag: charged bound coupling mean |E| ~0.9-1.0 eV (res1d ~2.3-3.4,
+  per-frame fit ceiling 0.3-0.7).
+- READING: the remaining 2x bound gap is INFORMATION-limited, not
+  architecture-limited — the frozen trunk features do not carry the
+  frame-specific lateral solvent detail (and part of the per-frame lstsq
+  ceiling is unreachable for any transferable model). Lever to close it:
+  joint training (residual loss backprops into the trunk) = the planned
+  stage-2 integration; or accept ~0.47 and integrate as-is.
