@@ -202,3 +202,32 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   stage-2 energy/force term.
 - Verdict: representation adequate; next level = frozen-trunk head training
   (cross-structure learnability of the modulation coefficients).
+
+## 2026-08-30 TTT pbc fix executed everywhere (user directive: never again)
+- User directive: fix TTT to TTF now, and this error must never recur.
+- Surgical line edits (tools1d/fix_pbc_ttf.py; solvated=0 rows only, pbc
+  field only; backups + log in claude/2-1D_PB/ttt_fix_backup/): NiN-mix
+  160/19/21, 1-train_all/data 160/20/20, 5-only_fermi val/test 20/20,
+  exp_neutral_prep/neutral_draft.xyz 200 (the assembly source). 840 lines.
+- VERIFIED: NiN-mix's 200 fixed neutral header lines are byte-identical to
+  the surviving corrected copy (claude/3-charge_probe/data_neutral) — the
+  fix reproduces the deleted 4-TTF correction exactly. ASE round-trip OK.
+- 7-cpmace was WRONGLY edited first, then reverted byte-identical from
+  backup: it is the vanilla CP-MACE comparison bundle, deliberately all-TTT
+  (solvated=1 charged frames are TTT, no Fermi/total_charge keys). Blanket
+  fixes across bundles with different conventions are exactly the incident
+  class — the new audit caught it immediately.
+- Remaining TTT after final sweep: 7-cpmace (intentional), ttt_fix_backup/
+  (the backups), exp_md_smoke/smoke_traj.xyz (output artifact). Zero in any
+  data-source bundle.
+- Recurrence prevention: (1) extract_neutral_set.py now sets pbc TTF
+  explicitly (ase defaults to TTT); (2) NEW GATE tools1d/
+  audit_bundle_conventions.py — run on every new/adopted bundle before use
+  (pbc TTF, solvated presence/consistency, charged->solvated=1, sid
+  uniqueness, per-config_type info-key inventory drift). NiN-mix and
+  1-train_all/data PASS.
+- Dangling-link repair: all 62 symlinks that pointed into the deleted 4-TTF
+  now point at data/NiN-mix (post-fix == 4-TTF content); real
+  density1d_net_cache.npz restored into NiN-mix from exp_2iter_gate's copy.
+  Older dangling links into long-deleted 3-train_add1Dcharge /
+  6-larger_chargew (archived exp dirs) left as-is.
