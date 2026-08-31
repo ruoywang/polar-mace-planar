@@ -231,3 +231,24 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   density1d_net_cache.npz restored into NiN-mix from exp_2iter_gate's copy.
   Older dangling links into long-deleted 3-train_add1Dcharge /
   6-larger_chargew (archived exp dirs) left as-is.
+
+## 2026-08-31 exp_residual3d_head: frozen-trunk head learnability (level 2, COMPLETE)
+- Setup: all 539 frames prepped (labels via fast np.fromfile reader, verified
+  byte-identical to the probe reader; w200 frozen forward stashes feats/
+  envelopes/1-D baselines; 300k fixed points/frame). Head = LayerNorm +
+  MLP 1152-512-256-54 (2ch x 3sig[.5,1,2] x l<=2), zero-init out,
+  OUT_SCALE 100, AdamW 1e-3 cosine, 15k steps x 2 frames x 8192 pts,
+  0.061 s/step (~15 min). Jobs 3403509/3403510.
+- HELD-OUT (59 val frames): bound head/res1d = 0.47 mean (0.40-0.54, flat
+  across charged AND neutral); ion (charged) 0.58 (0.45-0.73). The head
+  halves the lateral residual on unseen structures out of the box.
+- vs per-frame lstsq ceiling (same basis): head/ceiling 1.7-2.3 (bound),
+  1.5-2.4 (ion) — a 2x capacity/feature gap, not a learnability failure.
+- Energy diag: charged bound coupling +2.3..3.4 -> +0.6..1.6 eV (halved);
+  neutral -> -0.4..-0.9 (sign flip, similar magnitude).
+- KNOWN ISSUE: neutral-frame ion channel gets WORSE (2x, adds ~1e-4 where
+  signal ~5e-5): global variance normalization gives neutral frames no vote.
+  Fix candidates: charge-gated ion output or per-frame loss weighting.
+- Verdict: cross-structure learnability CONFIRMED; route is sound. Next
+  levers to close the 2x gap: equivariant readout (invariant-MLP is the
+  probe shortcut), bigger head/longer training, richer features.
