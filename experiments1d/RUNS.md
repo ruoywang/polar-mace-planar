@@ -175,12 +175,17 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   per-frame lstsq ceilings (no training). Dir: claude/2-1D_PB/exp_residual3d_probe.
 - Labels pass all audits (CONTCAR match 1e-13, ion integral = q_tot, rb
   integral ~0, plane avgs == dft_solvent1d_ref to 1e-10).
-- DATA GOTCHA: NiN-mix neutral frames (sid 401-600) are the VACUUM calcs:
-  solvated=0 AND pbc=TTT, so the model skips the solvent block twice over.
-  Probe forces solvated=1 + pbc=TTF -> runtime-baseline path solves cleanly
-  (rms ~1e-12, n_outer 7, q_ion=0). Geometries == 5-44_neutral_withsolv, so
-  the withsolv 3-D labels are valid for them. Future residual-3D training
-  must swap neutral frames to withsolv labels + solvated=1 + pbc TTF.
+- DATA GOTCHA: NiN-mix neutral frames (sid 401-600) are the VACUUM calcs
+  with solvated=0 AND pbc=TTT — NiN-mix is the UNFIXED original (the TTT
+  incident's corrected copy lived only in 4-TTF/data, which w200 actually
+  trained on via symlinks and which is now DELETED; both surviving bundles,
+  NiN-mix and 1-train_all/data, are still TTT — verified line-by-line).
+  w200 thus trained neutrals as TTF slabs WITHOUT solvent (solvated=0);
+  PB never ran on them either way. Probe forces solvated=1 + pbc=TTF ->
+  runtime-baseline path solves cleanly (rms ~1e-12, n_outer 7, q_ion=0).
+  Geometries == 5-44_neutral_withsolv, so the withsolv 3-D labels are valid.
+  Future residual-3D training must swap neutral frames to withsolv labels
+  + solvated=1 + pbc TTF; NiN-mix's formal TTT fix is still pending (user).
 - bound: plane average removes only 5-7% (lateral-dominated; region signal
   2.6-3.6e-3, after 1D 2.5-3.5e-3 e/A^3); envelope fit ceiling leaves 21-28%
   (gradS == s(1-s) envelopes; sigma .25-1 == .5-2 > 1-3; l=2 required:
