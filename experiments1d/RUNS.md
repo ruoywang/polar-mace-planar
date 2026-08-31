@@ -301,3 +301,18 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   density weight 1.0 + signal_ms, bundle paths (occ/cd1d now in ./data).
   rhob_1d_weight stays 1.0 (w200's actual value; NOT 1-train_all's 3e5).
   Gate gate800 (dev, 2 ep, warmup 0, MACE_PB_DEBUG): job 3404091.
+
+## 2026-08-31 gate800 + train800 production (SUBMITTED)
+- Gate 3404107 (dev, 2 ep, warmup 0, MACE_PB_DEBUG, code @2b149d6): PASS.
+  Loaded 640/80/80 + 4 test tables (incl. NiN44neusol); signal_ms echoed;
+  0 PB errors; fresh-stage1 cache 0 files; no OOM at 3xA100 production
+  layout; 175 s/epoch WITH full PB training path (500 ep ~ 24.3 h).
+- Gate 3404091 (first attempt, code @982468c) caught a REAL bug: neutral
+  solvated frames all fell back (758x) because layer_mean = dipole/q_ion
+  blew up at q_ion ~ 0 and failed the health bounds - the PB branch never
+  ran on the new frames. Fix @2b149d6: |rho_ion|-weighted center below
+  |q_ion| 1e-3 (always in [0,H]) and mu = exact ionic dipole integral +
+  mu_bound (identical for charged frames). After the fix the new frames
+  solve at 96.5% (1812 ok / 66 early-garbage fallbacks, self-healing).
+- Production: 2-1D_PB/10-train_800, job 3404125 (gpu-a100, 40 h,
+  3 ranks, 500 ep, warmup 30), code @2b149d6, bundle NiN-mix800.
