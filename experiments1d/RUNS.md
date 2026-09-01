@@ -380,3 +380,10 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - a100 replication leg cancelled (redundant; frees the queue for the
   user's train800 production). Next decision: 500-ep production with
   solvent3d w=1 (recipe = this gate config) vs first extending the gate.
+
+## 2026-09-01 s3d_prod500 SUBMITTED: 500-ep solvent3d production
+- 3-residual_3D/prod500, job 3406494, code @28ca32a (pb-solvent3d), config
+  == the passed gate config (w=1, points pack, density w1.0+signal_ms,
+  warmup 30) with max_num_epochs 500. 3-GPU a100, 30h wall (projection:
+  ~25h at gate pacing). Queued alongside the user's train800 (3404125,
+  main-branch baseline on the same bundle) — the production A/B pair.
