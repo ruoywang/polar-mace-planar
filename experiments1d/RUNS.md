@@ -362,3 +362,21 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   -> squeue visibility lag needs a submit grace + 3-empty-polls rule; a
   sentinel loop (state transitions / log staleness / epoch-time cap /
   stderr / ghost jobs) now guards all runs.
+
+## 2026-09-01 solvent3d GATE VERDICT: PASS (w1 dev leg complete, 34 ep, 78 min)
+- gate_w1_dev job 3406176 @28ca32a, points pack, rc=0, warmup ~2 min/ep,
+  PB epochs ~3 min/ep. vs gate_w0 (same code, weight 0) at epoch 33 (valid):
+  E 8.47 vs 9.80 meV, F 33.96 vs 33.75, potential 0.148 vs 0.183,
+  fermi 0.107 vs 0.120, density_3d 0.0316 vs 0.0310, occ 0.0087 vs 0.0091,
+  Phi1D 0.120 vs 0.126, rhob_1d 2.49e-4 vs 2.44e-4 -> par-or-better on
+  every legacy metric (differences within the epoch-to-epoch noise band).
+- solvent3d supervision IS learning through the joint path: eval
+  RMSE_solvent3d_b frozen at ~2.13e-3 during warmup (head untrained by
+  construction), then 1.151 -> 1.069e-3 over PB epochs 30-33 (ratio ~0.50
+  of the 1-D residual after only ~1.9k labeled steps — already at the
+  frozen-probe level 0.47, still falling); ion 1.28 -> 1.00e-4.
+- Criteria: (1) no legacy-metric harm PASS; (2) solvent3d falling PASS;
+  (3) runtime/memory PASS (3 min PB epochs, no OOM). GATE PASSED.
+- a100 replication leg cancelled (redundant; frees the queue for the
+  user's train800 production). Next decision: 500-ep production with
+  solvent3d w=1 (recipe = this gate config) vs first extending the gate.
