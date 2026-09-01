@@ -180,12 +180,14 @@ class Solvent3DGridTargets:
             p = Path(entry[key])
             return p if p.is_absolute() else self.manifest_path.parent / p
 
-        # full sequential read into RAM, NOT mmap: the loss samples ~1k random
-        # points per access, and cold random 4K page reads on Lustre cost
-        # 3-5 s/graph (measured 2026-08-31, 16x epoch slowdown); a sequential
-        # 108 MB read is ~0.1 s and the page cache makes repeats ~free
-        rho_b = np.load(_p("path_b"))
-        rho_i = np.load(_p("path_i"))
+        # mmap + sequential materialization — measured on the training nodes
+        # (2026-08-31, $SCRATCH is BeeGFS):
+        #   * random mmap faults (1k sampled points): 3-5 s/graph cold
+        #   * plain read() (np.load without mmap): bypasses the client-side
+        #     cache entirely -> re-fetches ~57 GB/epoch forever (14.5 min/ep)
+        #   * mmap sequential materialize: 0.0-0.1 s/file, repeats 1-2 ms
+        rho_b = np.asarray(np.load(_p("path_b"), mmap_mode="r"))
+        rho_i = np.asarray(np.load(_p("path_i"), mmap_mode="r"))
         with np.load(_p("meta_path")) as meta:
             lattice = np.asarray(meta["lattice"], dtype=np.float64)
         item = (rho_b, rho_i, lattice)
