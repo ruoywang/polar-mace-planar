@@ -216,6 +216,62 @@ class Solvent3DGridTargets:
         )
 
 
+class Solvent3DPointsTargets:
+    """Presampled point pack (solvent3d_points_npy_v1): per sid one npy of
+    rows (x, y, z, ref_b, ref_i) f32, drawn uniformly at build time. Each
+    access reads ONE contiguous window — ~20 KB, cold-cache cost ~ms — which
+    is the structural fix for BeeGFS, where nothing retains the 65 GB
+    full-grid pack between epochs (measured 10-30 min/epoch of pure IO in
+    both random-fault and sequential-read modes, 2026-08-31)."""
+
+    def __init__(self, manifest_path: Union[str, Path], max_open: int = 64):
+        self.manifest_path = Path(manifest_path)
+        payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        if payload.get("format") != "solvent3d_points_npy_v1":
+            raise ValueError(f"Unsupported solvent3d points manifest {self.manifest_path}")
+        self.signal_ms = {
+            "b": float(payload["signal_ms"]["b"]),
+            "i": float(payload["signal_ms"]["i"]),
+        }
+        self.n_points = int(payload["n_points"])
+        self.entries = {int(k): v for k, v in payload["entries"].items()}
+        self.max_open = int(max_open)
+        self._open: OrderedDict = OrderedDict()
+
+    def __contains__(self, sample_id: int) -> bool:
+        return int(sample_id) in self.entries
+
+    def _mmap(self, sample_id: int):
+        sample_id = int(sample_id)
+        if sample_id in self._open:
+            self._open.move_to_end(sample_id)
+            return self._open[sample_id]
+        p = Path(self.entries[sample_id]["path"])
+        p = p if p.is_absolute() else self.manifest_path.parent / p
+        arr = np.load(p, mmap_mode="r")
+        self._open[sample_id] = arr
+        while len(self._open) > self.max_open:
+            self._open.popitem(last=False)
+        return arr
+
+    def sample_points(self, sample_id, n_points, rng, dtype, device):
+        arr = self._mmap(sample_id)
+        n = arr.shape[0]
+        rand = rng if rng is not None else random
+        off = rand.randrange(0, max(n - int(n_points), 1))
+        rows = np.asarray(arr[off:off + int(n_points)])
+        t = torch.as_tensor(rows, dtype=dtype, device=device)
+        return t[:, 0:3].contiguous(), t[:, 3].contiguous(), t[:, 4].contiguous()
+
+
+def load_solvent3d_targets(path: Union[str, Path]):
+    """Manifest-format dispatch: points pack (preferred) or full-grid pack."""
+    fmt = json.loads(Path(path).read_text(encoding="utf-8")).get("format")
+    if fmt == "solvent3d_points_npy_v1":
+        return Solvent3DPointsTargets(path)
+    return Solvent3DGridTargets(path)
+
+
 def attach_solvent3d_samples_to_batch(batch, loss_fn) -> None:
     targets = getattr(loss_fn, "solvent3d_targets", None)
     samples_per_graph = int(getattr(loss_fn, "solvent3d_samples", 0))

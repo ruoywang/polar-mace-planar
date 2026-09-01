@@ -2441,9 +2441,9 @@ class WeightedEnergyForcesElectrostaticsLoss(torch.nn.Module):
         self.solvent3d_rng = random.Random(density_seed + 777)
         self.solvent3d_seed = density_seed + 777
         if solvent3d_file is not None and float(solvent3d_weight) > 1.0e-12:
-            from .solvent3d import Solvent3DGridTargets
+            from .solvent3d import load_solvent3d_targets
 
-            self.solvent3d_targets = Solvent3DGridTargets(solvent3d_file)
+            self.solvent3d_targets = load_solvent3d_targets(solvent3d_file)
         self.potential_1d_profile_file = potential_1d_profile_file
         self.potential_1d_profile_targets = (
             _load_potential_1d_profiles_npz(potential_1d_profile_file)
