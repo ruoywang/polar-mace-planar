@@ -339,3 +339,26 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   with density_3d_weight 1.0 + signal_ms 4.6934e-3 (normalized w200-strength)
   on the NiN-mix800 bundle. Pass criteria: w1 hurts no legacy metric vs w0
   at equal epochs; solvent3d validation falling; memory/step-time measured.
+
+## 2026-09-01 solvent3d label-IO saga: RESOLVED by presampled point pack
+- Root cause chain (all on-node measurements): NiN-mix800 label pack (65 GB)
+  must re-stream EVERY epoch on BeeGFS — read() bypasses all local caching
+  (fincore 0 B after 3 full reads; 88 MB/s sustained), random mmap faults
+  are latency-bound (3-5 s/graph cold), mmap sequential materialize also
+  re-streams on truly cold nodes (~24 MB/s; the fast standalone timings were
+  polluted by the running job's client cache — trust only the training
+  process's own /proc/PID/io). Epoch times: 24 min (mmap random) ->
+  14.5 min (seq read) -> 33 min (mmap materialize, cold node).
+- Fix @28ca32a: solvent3d_points_npy_v1 — 300k presampled rows/frame
+  (x,y,z,ref_b,ref_i f32; 3.4 GB total), each step reads ONE contiguous
+  ~20 KB window; full-grid signal_ms kept for normalization; builder
+  self-checks rows vs source grids; sampled ms matches full-grid to 0.3%.
+- VERDICT (job 3406176, fresh node c301-004): warmup epochs 1m56s-1m58s —
+  at/below the w0 baseline (2.7-4 min) and back to the production-normal
+  pace. 34-epoch gate leg now fits one dev link.
+- Ops lessons: crashed-session watcher loops survive as PPID=1 orphans and
+  keep resubmitting ghost jobs (two caught: 3405985, 3406172; killed orphan
+  PID 1896485) — new-session takeover must sweep for orphan shells; sbatch
+  -> squeue visibility lag needs a submit grace + 3-empty-polls rule; a
+  sentinel loop (state transitions / log staleness / epoch-time cap /
+  stderr / ghost jobs) now guards all runs.
