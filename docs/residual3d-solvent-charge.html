@@ -1,0 +1,484 @@
+<title>Residual-3D Solvent Charge</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,700;8..60,900&family=Source+Sans+3:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#f5f7f6; --card:#fdfefd; --ink:#1d2630; --ink2:#5a6772; --hair:#d7dee2;
+  --bound:#2a78d6; --ion:#eb6834; --grad:#4a3aa7;
+  --bound-soft:rgba(42,120,214,.14); --ion-soft:rgba(235,104,52,.13); --grad-soft:rgba(74,58,167,.10);
+  --band-metal:rgba(90,103,114,.14); --good:#00830022;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#141a20; --card:#1b232b; --ink:#e3e9ee; --ink2:#9aa8b3; --hair:#2d3842;
+    --bound:#3987e5; --ion:#d95926; --grad:#9085e9;
+    --bound-soft:rgba(57,135,229,.18); --ion-soft:rgba(217,89,38,.18); --grad-soft:rgba(144,133,233,.14);
+    --band-metal:rgba(154,168,179,.12); --good:#00830033;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#141a20; --card:#1b232b; --ink:#e3e9ee; --ink2:#9aa8b3; --hair:#2d3842;
+  --bound:#3987e5; --ion:#d95926; --grad:#9085e9;
+  --bound-soft:rgba(57,135,229,.18); --ion-soft:rgba(217,89,38,.18); --grad-soft:rgba(144,133,233,.14);
+  --band-metal:rgba(154,168,179,.12); --good:#00830033;
+}
+body{background:var(--paper);color:var(--ink);font-family:"Source Sans 3",-apple-system,sans-serif;
+     font-size:15px;line-height:1.75;margin:0}
+main{max-width:920px;margin:0 auto;padding:40px 24px 80px}
+h1{font-family:"Source Serif 4",Georgia,serif;font-weight:900;font-size:34px;line-height:1.3;margin:6px 0 4px;text-wrap:balance}
+h2{font-family:"Source Serif 4",Georgia,serif;font-weight:700;font-size:21px;margin:56px 0 6px;text-wrap:balance}
+h2 .no{font-family:"IBM Plex Mono",monospace;font-weight:500;color:var(--ink2);font-size:15px;margin-right:10px}
+p{max-width:66ch;margin:8px 0}
+.sub{color:var(--ink2)}
+mono,code,.mono{font-family:"IBM Plex Mono",monospace;font-size:.92em}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+.chip{font-size:12.5px;padding:3px 12px;border-radius:999px;border:1px solid var(--hair);color:var(--ink2);letter-spacing:.02em}
+.chip.on{background:var(--good);border-color:transparent;color:var(--ink)}
+figure{margin:22px 0 8px;background:var(--card);border:1px solid var(--hair);border-radius:10px;padding:18px 18px 10px;overflow-x:auto}
+figure svg{max-width:100%;height:auto;display:block;margin:0 auto}
+figcaption{font-size:13px;color:var(--ink2);line-height:1.7;margin-top:10px;border-top:1px solid var(--hair);padding-top:9px;max-width:none}
+.formula{font-family:"IBM Plex Mono",monospace;font-size:14.5px;background:var(--card);border:1px solid var(--hair);
+  border-radius:8px;padding:10px 16px;margin:14px 0;overflow-x:auto;white-space:nowrap}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums;margin:14px 0}
+th,td{padding:7px 12px;text-align:right;border-bottom:1px solid var(--hair)}
+th{color:var(--ink2);font-weight:500;font-size:12.5px}
+th:first-child,td:first-child{text-align:left}
+td.win{color:var(--bound);font-weight:700}
+.legend{display:flex;gap:18px;font-size:12.5px;color:var(--ink2);margin:2px 4px 6px}
+.legend b{display:inline-block;width:14px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tipbox{position:absolute;pointer-events:none;background:var(--ink);color:var(--paper);font:12px "IBM Plex Mono",monospace;
+  padding:5px 9px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-130%);display:none}
+.svgtxt{font-family:"Source Sans 3",sans-serif;font-size:12.5px;fill:var(--ink)}
+.svgsub{font-family:"Source Sans 3",sans-serif;font-size:11.5px;fill:var(--ink2)}
+.svgmono{font-family:"IBM Plex Mono",monospace;font-size:11.5px;fill:var(--ink)}
+.eqbox{background:var(--card);border:1px solid var(--hair);border-radius:8px;padding:2px 16px;margin:14px 0;overflow-x:auto}
+footer{margin-top:60px;font-size:12.5px;color:var(--ink2);border-top:1px solid var(--hair);padding-top:14px}
+a{color:var(--bound)}
+</style>
+<main>
+<div class="sub mono" style="font-size:12px;letter-spacing:.08em">POLAR-MACE · PB-SOLVENT3D BRANCH · 2026-09-02</div>
+<h1>Residual-3D Solvent Charge: Mechanism and Validation</h1>
+<p class="sub">On top of the 1-D Poisson–Boltzmann solvation model, a residual head completes the solvent bound and ionic charge on the full 3-D grid. This page answers four questions — how the prediction works, what it consumes, what it outputs, and how a grid value is assembled — followed by the design and results of three validation rounds.</p>
+<div class="chips">
+  <span class="chip on">34-epoch gate: passed</span>
+  <span class="chip">500-epoch production running (dual-lane)</span>
+  <span class="chip">branch pb-solvent3d @28ca32a</span>
+  <span class="chip">data NiN-mix800 (600 frames with 3-D labels)</span>
+</div>
+
+<h2><span class="no">1</span>Pipeline: where the prediction happens</h2>
+<figure>
+<svg viewBox="0 0 960 440" role="img" aria-label="Prediction pipeline: the MACE backbone feeds three branches (1-D PB solve, equivariant readout head, live cavity); the assembled 3-D solvent charge is compared to DFT labels at sampled points; gradients flow back only through the head coefficients">
+<defs>
+  <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker>
+  <marker id="arg" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0 0 L8 4 L0 8 z" fill="var(--grad)"/></marker>
+</defs>
+<g stroke="currentColor" fill="none" stroke-width="1.3">
+  <rect x="14" y="176" width="96" height="68" rx="7"/>
+  <rect x="156" y="176" width="112" height="68" rx="7"/>
+  <rect x="330" y="56"  width="168" height="56" rx="7"/>
+  <rect x="330" y="182" width="168" height="56" rx="7" stroke="var(--grad)" stroke-width="2"/>
+  <rect x="330" y="308" width="168" height="56" rx="7"/>
+  <rect x="700" y="150" width="240" height="96" rx="7"/>
+  <rect x="742" y="292" width="170" height="46" rx="23"/>
+</g>
+<rect x="330" y="182" width="168" height="56" rx="7" fill="var(--grad-soft)"/>
+<text x="62" y="204" text-anchor="middle" class="svgtxt">Structure</text>
+<text x="62" y="222" text-anchor="middle" class="svgsub">positions · total charge</text>
+<text x="212" y="204" text-anchor="middle" class="svgtxt">MACE backbone</text>
+<text x="212" y="222" text-anchor="middle" class="svgsub">message passing ×2 layers</text>
+<text x="414" y="79"  text-anchor="middle" class="svgtxt">1-D PB solver</text>
+<text x="414" y="97"  text-anchor="middle" class="svgsub">existing 1-D solvation model, untouched</text>
+<text x="414" y="205" text-anchor="middle" class="svgtxt">equivariant linear head (new)</text>
+<text x="414" y="223" text-anchor="middle" class="svgsub">zero-init · ionic channel ×q<tspan baseline-shift="sub" font-size="9">tot</tspan></text>
+<text x="414" y="331" text-anchor="middle" class="svgtxt">live cavity build</text>
+<text x="414" y="349" text-anchor="middle" class="svgsub">s_diel(r) · s_ion(r), from the density every step</text>
+<text x="820" y="181" text-anchor="middle" class="svgtxt">assembled 3-D solvent charge</text>
+<text x="820" y="207" text-anchor="middle" class="svgmono" font-size="12">ρ(r) = ρ₁d(z)</text>
+<text x="820" y="228" text-anchor="middle" class="svgmono" font-size="12">+ env(r)·Σₐ cₐ·G(r−Rₐ)</text>
+<text x="827" y="320" text-anchor="middle" class="svgtxt">sampled-point MSE loss</text>
+<g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)" fill="none">
+  <line x1="110" y1="210" x2="150" y2="210"/>
+  <path d="M268 196 C 300 180, 300 100, 324 88"/>
+  <path d="M268 224 C 300 240, 300 320, 324 332"/>
+  <line x1="498" y1="84"  x2="694" y2="160"/>
+  <line x1="498" y1="336" x2="694" y2="236"/>
+  <line x1="820" y1="246" x2="824" y2="286"/>
+</g>
+<line x1="268" y1="210" x2="324" y2="210" stroke="var(--grad)" stroke-width="2" marker-end="url(#arg)"/>
+<line x1="498" y1="210" x2="694" y2="200" stroke="var(--grad)" stroke-width="2" marker-end="url(#arg)"/>
+<text x="292" y="200" class="svgsub" font-size="10.5">features x_i</text>
+<text x="540" y="196" class="svgsub" font-size="10.5" fill="var(--grad)">coefficients c (with grad)</text>
+<text x="520" y="118" class="svgsub" font-size="10.5">ρ₁d profile</text>
+<text x="520" y="322" class="svgsub" font-size="10.5">envelope env(r)</text>
+<text x="286" y="152" class="svgsub" font-size="10.5">charge coeffs</text>
+<text x="288" y="286" class="svgsub" font-size="10.5">electron density</text>
+<g>
+  <circle cx="592" cy="122" r="9" fill="var(--paper)" stroke="currentColor" stroke-width="1.3"/>
+  <line x1="586" y1="128" x2="598" y2="116" stroke="currentColor" stroke-width="1.3"/>
+  <circle cx="592" cy="288" r="9" fill="var(--paper)" stroke="currentColor" stroke-width="1.3"/>
+  <line x1="586" y1="294" x2="598" y2="282" stroke="currentColor" stroke-width="1.3"/>
+  <text x="612" y="126" class="svgsub" font-size="10.5">detached (no grad)</text>
+  <text x="612" y="292" class="svgsub" font-size="10.5">detached (no grad)</text>
+</g>
+<path d="M498 68 C 600 44, 700 40, 830 46" stroke="currentColor" stroke-width="1.1" fill="none" stroke-dasharray="1 4" marker-end="url(#ar)"/>
+<text x="700" y="30" class="svgsub" font-size="10.5">potential / Fermi / Phi1D observables (existing path, unaffected)</text>
+<path d="M742 320 C 500 420, 300 420, 218 250" stroke="var(--grad)" stroke-width="1.8" fill="none" stroke-dasharray="6 4" marker-end="url(#arg)"/>
+<text x="480" y="416" text-anchor="middle" class="svgsub" fill="var(--grad)">the only gradient path: loss → coefficients c → features x_i → backbone (joint training)</text>
+</svg>
+<figcaption>The prediction pipeline. The <b>solid violet line</b> is the only grad-carrying forward path; the dashed violet line is its backward flow — this is how the 3-D supervision shapes the backbone features. Both the ρ₁d baseline and the cavity envelope are detached (⊘): the 3-D loss must not push the 1-D solve or deform the cavity (the ρ_b 1-D supervision experiment showed that doing so damages the potential observables). The 1-D solver and every existing observable path are untouched.</figcaption>
+</figure>
+
+<h2><span class="no">2</span>The head: inputs and outputs</h2>
+<figure>
+<svg viewBox="0 0 960 330" role="img" aria-label="The head consumes 1152-dim node features arranged in angular-momentum blocks; a same-l equivariant linear map outputs per-atom Gaussian coefficients of 2 channels × 3 widths × 9 spherical components, with the ionic channel gated by the total charge">
+<text x="20" y="30" class="svgtxt" font-weight="700">Input: per-atom features x_i (1152 dims, irreps-blocked)</text>
+<g font-size="11">
+  <text x="20" y="58" class="svgsub">layer 1</text>
+  <rect x="80" y="44" width="36"  height="26" fill="var(--band-metal)" stroke="currentColor" stroke-width="1"/>
+  <rect x="116" y="44" width="100" height="26" fill="var(--bound-soft)" stroke="currentColor" stroke-width="1"/>
+  <rect x="216" y="44" width="164" height="26" fill="var(--grad-soft)" stroke="currentColor" stroke-width="1"/>
+  <text x="98"  y="61" text-anchor="middle" class="svgsub" font-size="10">l=0</text>
+  <text x="166" y="61" text-anchor="middle" class="svgsub" font-size="10">l=1 (64×3)</text>
+  <text x="298" y="61" text-anchor="middle" class="svgsub" font-size="10">l=2 (64×5)</text>
+  <text x="20" y="98" class="svgsub">layer 2</text>
+  <rect x="80" y="84" width="36"  height="26" fill="var(--band-metal)" stroke="currentColor" stroke-width="1"/>
+  <rect x="116" y="84" width="100" height="26" fill="var(--bound-soft)" stroke="currentColor" stroke-width="1"/>
+  <rect x="216" y="84" width="164" height="26" fill="var(--grad-soft)" stroke="currentColor" stroke-width="1"/>
+  <text x="98"  y="101" text-anchor="middle" class="svgsub" font-size="10">l=0</text>
+  <text x="166" y="101" text-anchor="middle" class="svgsub" font-size="10">l=1</text>
+  <text x="298" y="101" text-anchor="middle" class="svgsub" font-size="10">l=2</text>
+</g>
+<g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)" fill="none">
+  <line x1="390" y1="57" x2="470" y2="120"/>
+  <line x1="390" y1="97" x2="470" y2="140"/>
+</g>
+<defs><marker id="ar2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+  <path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+<text x="398" y="80" class="svgsub" font-size="10.5">same-l linear mixing</text>
+<text x="398" y="94" class="svgsub" font-size="10.5">(no l-mixing → exactly equivariant)</text>
+<rect x="470" y="104" width="130" height="62" rx="7" fill="var(--grad-soft)" stroke="var(--grad)" stroke-width="2"/>
+<text x="535" y="130" text-anchor="middle" class="svgtxt">equivariant linear</text>
+<text x="535" y="150" text-anchor="middle" class="svgsub" font-size="10.5">weights zero-initialized</text>
+<line x1="535" y1="240" x2="535" y2="170" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+<text x="545" y="222" class="svgsub" font-size="10.5">q_tot gate (ionic channel only;</text>
+<text x="545" y="237" class="svgsub" font-size="10.5">neutral frames: ionic output exactly zero)</text>
+<line x1="600" y1="135" x2="648" y2="135" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+<text x="660" y="30" class="svgtxt" font-weight="700">Output: per-atom Gaussian coefficients c[a, 2, 3, 9]</text>
+<g>
+  <text x="660" y="66" class="svgsub" font-size="11" fill="var(--bound)">bound channel</text>
+  <g stroke="var(--bound)" stroke-width="1" fill="var(--bound-soft)">
+    <rect x="660" y="74" width="243" height="27"/><rect x="660" y="101" width="243" height="27"/><rect x="660" y="128" width="243" height="27"/>
+  </g>
+  <g stroke="var(--bound)" stroke-width=".7">
+    <line x1="687" y1="74" x2="687" y2="155"/><line x1="768" y1="74" x2="768" y2="155"/>
+    <line x1="714" y1="74" x2="714" y2="155" opacity=".4"/><line x1="741" y1="74" x2="741" y2="155" opacity=".4"/>
+    <line x1="795" y1="74" x2="795" y2="155" opacity=".4"/><line x1="822" y1="74" x2="822" y2="155" opacity=".4"/>
+    <line x1="849" y1="74" x2="849" y2="155" opacity=".4"/><line x1="876" y1="74" x2="876" y2="155" opacity=".4"/>
+  </g>
+  <text x="908" y="91"  class="svgsub" font-size="10">σ=0.5 Å</text>
+  <text x="908" y="118" class="svgsub" font-size="10">σ=1.0 Å</text>
+  <text x="908" y="145" class="svgsub" font-size="10">σ=2.0 Å</text>
+  <text x="673" y="170" class="svgsub" font-size="10">l=0</text>
+  <text x="727" y="170" class="svgsub" font-size="10">l=1 (3 comps)</text>
+  <text x="835" y="170" class="svgsub" font-size="10">l=2 (5 comps)</text>
+  <text x="660" y="203" class="svgsub" font-size="11" fill="var(--ion)">ionic channel (same layout, ×q_tot)</text>
+  <g stroke="var(--ion)" stroke-width="1" fill="var(--ion-soft)">
+    <rect x="660" y="211" width="243" height="27"/><rect x="660" y="238" width="243" height="27"/><rect x="660" y="265" width="243" height="27"/>
+  </g>
+  <g stroke="var(--ion)" stroke-width=".7">
+    <line x1="687" y1="211" x2="687" y2="292"/><line x1="768" y1="211" x2="768" y2="292"/>
+  </g>
+  <text x="908" y="255" class="svgsub" font-size="10">same σ</text>
+</g>
+</svg>
+<figcaption>The input is the concatenation of both interaction layers&rsquo; node features (the same features the 1-D P_off head consumes), internally blocked by angular momentum. The head is a single equivariant linear layer: l=0 coefficients mix only the scalar blocks, l=1 and l=2 each mix only their own blocks — no cross-l mixing, hence exact rotational equivariance, and the coefficient layout matches the existing 3-D density evaluators bit-for-bit (unit-tested to 10⁻¹⁷). Zero initialization makes the initial residual identically zero: with no training, the model is untouched.</figcaption>
+</figure>
+
+<h2><span class="no">3</span>How any grid value is assembled</h2>
+<div class="eqbox">
+\[
+\rho_{c}(\mathbf r)\;=\;\underbrace{\rho^{\mathrm{1D}}_{c}(z)}_{\text{(1)}}\;+\;\underbrace{\mathrm{env}_{c}(\mathbf r)}_{\text{(2)}}\cdot\underbrace{\sum_{a}^{N_{\mathrm{at}}}\;\sum_{\sigma}^{3}\;\sum_{l=0}^{2}\sum_{m=-l}^{l} c^{\,\sigma lm}_{a,c}\;G^{lm}_{\sigma}\!\left(\mathbf r-\mathbf R_a\right)}_{\text{(3)}},\qquad c\in\{\mathrm{b},\;\mathrm{ion}\}
+\]
+\[
+\mathrm{env}_{\mathrm b}(\mathbf r)=\frac{\left|\nabla s_{\mathrm{diel}}(\mathbf r)\right|}{\max_{\mathbf r}\left|\nabla s_{\mathrm{diel}}\right|},\qquad
+\mathrm{env}_{\mathrm{ion}}(\mathbf r)=s_{\mathrm{ion}}(\mathbf r),\qquad
+G^{lm}_{\sigma}(\mathbf d)\;\propto\;\left|\mathbf d\right|^{\,l}\,Y_{lm}(\hat{\mathbf d})\;e^{-\left|\mathbf d\right|^{2}/2\sigma^{2}}
+\]
+\[
+c^{\,\sigma lm}_{a,\mathrm{b}}=\big[W_{l}\,x_{a}\big]^{\sigma m}_{\mathrm{b}},\qquad
+c^{\,\sigma lm}_{a,\mathrm{ion}}=q_{\mathrm{tot}}\cdot\big[W_{l}\,x_{a}\big]^{\sigma m}_{\mathrm{ion}}
+\qquad(W_{l}\text{: same-}l\text{ equivariant linear, zero-init})
+\]
+</div>
+<figure>
+<svg viewBox="0 0 960 470" role="img" aria-label="Three components on a shared z axis: the 1-D profile baseline, the cavity envelope at the interface, and the atom-centered Gaussian modulation; the formula combines them into the charge value at any point">
+<g font-size="10.5">
+  <rect x="80"  y="46" width="196" height="360" fill="var(--band-metal)"/>
+  <rect x="276" y="46" width="195" height="360" fill="var(--bound-soft)" opacity=".45"/>
+  <rect x="471" y="46" width="409" height="360" fill="var(--ion-soft)" opacity=".4"/>
+  <text x="178" y="38" text-anchor="middle" class="svgsub">metal slab</text>
+  <text x="373" y="38" text-anchor="middle" class="svgsub">explicit water</text>
+  <text x="675" y="38" text-anchor="middle" class="svgsub">implicit solvent (PB continuum)</text>
+</g>
+<g class="svgsub" font-size="10.5">
+  <line x1="80" y1="406" x2="880" y2="406" stroke="currentColor" stroke-width="1"/>
+  <text x="80" y="424">z = 0</text><text x="470" y="424">≈22 Å</text><text x="856" y="424">45 Å</text>
+</g>
+<text x="20" y="86" class="svgtxt" font-weight="700">①</text>
+<text x="40" y="86" class="svgsub">baseline ρ₁d(z): the 1-D solve profile broadcast along z (detached)</text>
+<path d="M80 140 L276 140 C 320 140 330 128 360 126 C 400 124 420 148 470 118 C 505 98 540 108 580 128 C 640 152 700 140 880 139"
+      stroke="var(--bound)" stroke-width="2" fill="none"/>
+<line x1="80" y1="140" x2="880" y2="140" stroke="currentColor" stroke-width=".7" stroke-dasharray="2 4" opacity=".5"/>
+<text x="20" y="212" class="svgtxt" font-weight="700">②</text>
+<text x="40" y="212" class="svgsub">envelope env(r): from the live cavity — it knows where the charge lives (detached)</text>
+<path d="M80 280 L400 280 C 440 280 455 216 495 216 C 535 216 550 280 590 280 L880 280"
+      stroke="var(--bound)" stroke-width="2" fill="none"/>
+<path d="M80 282 L430 282 C 480 282 490 230 545 226 C 610 222 640 224 880 224"
+      stroke="var(--ion)" stroke-width="2" fill="none" stroke-dasharray="7 4"/>
+<text x="500" y="206" class="svgsub" font-size="10" fill="var(--bound)">|∇s_diel|: a thin shell on the cavity interface</text>
+<text x="690" y="243" class="svgsub" font-size="10" fill="var(--ion)">s_ion: the ion-accessible region, opening into the bulk</text>
+<text x="20" y="330" class="svgtxt" font-weight="700">③</text>
+<text x="40" y="330" class="svgsub">modulation field: atom-centered Gaussians × head coefficients c_a (three widths σ, with directional components)</text>
+<g stroke="var(--grad)" fill="none" stroke-width="1.6">
+  <path d="M300 396 C 306 362 318 362 324 396"/>
+  <path d="M340 396 C 352 348 376 348 388 396"/>
+  <path d="M420 396 C 444 356 492 356 516 396"/>
+  <path d="M470 396 C 478 340 498 340 506 396"/>
+</g>
+<g fill="var(--ink2)">
+  <circle cx="140" cy="396" r="4"/><circle cx="180" cy="396" r="4"/><circle cx="220" cy="396" r="4"/>
+</g>
+<g fill="var(--grad)">
+  <circle cx="312" cy="396" r="3.4"/><circle cx="364" cy="396" r="3.4"/><circle cx="468" cy="396" r="3.4"/><circle cx="488" cy="396" r="3.4"/>
+</g>
+<text x="140" y="384" class="svgsub" font-size="10">metal atoms</text>
+<text x="330" y="452" class="svgsub" font-size="10.5">G_σlm on water/interface atoms (σ = 0.5 / 1.0 / 2.0 Å); amplitude and direction set by c_a</text>
+<text x="890" y="140" class="svgmono" font-size="12">①</text>
+<text x="890" y="252" class="svgmono" font-size="12">②</text>
+<text x="890" y="380" class="svgmono" font-size="12">③</text>
+</svg>
+<figcaption>The key division of labour: <b>sharp localization belongs to physics</b> — the envelope is rebuilt from the current electron density every step (full 3-D field, per-point gradient, not a plane average), so it naturally sits on the corrugated cavity interface and follows atoms and charge state; <b>ML only supplies smooth modulation</b> — atom-centered Gaussians represent a smooth field comfortably. This decomposition is a measured conclusion, not an assumption: removing the envelope (bare atomic basis) costs a 2–3× loss of fitting power (§5). A grid value = ① + ② × the Gaussian sum of ③; during training the field is only ever evaluated at sampled points, never on the full grid.</figcaption>
+</figure>
+
+<h2><span class="no">4</span>Supervision: labels and the point pack</h2>
+<figure>
+<svg viewBox="0 0 960 250" role="img" aria-label="The DFT RHOB/RHOION full-grid labels are presampled once into 300k contiguous rows per frame; each training step reads one contiguous 1024-point window and compares model and label at the same points">
+<g stroke="currentColor" fill="none" stroke-width="1.3">
+  <rect x="14"  y="60" width="182" height="84" rx="7"/>
+  <rect x="286" y="60" width="220" height="84" rx="7"/>
+  <rect x="600" y="60" width="150" height="84" rx="7"/>
+  <rect x="800" y="70" width="140" height="64" rx="32"/>
+</g>
+<text x="105" y="88"  text-anchor="middle" class="svgtxt">DFT labels (VASPsol++)</text>
+<text x="105" y="108" text-anchor="middle" class="svgmono" font-size="11">RHOB / RHOION</text>
+<text x="105" y="126" text-anchor="middle" class="svgsub" font-size="10.5">168×168×500 ×2 · 108 MB/frame</text>
+<text x="396" y="84"  text-anchor="middle" class="svgtxt">presampled point pack (built once)</text>
+<text x="396" y="104" text-anchor="middle" class="svgmono" font-size="11">(x,y,z,ρ_b,ρ_i) × 300k rows/frame</text>
+<text x="396" y="124" text-anchor="middle" class="svgsub" font-size="10.5">6 MB/frame · 3.4 GB for 600 frames</text>
+<text x="675" y="92"  text-anchor="middle" class="svgtxt">model at same points</text>
+<text x="675" y="112" text-anchor="middle" class="svgsub" font-size="10.5">the §3 formula, pointwise</text>
+<text x="870" y="96"  text-anchor="middle" class="svgtxt">two-channel MSE</text>
+<text x="870" y="114" text-anchor="middle" class="svgsub" font-size="10.5">/ per-channel signal MS</text>
+<g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar3)" fill="none">
+  <line x1="196" y1="102" x2="280" y2="102"/>
+  <line x1="506" y1="102" x2="594" y2="102"/>
+  <line x1="750" y1="102" x2="794" y2="102"/>
+</g>
+<defs><marker id="ar3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+  <path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+<text x="238" y="88" text-anchor="middle" class="svgsub" font-size="10.5">uniform sampling</text>
+<text x="550" y="88" text-anchor="middle" class="svgsub" font-size="10.5">1024 pts/step</text>
+<g>
+  <rect x="286" y="176" width="440" height="18" fill="none" stroke="currentColor" stroke-width="1"/>
+  <rect x="430" y="176" width="52" height="18" fill="var(--grad-soft)" stroke="var(--grad)" stroke-width="1.4"/>
+  <line x1="396" y1="150" x2="396" y2="170" stroke="currentColor" stroke-width="1" marker-end="url(#ar3)"/>
+  <text x="286" y="214" class="svgsub" font-size="10.5">a random <tspan fill="var(--grad)">contiguous window</tspan> of the 300k rows (1024 rows ≈ 20 KB) — milliseconds even on a cold cache</text>
+</g>
+<text x="14" y="214" class="svgsub" font-size="10.5">frames without labels (200 vacuum neutrals) are skipped</text>
+</svg>
+<div class="eqbox">
+\[
+\mathcal L_{\mathrm{s3d}}\;=\;\frac{1}{N}\sum_{p=1}^{N}\left[
+\frac{\big(\rho_{\mathrm b}(\mathbf r_p)-\rho^{\mathrm{DFT}}_{\mathrm b}(\mathbf r_p)\big)^{2}}{\big\langle(\rho^{\mathrm{DFT}}_{\mathrm b})^{2}\big\rangle}
++\frac{\big(\rho_{\mathrm{ion}}(\mathbf r_p)-\rho^{\mathrm{DFT}}_{\mathrm{ion}}(\mathbf r_p)\big)^{2}}{\big\langle(\rho^{\mathrm{DFT}}_{\mathrm{ion}})^{2}\big\rangle}\right],
+\qquad N=1024\ \text{points/frame/step}
+\]
+</div>
+<figcaption>Why a point pack instead of reading the grids: each step needs only 1024 points, but on BeeGFS no cache layer retains the 65 GB full-grid pack between epochs, and re-streaming it dragged epochs to 10–30 minutes (both read() and mmap access patterns failed on-node measurements). With presampled contiguous rows, each step reads a 20 KB contiguous block and epochs returned to 2 minutes. Statistical equivalence of a fixed 300k-point pool was validated by the frozen-backbone probe (it trained on exactly such a pool). Normalization: each channel is divided by its dataset signal mean-square (bound 4.27×10⁻⁶, ionic 7.91×10⁻⁸), so weight 1.0 sits at parity with the other loss terms.</figcaption>
+</figure>
+
+<h2><span class="no">5</span>Probe I: can this representation hold the answer? (no training)</h2>
+<p class="sub" style="font-size:13.5px">Principle: a trained model supplies baseline and envelopes; a per-frame least-squares fit against the DFT labels then gives the accuracy ceiling of a perfectly trained head. Nine frames (charged/neutral, held-out/train) agree.</p>
+<figure>
+<div class="legend"><span><b style="background:var(--bound)"></b>bound</span><span><b style="background:var(--ion)"></b>ionic</span><span class="sub">solvent-region rms · sid 28 (held-out) · units 10⁻³ e/Å³</span></div>
+<svg viewBox="0 0 960 340" role="img" aria-label="Per-frame least-squares ceiling: bound signal 2.98, after the 1-D baseline 2.76, after the envelope × atomic-basis fit 0.58, bare-basis control 1.70; ionic: 0.62, 0.22, 0.067, 0.147">
+<defs><pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+  <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="1.4" opacity=".45"/></pattern></defs>
+<g font-size="12">
+<text x="70" y="28" class="svgtxt" font-weight="700" fill="var(--bound)">bound (polarization charge)</text>
+<g class="svgsub" font-size="11.5">
+  <text x="70" y="62">signal</text>
+  <text x="70" y="128">after 1-D baseline (residual)</text>
+  <text x="70" y="194">+ envelope × atomic basis = ceiling</text>
+  <text x="70" y="260">bare atomic basis (no envelope)</text>
+</g>
+<g>
+  <rect x="70" y="70"  width="338" height="26" rx="4" fill="var(--bound)" opacity=".45"/>
+  <rect x="70" y="136" width="313" height="26" rx="4" fill="var(--bound)" opacity=".45"/>
+  <rect x="70" y="202" width="66"  height="26" rx="4" fill="var(--bound)"/>
+  <rect x="70" y="268" width="193" height="26" rx="4" fill="url(#hatch)" stroke="var(--bound)" stroke-width="1.4"/>
+</g>
+<g class="svgmono" font-size="12">
+  <text x="416" y="88">2.98</text>
+  <text x="391" y="154">2.76 <tspan class="svgsub" font-size="10.5">(1-D removes only 7%: bound is almost all lateral)</tspan></text>
+  <text x="144" y="220">0.58 <tspan class="svgsub" font-size="10.5">= 21% of the residual</tspan></text>
+  <text x="271" y="286">1.70 <tspan class="svgsub" font-size="10.5">(2.9× worse → the envelope is essential)</tspan></text>
+</g>
+<text x="560" y="28" class="svgtxt" font-weight="700" fill="var(--ion)">ionic charge</text>
+<g class="svgsub" font-size="11.5">
+  <text x="560" y="62">signal</text>
+  <text x="560" y="128">after 1-D baseline</text>
+  <text x="560" y="194">+ envelope × atomic basis = ceiling</text>
+  <text x="560" y="260">bare atomic basis</text>
+</g>
+<g>
+  <rect x="560" y="70"  width="324" height="26" rx="4" fill="var(--ion)" opacity=".45"/>
+  <rect x="560" y="136" width="115" height="26" rx="4" fill="var(--ion)" opacity=".45"/>
+  <rect x="560" y="202" width="35"  height="26" rx="4" fill="var(--ion)"/>
+  <rect x="560" y="268" width="77"  height="26" rx="4" fill="url(#hatch)" stroke="var(--ion)" stroke-width="1.4"/>
+</g>
+<g class="svgmono" font-size="12">
+  <text x="892" y="88">0.62</text>
+  <text x="683" y="154">0.22 <tspan class="svgsub" font-size="10.5">(1-D removes 65%)</tspan></text>
+  <text x="603" y="220">0.067</text>
+  <text x="645" y="286">0.147</text>
+</g>
+<line x1="70" y1="316" x2="884" y2="316" stroke="currentColor" stroke-width=".8" opacity=".4"/>
+<text x="70" y="336" class="svgsub" font-size="11">All 9 frames: ceiling = 21&#8211;28% of the residual | far region (&gt;6 &#197; from any atom) holds 1&#8211;2% | l=2 required (l0/l1/l2 = 1.21/0.87/0.65&#215;10&#8315;&#179;)</text>
+</g>
+</svg>
+<figcaption>Verdict: the representation is adequate. It also answered two design doubts — &ldquo;the solvent charge lives outside the explicit atoms; is an atom-centered Gaussian basis appropriate?&rdquo; (yes, but only with the cavity envelope supplying sharp localization: the bare-basis control is 2–3× worse) and &ldquo;will the coefficients blow up and become unlearnable, like the atom-anchored representation did in the 1-D era?&rdquo; (no: ridge 10⁻¹⁰→10⁻⁷ costs 2–4% accuracy while coefficients settle from 10⁴ to 10³ — no unlearnability elbow).</figcaption>
+</figure>
+
+<h2><span class="no">6</span>Probe II: can a network learn it? (frozen backbone)</h2>
+<p class="sub" style="font-size:13.5px">Principle: freeze the backbone, train only a small head, and score it on 59 never-seen validation frames — the cross-structure learnability question. Three head architectures separate &ldquo;architecture&rdquo; from &ldquo;feature information content&rdquo;.</p>
+<figure>
+<svg viewBox="0 0 960 330" role="img" aria-label="Remaining residual fraction on held-out frames for three head architectures under a frozen backbone: bound ties at 0.46–0.47, about 2× above the per-frame ceiling of 0.21–0.28; ionic improves from 0.58 to 0.46">
+<g font-size="11.5">
+<text x="70" y="26" class="svgtxt" font-weight="700">remaining residual ÷ 1-D baseline residual (held-out mean; lower is better, 1.0 = head does nothing)</text>
+<line x1="200" y1="46" x2="200" y2="290" stroke="currentColor" stroke-width="1" opacity=".5"/>
+<line x1="880" y1="46" x2="880" y2="290" stroke="currentColor" stroke-width=".7" stroke-dasharray="2 4" opacity=".5"/>
+<text x="880" y="304" text-anchor="middle" class="svgsub" font-size="10.5">1.0</text>
+<text x="200" y="304" text-anchor="middle" class="svgsub" font-size="10.5">0</text>
+<rect x="343" y="46" width="47" height="120" fill="var(--band-metal)"/>
+<text x="366" y="40" text-anchor="middle" class="svgsub" font-size="10">ceiling band 0.21–0.28</text>
+<g class="svgsub">
+  <text x="70" y="80">small MLP (probe)</text>
+  <text x="70" y="112">equivariant readout</text>
+  <text x="70" y="144">large MLP (control)</text>
+</g>
+<g fill="var(--bound)">
+  <rect x="200" y="66"  width="322" height="18" rx="4"/>
+  <rect x="200" y="98"  width="316" height="18" rx="4"/>
+  <rect x="200" y="130" width="320" height="18" rx="4"/>
+</g>
+<g class="svgmono" font-size="12">
+  <text x="530" y="80">0.473</text><text x="524" y="112">0.464</text><text x="528" y="144">0.471</text>
+</g>
+<text x="620" y="112" class="svgsub" font-size="11">a three-way tie → the bottleneck is not</text>
+<text x="620" y="128" class="svgsub" font-size="11">architecture but frozen-feature information → joint training</text>
+<g class="svgsub">
+  <text x="70" y="210">small MLP</text>
+  <text x="70" y="242">equivariant + q gate</text>
+  <text x="70" y="274">large MLP + q gate</text>
+</g>
+<g fill="var(--ion)">
+  <rect x="200" y="196" width="397" height="18" rx="4"/>
+  <rect x="200" y="228" width="333" height="18" rx="4"/>
+  <rect x="200" y="260" width="316" height="18" rx="4"/>
+</g>
+<g class="svgmono" font-size="12">
+  <text x="605" y="210">0.584</text><text x="541" y="242">0.489</text><text x="524" y="274">0.464</text>
+</g>
+<text x="660" y="242" class="svgsub" font-size="11">with the q gate, neutral-frame ionic is exactly harmless</text>
+</g>
+</svg>
+<figcaption>Verdict: learnable — a 15-minute training run already halves the residual on never-seen structures, uniformly across all 59 frames (a learned regularity, not memorization). A ~2× gap to the ceiling remains, and the equivariant / large-MLP controls prove it is not an architecture problem: the frozen features simply do not carry that per-frame detail. <b>The conclusion dictates the next step</b>: let the backbone learn to carry the information — joint training (§7). The probes also measured the energy scale: the coupling of the bound residual to the lateral solute-potential fluctuation is 2.3–3.4 eV, reduced to ~1 eV by the fit — the lateral solvent electrostatics missing from the 1-D model is eV-scale, which is the case for eventually entering the energy/force path (stage 2).</figcaption>
+</figure>
+
+<h2><span class="no">7</span>The joint-training gate: 34 epochs, measured</h2>
+<p class="sub" style="font-size:13.5px">A strict single-variable pair: w=1 vs w=0 (same code, seed and data; the configs differ by one weight line). The metric is validation sampled-point rms, normalized here by each channel&rsquo;s warmup baseline.</p>
+<figure style="position:relative">
+<div class="legend"><span><b style="background:var(--bound)"></b>bound</span><span><b style="background:var(--ion)"></b>ionic</span><span class="sub">hover for per-epoch values</span></div>
+<svg id="gatechart" viewBox="0 0 960 320" role="img" aria-label="34-epoch gate: during the 30 warmup epochs the head receives no gradient by design and the metric holds at 1.0; within 4 PB epochs bound drops to 0.49 and ionic to 0.68; the frozen-probe reference is 0.47">
+<g font-size="11">
+  <rect x="80" y="30" width="751" height="230" fill="var(--band-metal)" opacity=".55"/>
+  <text x="418" y="52" text-anchor="middle" class="svgsub">warmup (epochs 0–29): training steps skip PB, the head gets no gradient — the plateau is by design</text>
+  <text x="876" y="52" text-anchor="middle" class="svgsub" font-size="10.5">PB active</text>
+  <g stroke="currentColor" opacity=".35" stroke-width=".7">
+    <line x1="80" y1="63.6" x2="920" y2="63.6"/><line x1="80" y1="152" x2="920" y2="152"/>
+    <line x1="80" y1="196.2" x2="920" y2="196.2"/><line x1="80" y1="240.4" x2="920" y2="240.4"/>
+  </g>
+  <g class="svgmono" font-size="10.5" fill="var(--ink2)">
+    <text x="46" y="67">1.00</text><text x="46" y="156">0.75</text><text x="46" y="200">0.62</text><text x="46" y="244">0.50</text>
+  </g>
+  <line x1="80" y1="284" x2="920" y2="284" stroke="currentColor" stroke-width="1"/>
+  <g class="svgmono" font-size="10.5" fill="var(--ink2)">
+    <text x="77" y="302">0</text><text x="328" y="302">10</text><text x="582" y="302">20</text><text x="836" y="302">30</text><text x="912" y="302">33</text>
+  </g>
+  <line x1="80" y1="251" x2="920" y2="251" stroke="var(--grad)" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="98" y="246" class="svgsub" font-size="10.5" fill="var(--grad)">frozen-probe level 0.47 (§6)</text>
+  <polyline id="lineB" points="" fill="none" stroke="var(--bound)" stroke-width="2.2"/>
+  <polyline id="lineI" points="" fill="none" stroke="var(--ion)" stroke-width="2.2" stroke-dasharray="7 4"/>
+  <circle id="dotB" r="4" fill="var(--bound)" stroke="var(--card)" stroke-width="2" style="display:none"/>
+  <circle id="dotI" r="4" fill="var(--ion)" stroke="var(--card)" stroke-width="2" style="display:none"/>
+  <text x="928" y="248" class="svgmono" font-size="12" fill="var(--bound)">0.49</text>
+  <text x="928" y="182" class="svgmono" font-size="12" fill="var(--ion)">0.68</text>
+</g>
+</svg>
+<div class="tipbox" id="tip"></div>
+</figure>
+<table>
+<thead><tr><th>epoch 33 · validation</th><th>E<br>meV/atom</th><th>F<br>meV/Å</th><th>potential<br>eV</th><th>Fermi<br>eV</th><th>3-D density<br>e/Å³</th><th>occ</th><th>Phi1D<br>eV</th><th>ρb_1d<br>e/Å³</th></tr></thead>
+<tbody>
+<tr><td>w=0 (no new loss)</td><td>9.80</td><td>33.75</td><td>0.183</td><td>0.120</td><td>0.0310</td><td>0.0091</td><td>0.126</td><td>2.44e-4</td></tr>
+<tr><td>w=1 (this method)</td><td class="win">8.47</td><td>33.96</td><td class="win">0.148</td><td class="win">0.107</td><td>0.0316</td><td class="win">0.0087</td><td class="win">0.120</td><td>2.49e-4</td></tr>
+</tbody>
+</table>
+<p class="sub" style="font-size:13px">Gate verdict: <b>pass</b> — every legacy metric at par or better (differences inside the epoch-to-epoch noise band; the potential/Phi1D damage seen in the old ρ_b 1-D supervision experiment did not appear); the solvent3d metric reaches the frozen-probe level within 4 PB epochs and is still falling (the joint-training path works); PB epochs take 3 minutes with no memory issues. The 500-epoch production run (same recipe) is under way.</p>
+
+<footer>
+Data provenance: exp_residual3d_probe (representation probe), exp_residual3d_head (frozen-head probe), 3-residual_3D/gate_w{0,1} (gate); ledger experiments1d/RUNS.md @46345a7.
+</footer>
+</main>
+<script>
+(function(){
+  var b=[0.002181,0.002188,0.002191,0.002202,0.002188,0.002187,0.002187,0.002189,0.002188,0.002189,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002188,0.002189,0.002188,0.002189,0.002189,0.002189,0.002189,0.002189,0.002189,0.001151,0.001090,0.001077,0.001069];
+  var i=[0.000147,0.000149,0.000146,0.000151,0.000151,0.000152,0.000151,0.000150,0.000149,0.000148,0.000148,0.000148,0.000147,0.000147,0.000146,0.000147,0.000147,0.000146,0.000147,0.000147,0.000147,0.000147,0.000147,0.000147,0.000147,0.000148,0.000148,0.000148,0.000148,0.000148,0.000128,0.000112,0.000104,0.000100];
+  var bb=0.0021884, ib=0.0001478;             // warmup baselines (means)
+  function X(e){return 80+e*(840/33);}
+  function Y(r){return 63.6+(1.0-r)*(240.4-63.6)/0.5;}  // linear map: r=1.0→63.6, r=0.5→240.4
+  var pb=[],pi=[];
+  for(var e=0;e<34;e++){pb.push(X(e)+","+Y(b[e]/bb));pi.push(X(e)+","+Y(i[e]/ib));}
+  document.getElementById("lineB").setAttribute("points",pb.join(" "));
+  document.getElementById("lineI").setAttribute("points",pi.join(" "));
+  var svg=document.getElementById("gatechart"),tip=document.getElementById("tip");
+  var dB=document.getElementById("dotB"),dI=document.getElementById("dotI");
+  svg.addEventListener("mousemove",function(ev){
+    var r=svg.getBoundingClientRect(),sx=960/r.width;
+    var e=Math.round(((ev.clientX-r.left)*sx-80)/(840/33));
+    if(e<0||e>33){tip.style.display="none";dB.style.display="none";dI.style.display="none";return;}
+    dB.style.display=dI.style.display="block";
+    dB.setAttribute("cx",X(e));dB.setAttribute("cy",Y(b[e]/bb));
+    dI.setAttribute("cx",X(e));dI.setAttribute("cy",Y(i[e]/ib));
+    tip.style.display="block";
+    tip.style.left=(svg.offsetLeft+X(e)/sx)+"px";
+    tip.style.top=(svg.offsetTop+Y(b[e]/bb)/sx)+"px";
+    tip.textContent="epoch "+e+"  b="+(b[e]*1000).toFixed(3)+"e-3  i="+(i[e]*10000).toFixed(2)+"e-4";
+  });
+  svg.addEventListener("mouseleave",function(){tip.style.display="none";dB.style.display="none";dI.style.display="none";});
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js"></script>
