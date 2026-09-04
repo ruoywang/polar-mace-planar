@@ -387,3 +387,30 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   warmup 30) with max_num_epochs 500. 3-GPU a100, 30h wall (projection:
   ~25h at gate pacing). Queued alongside the user's train800 (3404125,
   main-branch baseline on the same bundle) — the production A/B pair.
+
+## 2026-09-04 twin-energy diagnostic (train800): energy regression root cause
+- Setup: model E on both members of the 200 neutral geometry twins
+  (NiN44vac sid 401-600 / NiN44neusol sid 601-800), eval mode, dev job
+  3413461, ~0.7 s/pair. exp_neutralsolv_prep/twin_energy_diag.{py,npz}.
+- DFT:  E_solv - E_vac = +2.944 +/- 0.088 eV/cell (+14.2 meV/atom).
+- MODEL: +0.032 +/- 0.045 eV -- the twins are energetically
+  indistinguishable to the model. corr(d_ml, d_dft)=0.52 (it tracks about
+  half of the structure-dependent variation, none of the constant).
+- The optimizer parks each pair's prediction between the labels:
+  per-frame error vac +0.959 eV (=4.6 meV/atom) / neusol -1.953 eV
+  (=9.4 meV/atom), summing to the 2.91 shortfall -- EXACTLY reproducing
+  the final test-table energies (4.6 / 9.5). Root cause of the energy
+  regression confirmed.
+- Physics of the offset: cavity-formation energy. VASPsol++ A_cav prints
+  3.77-3.90 per frame (consistent with ~380-390 A^2 = the two flat
+  interfaces of the 190 A^2 cell); tau=9e-3 eV/A^2 -> E_cav ~ +3.5 eV,
+  near-constant, plus electrostatic/ionic solvation ~ -0.5 eV
+  (structure-dependent, the 0.088 spread). The model's solvent energy
+  path (1-D periodic cross+self + dipole-correction delta) is PURELY
+  electrostatic -- no cavity term exists, so the +3.5 eV constant is
+  unrepresentable by construction.
+- Candidate fixes (user to decide): (a) physical cavity term
+  E_cav = tau * A_cav from the model's own cavity field (1-D shape
+  factor gives the flat-interface area; tau fixed 9e-3 or learnable);
+  (b) minimal learnable scalar offset * solvated flag (captures the
+  constant, one parameter); (c) label-side constant shift (not preferred).
