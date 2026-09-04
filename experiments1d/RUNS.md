@@ -430,3 +430,22 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   energy (cv 4.6%) -> a solvated-gated learnable energy offset (one
   scalar, plus optionally a small structure readout for the remaining
   ~0.1 eV/cell) is the CORRECT fix, not a cavity term.
+
+## 2026-09-04 FINAL (source-verified): twin offset = A_solv + A_cav + relaxation
+- solvation.F line 1690: A_corr = A_solv + A_cav. The "A_cav: 3.9044"
+  print is an ENERGY in eV (= tau * area = 0.009 * 433.82, bitwise), not
+  an area; the previous "alignment artifact" reading is retracted.
+  Ecorr_band = int(n_val * V_corr) is standard double-counting removal
+  (V_corr sits in the KS Hamiltonian); Ecorr = A_corr - Ecorr_band by
+  construction -- the 4.4 mV/e "shift difference" is A_corr/660, an identity.
+- 200-frame decomposition: E_diff = A_cav (+3.839 +/- 0.055, cavitation,
+  near-constant) + A_solv (-1.011 +/- 0.166, PB electrostatic/ionic)
+  + SCF relaxation (+0.116 +/- 0.054) = +2.944 +/- 0.088. All bitwise
+  consistent with the extracted A_corr (2.828 +/- 0.130, corr 0.952).
+- Fix ranking (final): mirror VASPsol in the model's solvent branch --
+  E += A_solv_1d (the 1-D PB functional value, already computed by the
+  solver) + tau*A_cav (flat-interface 1-D area 379 A^2 -> 3.41 eV covers
+  89%; the 11% lateral-corrugation remainder is a 3-D cavity quantity,
+  connecting to the residual-3D line's s_diel3). Transfers across cells,
+  unlike a learned constant. Learnable solvated offset stays the cheap
+  fallback.
