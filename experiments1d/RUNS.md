@@ -449,3 +449,15 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   connecting to the residual-3D line's s_diel3). Transfers across cells,
   unlike a learned constant. Learnable solvated offset stays the cheap
   fallback.
+
+## 2026-09-04 twin decomposition (instrumented forward, 20 pairs, job 3414515)
+- Verified: the model's total solvated-vacuum energy contribution is
+  +0.037 +/- 0.037 eV (200-pair diag: +0.032 +/- 0.045) vs required +2.944.
+- Split: 1-D solvent electrostatic (cross+self) +0.092 +/- 0.029 (small AND
+  opposite in sign to the true A_solv -1.01 - the 1-D plane-averaged rb,
+  amplitude ~7e-4, cannot carry the laterally dominated solvation
+  electrostatics; consistent with the residual-3D probe's 5-7% plane share);
+  dipole delta -0.016; backbone/SCF-features -0.039. Components close the
+  total per frame. twin_energy_decomp.py.
+- Fix list unchanged: add A_cav (cavity geometry, +3.84 dominant);
+  the bulk of A_solv belongs to the residual-3D stage-2 3-D energy term.
