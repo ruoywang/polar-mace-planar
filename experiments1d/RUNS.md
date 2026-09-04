@@ -414,3 +414,19 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   factor gives the flat-interface area; tau fixed 9e-3 or learnable);
   (b) minimal learnable scalar offset * solvated flag (captures the
   constant, one parameter); (c) label-side constant shift (not preferred).
+
+## 2026-09-04 CORRECTION: the twin offset is VASPsol++'s alignment term, NOT cavitation
+- Per-frame extraction over all 200 logs: A_corr (= Ecorr + Ecorr_band,
+  the potential-reference alignment correction VASPsol++ adds to TOTEN)
+  = +2.828 +/- 0.130 eV with corr(E_diff, A_corr) = 0.952;
+  E_diff - A_corr = +0.116 +/- 0.054 eV (net physical solvation at this
+  bookkeeping level). twin_decomp.npz.
+- Cavitation does NOT fit: printed cavity area 426.5 +/- 6.1 A^2 ->
+  tau*area = 3.84 eV != 2.94, and it lives inside the PB functional
+  A_solv (-1.01 +/- 0.17), not as a separate TOTEN add-on. The previous
+  entry's tau*A_cav ~ 3.5 attribution was a numerical coincidence -
+  retracted.
+- Fix ranking updated: the offset is a near-constant reference-convention
+  energy (cv 4.6%) -> a solvated-gated learnable energy offset (one
+  scalar, plus optionally a small structure readout for the remaining
+  ~0.1 eV/cell) is the CORRECT fix, not a cavity term.
