@@ -461,3 +461,27 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   total per frame. twin_energy_decomp.py.
 - Fix list unchanged: add A_cav (cavity geometry, +3.84 dominant);
   the bulk of A_solv belongs to the residual-3D stage-2 3-D energy term.
+
+## 2026-09-04 solvent energy 3D-vs-1D, measured (user-demanded verification)
+- Setup: E_int = int[rho_solute_net * phi(rho_solv)] periodic Poisson,
+  10 neutral frames; solvent charge from RHOB/RHOION (DFT) and from the
+  model's stage-2 1-D layer profile (job 3414702, 20 frames).
+  exp_neutralsolv_prep/solvent_energy_3d_vs_1d.py, ml_profiles.npz.
+- DFT 3-D:  E_int = -1.52 mean; linear DG = E/2 = -0.76, tracking A_solv
+  (-1.03) per frame at ~74% (rest = nonlinear lambda terms).
+- DFT 1-D (plane-averaged solvent): E_int = +0.101 +/- 0.022 -- the 1-D
+  reduction keeps -6.6% of the 3-D energy WITH A SIGN FLIP. (The earlier
+  "(5-7%)^2 ~ 0" energy argument was wrong reasoning - coupling is linear
+  in the solvent charge; the correct statement is this measured number.)
+- ML 1-D solvent profile: E_int = +0.070 +/- 0.016, profile corr 0.8-0.9
+  vs DFT-1-D; model's internal 1-D energy term measured +0.092. All three
+  1-D numbers (+0.07/+0.09/+0.10) agree: the model solves the 1-D problem
+  correctly; the missing -1.5 eV is strictly lateral, unreachable by any
+  1-D representation.
+- 1-D cavity energy (tau * A_lat * int|dS/dz|, VASPsol S-function):
+  from the superposition baseline 3.439 +/- 0.053, from the DFT 1-D
+  electron density 3.596 +/- 0.045, vs the 3-D truth 3.839 +/- 0.055 ->
+  a model-side 1-D cavity term recovers ~90%, missing ~0.2-0.4 eV of
+  lateral corrugation.
+- Solvent correction composition confirmed: exactly A_solv + A_cav
+  (plus base-DFT SCF relaxation +0.116 in the twin difference).
