@@ -1788,6 +1788,16 @@ class PolarMACE(ScaleShiftMACE):
                     # need the pb1d path in the graph even for wild densities)
                     healthy = rms_h == rms_h and abs(mb_h) < 1.0e6
             if not healthy:
+                # fallbacks must be visible WITHOUT debug env (the silent
+                # neutral-frame fallback of 2026-09-05 hid for a whole
+                # production): first 5 + every 100th, always printed
+                self._pb1d_fb_count = getattr(self, "_pb1d_fb_count", 0) + 1
+                if self._pb1d_fb_count <= 5 or self._pb1d_fb_count % 100 == 0:
+                    print(
+                        f"PB1D-FALLBACK #{self._pb1d_fb_count} sid={sid} "
+                        f"rms={rms_h:.2e} lm={lm_h:+.2f} mu_b={mb_h:+.2f}",
+                        flush=True,
+                    )
                 if os.environ.get("MACE_PB_DEBUG"):
                     print(
                         f"PB1DDBG-FALLBACK sid={sid} rms={rms_h:.3e} "
