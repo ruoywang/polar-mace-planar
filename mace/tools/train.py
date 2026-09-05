@@ -224,6 +224,7 @@ def train(
     log_wandb: bool = False,
     distributed: bool = False,
     save_all_checkpoints: bool = False,
+    save_latest_every: int = 0,
     plotter: TrainingPlotter = None,
     distributed_model: Optional[DistributedDataParallel] = None,
     train_sampler: Optional[DistributedSampler] = None,
@@ -234,6 +235,7 @@ def train(
     patience_counter = 0
     swa_start = True
     keep_last = False
+    rolling_latest_path: Optional[str] = None
     if log_wandb:
         import wandb
 
@@ -408,6 +410,36 @@ def train(
                             keep_last=keep_last,
                         )
                         keep_last = False or save_all_checkpoints
+                # rolling restart checkpoint: saved every save_latest_every
+                # epochs regardless of improvement, so restart_latest chains
+                # keep moving through validation plateaus. Bypasses the
+                # handler's old_path bookkeeping so the best checkpoint is
+                # never deleted; only the previous rolling file is replaced.
+                if save_latest_every > 0 and epoch % save_latest_every == 0:
+                    io = checkpoint_handler.io
+                    fname = io._get_checkpoint_filename(epoch, io.swa_start)
+                    path = os.path.join(io.directory, fname)
+                    if io.old_path != path:  # skip if best-save just wrote it
+                        param_context = (
+                            ema.average_parameters()
+                            if ema is not None
+                            else nullcontext()
+                        )
+                        with param_context:
+                            ckpt = checkpoint_handler.builder.create_checkpoint(
+                                CheckpointState(model, optimizer, lr_scheduler)
+                            )
+                        os.makedirs(io.directory, exist_ok=True)
+                        torch.save(obj=ckpt, f=path)
+                        prev = rolling_latest_path
+                        if (
+                            prev
+                            and prev != path
+                            and prev != io.old_path
+                            and os.path.exists(prev)
+                        ):
+                            os.remove(prev)
+                        rolling_latest_path = path
         if distributed:
             torch.distributed.barrier()
         if exit_now is not None:

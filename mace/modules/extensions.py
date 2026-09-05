@@ -822,6 +822,8 @@ class PolarMACE(ScaleShiftMACE):
         solvent_pb1d_fresh_stage1: bool = False,
         solvent3d_head: bool = False,
         solvent3d_sigmas: str = "[0.5, 1.0, 2.0]",
+        solvent3d_energy: bool = False,
+        solvent_cavity_energy: bool = False,
         occ_aug_enabled: bool = False,
         occ_aug_channel_spec: str = None,
         fermi_level_baseline: float = 0.0,
@@ -1232,6 +1234,17 @@ class PolarMACE(ScaleShiftMACE):
                 sigmas=self.solvent3d_sigmas,
                 cueq_config=cueq_config,
             )
+        # stage-2 energy terms (value-carrying, lagged-SCF convention):
+        # cavity-formation energy tau*A[s_diel3] and the residual-3D solvent
+        # electrostatic coupling. Default off; pure additions to the total
+        # energy of solvated pb1d frames (twin diagnostic 2026-09-04:
+        # DFT E_solv-E_vac = A_cav 3.84 + A_solv -1.01 + relax 0.12).
+        self.solvent_cavity_energy = bool(solvent_cavity_energy)
+        self.solvent3d_energy = bool(solvent3d_energy)
+        if self.solvent_cavity_energy and solvent_model != "pb1d":
+            raise ValueError("solvent_cavity_energy requires solvent_model='pb1d'")
+        if self.solvent3d_energy and self.solvent3d_head is None:
+            raise ValueError("solvent3d_energy requires solvent3d_head=True (pb1d)")
         # equivariant PAW augmentation-occupancy readout (auxiliary target;
         # zero-init weights draw no RNG, so same-seed A/B stays bit-clean)
         self.occ_head = None
@@ -1628,6 +1641,12 @@ class PolarMACE(ScaleShiftMACE):
         s3d_base_b = positions.new_zeros(n_s3d)
         s3d_base_i = positions.new_zeros(n_s3d)
         s3d_valid = torch.zeros(n_s3d, dtype=torch.bool, device=positions.device)
+        # stage-2 energy terms: only the final (head-carrying) pass computes
+        # them; warmup/fallback graphs stay at zero
+        cav_on = use_head and bool(getattr(self, "solvent_cavity_energy", False))
+        s3d_e_on = s3d_on and bool(getattr(self, "solvent3d_energy", False))
+        e_cav_g = positions.new_zeros(num_graphs)
+        e_s3d_g = positions.new_zeros(num_graphs)
 
         for g in range(num_graphs):
             cell_g = cells[g]
@@ -1712,6 +1731,17 @@ class PolarMACE(ScaleShiftMACE):
                     s3d_pts_g = s3d_points[s3d_pm].detach()
                 else:
                     s3d_pm = None
+            # head coefficients (needs only feats + q gate, so they can be
+            # computed before the solve and reused by the energy terms);
+            # they carry the ONLY gradient path of the solvent3d loss
+            # (head -> node feats -> trunk); ion channel gated by the
+            # frame's total charge (exactly zero on neutral frames)
+            s3d_cg = None
+            if s3d_coeffs is not None and feats_g is not None:
+                q_gate = total_charge_g[g].detach().to(positions.dtype)
+                s3d_cg = self.solvent3d_head(
+                    feats_g, q_gate.expand(int(atom_mask.sum().item()))
+                )
             try:
                 result = backend.solve_graph(
                     positions=pos_g,
@@ -1727,6 +1757,12 @@ class PolarMACE(ScaleShiftMACE):
                     q_tot=total_charge_g[g].detach(),
                     ckpt_closure=True,  # unckpt tested twice, OOMs both eval (retention) and train (PB step footprint) on 40 GB
                     probe_points=s3d_pts_g,
+                    s3d_coeffs=s3d_cg if s3d_e_on else None,
+                    s3d_sigmas=(
+                        self.solvent3d_sigmas if s3d_cg is not None else None
+                    ),
+                    s3d_energy=s3d_e_on,
+                    cav_energy=cav_on,
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1799,14 +1835,12 @@ class PolarMACE(ScaleShiftMACE):
                     rb_g, H_g, 512, False).detach()
             rho_bound_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
-            if s3d_coeffs is not None and feats_g is not None:
-                # coefficients carry the ONLY gradient path of the solvent3d
-                # loss (head -> node feats -> trunk); ion channel gated by the
-                # frame's total charge (exactly zero on neutral frames)
-                q_gate = total_charge_g[g].detach().to(positions.dtype)
-                s3d_coeffs[atom_mask] = self.solvent3d_head(
-                    feats_g, q_gate.expand(int(atom_mask.sum().item()))
-                ).to(s3d_coeffs.dtype)
+            if e_cav_g is not None and result.get("e_cav") is not None:
+                e_cav_g[g] = result["e_cav"].to(positions.dtype)
+            if e_s3d_g is not None and result.get("e_s3d") is not None:
+                e_s3d_g[g] = result["e_s3d"].to(positions.dtype)
+            if s3d_coeffs is not None and s3d_cg is not None:
+                s3d_coeffs[atom_mask] = s3d_cg.to(s3d_coeffs.dtype)
                 sv3 = result.get("solv3d")
                 if s3d_pm is not None and sv3 is not None:
                     s3d_env_b[s3d_pm] = sv3["env_b"].to(positions.dtype)
@@ -1850,6 +1884,10 @@ class PolarMACE(ScaleShiftMACE):
             out["solv3d_base_b"] = s3d_base_b
             out["solv3d_base_i"] = s3d_base_i
             out["solv3d_valid"] = s3d_valid
+        if cav_on:
+            out["cavity_energy_g"] = e_cav_g
+        if s3d_e_on:
+            out["solvent3d_energy_g"] = e_s3d_g
         return out
 
     @torch.jit.ignore
@@ -2809,6 +2847,12 @@ class PolarMACE(ScaleShiftMACE):
             + compensation_slab_correction_energy
             + torch.sum(external_potential[:, 1:] * explicit_dipole, dim=-1)
         )
+        # stage-2 solvent energy terms (per-graph; zero on unsolvated/fallback
+        # frames and when the flags are off)
+        if pb_solvent_data is not None and "cavity_energy_g" in pb_solvent_data:
+            total_energy = total_energy + pb_solvent_data["cavity_energy_g"]
+        if pb_solvent_data is not None and "solvent3d_energy_g" in pb_solvent_data:
+            total_energy = total_energy + pb_solvent_data["solvent3d_energy_g"]
 
         forces, virials, stress, hessian, edge_forces = get_outputs(
             energy=total_energy,
@@ -2866,6 +2910,10 @@ class PolarMACE(ScaleShiftMACE):
             for k in ("solvent3d_coeffs", "solv3d_env_b", "solv3d_env_i",
                       "solv3d_base_b", "solv3d_base_i", "solv3d_valid"):
                 solvent3d_out[k] = pb_solvent_data[k]
+        if pb_solvent_data is not None:
+            for k in ("cavity_energy_g", "solvent3d_energy_g"):
+                if k in pb_solvent_data:
+                    solvent3d_out[k] = pb_solvent_data[k]
 
         return {
             **solvent3d_out,

@@ -729,6 +729,17 @@ def get_loss_fn(
             raise ValueError("solvent3d_weight > 0 requires solvent3d_head=True")
         if getattr(args, "solvent_model", "planar") != "pb1d":
             raise ValueError("solvent3d supervision requires solvent_model=pb1d")
+    if bool(getattr(args, "solvent3d_energy", False)):
+        if not bool(getattr(args, "solvent3d_head", False)):
+            raise ValueError("solvent3d_energy requires solvent3d_head=True")
+        if float(getattr(args, "solvent3d_weight", 0.0)) <= 1.0e-12:
+            raise ValueError(
+                "solvent3d_energy without solvent3d supervision would couple "
+                "an untrained residual into the energy; set solvent3d_weight"
+            )
+    if bool(getattr(args, "solvent_cavity_energy", False)):
+        if getattr(args, "solvent_model", "planar") != "pb1d":
+            raise ValueError("solvent_cavity_energy requires solvent_model=pb1d")
     if args.loss == "weighted":
         loss_fn = modules.WeightedEnergyForcesLoss(
             energy_weight=args.energy_weight,

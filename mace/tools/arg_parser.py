@@ -527,6 +527,24 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "(equivariant GTO coefficients from the mixed node feats)",
     )
     parser.add_argument(
+        "--solvent3d_energy", type=str2bool, default=False,
+        help="pb1d: add the residual-3D solvent electrostatic coupling to the "
+        "total energy (cross with the solute potential + cross with the 1-D "
+        "profile + half self-energy; solvent state detached, lagged-SCF)",
+    )
+    parser.add_argument(
+        "--solvent_cavity_energy", type=str2bool, default=False,
+        help="pb1d: add the cavity-formation energy tau*A to the total energy "
+        "(A = int |grad s_diel3| dV from the live cavity; tau from the "
+        "solvation params json, mirrors VASPsol A_cav)",
+    )
+    parser.add_argument(
+        "--save_latest_every", type=int, default=0,
+        help="also save a rolling restart checkpoint every N epochs "
+        "regardless of validation improvement (0 = off); keeps chained "
+        "restarts moving through loss plateaus",
+    )
+    parser.add_argument(
         "--solvent3d_weight", type=float, default=0.0,
         help="weight of the solvent3d charge supervision (1.0 = parity; the "
         "loss is normalized by the manifest's per-channel signal_ms)",

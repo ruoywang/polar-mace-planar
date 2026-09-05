@@ -1499,6 +1499,7 @@ def run(args) -> None:
         logger=logger,
         patience=args.patience,
         save_all_checkpoints=args.save_all_checkpoints,
+        save_latest_every=int(getattr(args, "save_latest_every", 0)),
         output_args=output_args,
         device=device,
         swa=swa,

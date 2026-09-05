@@ -105,6 +105,46 @@ def solvent3d_probe_fields(
 
 
 # ---------------------------------------------------------------------------
+# energy-path field helpers (stage 2). Explicit spectral electrostatics with
+# its own constants — deliberately independent of the VASP-unit grid class,
+# validated against the DFT-side sizing script (exp_neutralsolv_prep).
+# ---------------------------------------------------------------------------
+
+FIELD_CONSTANT_EVA = 14.39964546866782  # e^2/(4 pi eps0), eV*A
+
+
+def poisson_phi_periodic(rho: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
+    """Periodic Poisson potential (eV) of a charge density rho (e/A^3) on a
+    general-cell grid [nx,ny,nz]; the G=0 mode is dropped (zero-mean phi).
+    Convention: positive rho -> positive phi (energy of a +1e test charge is
+    rho-weighted phi; the caller owns sign bookkeeping)."""
+    import math as _math
+    nx, ny, nz = rho.shape
+    rg = torch.fft.rfftn(rho)
+    B = 2.0 * _math.pi * torch.linalg.inv(cell).T.to(rho.dtype)
+    fx = torch.fft.fftfreq(nx, device=rho.device, dtype=rho.dtype) * nx
+    fy = torch.fft.fftfreq(ny, device=rho.device, dtype=rho.dtype) * ny
+    fz = torch.arange(nz // 2 + 1, device=rho.device, dtype=rho.dtype)
+    G = (fx[:, None, None, None] * B[0]
+         + fy[None, :, None, None] * B[1]
+         + fz[None, None, :, None] * B[2])
+    G2 = (G * G).sum(-1)
+    G2[0, 0, 0] = 1.0
+    pg = 4.0 * _math.pi * FIELD_CONSTANT_EVA * rg / G2
+    pg[0, 0, 0] = 0.0
+    return torch.fft.irfftn(pg, s=rho.shape)
+
+
+def project_zero_total(delta: torch.Tensor, env: torch.Tensor) -> torch.Tensor:
+    """Charge-conservation projection: remove the net charge of delta by
+    subtracting (sum delta / sum env) * env — the envelope is the
+    redistribution shape, so the correction lives where charge is allowed.
+    Grid-uniform dV cancels from the ratio."""
+    denom = torch.clamp(env.sum(), min=1.0e-30)
+    return delta - (delta.sum() / denom) * env
+
+
+# ---------------------------------------------------------------------------
 # head
 # ---------------------------------------------------------------------------
 

@@ -292,6 +292,10 @@ class PB1DBackend:
         q_tot: Optional[torch.Tensor] = None,
         ckpt_closure: bool = True,
         probe_points: Optional[torch.Tensor] = None,
+        s3d_coeffs: Optional[torch.Tensor] = None,
+        s3d_sigmas=None,
+        s3d_energy: bool = False,
+        cav_energy: bool = False,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -473,6 +477,64 @@ class PB1DBackend:
                 msg = " ".join(f"{k}={v:.1f}" for k, v in snap.items())
                 print(f"PB1DTIMING calls={self.timing_calls} "
                       f"fwd_total={total:.1f}ms/graph {msg}", flush=True)
+        # ---- stage-2 energy terms -------------------------------------
+        # Lagged-SCF convention (same as the 1-D compensation energy and the
+        # dipole delta): the solvent state enters DETACHED; the only live
+        # factor is cvhar3 in the solute-cross term (gradient reaches the
+        # density coefficients, exactly like e1d's cross term). Units are
+        # physical throughout: densities e/A^3, potentials eV via the
+        # explicit spectral Poisson (validated against the DFT-side sizing
+        # script). Grid GTO assembly = point evaluator * volume (measured
+        # 2026-09-05, ratio/V = 1.0003; the 3e-4 is periodic-image tails).
+        e_cav_t: Optional[torch.Tensor] = None
+        e_s3d_t: Optional[torch.Tensor] = None
+        if cav_energy or (s3d_energy and s3d_coeffs is not None):
+            cav = getattr(grid, "_solv3d_cavity", None)
+            if cav is not None:
+                from .solvent3d import (
+                    _grad_mag_periodic,
+                    poisson_phi_periodic,
+                    project_zero_total,
+                )
+                s_ion3_d, s_diel3_d = cav
+                gsd3 = _grad_mag_periodic(s_diel3_d, cell64)
+                dV = volume / float(gsd3.numel())
+                if cav_energy:
+                    # sharp-interface cavity area = int |grad s_diel| dV
+                    e_cav_t = float(self.params["TAU"]) * gsd3.sum() * dV
+                if s3d_energy and s3d_coeffs is not None:
+                    with torch.no_grad():
+                        env_b3 = gsd3 / torch.clamp(gsd3.max(), min=1.0e-30)
+                        env_i3 = torch.clamp(s_ion3_d, 0.0, 1.0)
+                        mb3 = grid.ifft_real(self._gto_net_density_g(
+                            grid, pos_frac.detach(),
+                            s3d_coeffs[:, 0].detach().to(dt), s3d_sigmas,
+                        )) / volume
+                        mi3 = grid.ifft_real(self._gto_net_density_g(
+                            grid, pos_frac.detach(),
+                            s3d_coeffs[:, 1].detach().to(dt), s3d_sigmas,
+                        )) / volume
+                        delta_b3 = project_zero_total(env_b3 * mb3, env_b3)
+                        delta_i3 = project_zero_total(env_i3 * mi3, env_i3)
+                        delta3 = delta_b3 + delta_i3
+                        # self energy of the residual
+                        phi_d3 = poisson_phi_periodic(delta3, cell64)
+                        e_self = 0.5 * (delta3 * phi_d3).sum() * dV
+                        # cross with the 1-D solvent profile (plane content)
+                        delta_pl = delta3.mean(dim=(0, 1))
+                        rho_l1 = (rho_ion_z + rho_bound_z).detach()
+                        phi_l1 = poisson_phi_periodic(
+                            rho_l1.view(1, 1, -1), cell64).view(-1)
+                        f_up = rho_l1.shape[0] // delta_pl.shape[0]
+                        e_x1d = (delta_pl * phi_l1[::f_up]).sum() * (
+                            volume / float(delta_pl.shape[0]))
+                    # cross with the solute potential: cvhar3 stays LIVE
+                    # (VASP potential-energy-of-electron convention -> the
+                    # electrostatic potential of the solute is -cvhar3;
+                    # sign validated by the label-charge unit test)
+                    e_xsol = -(delta3 * cvhar3).sum() * dV
+                    e_s3d_t = e_xsol + e_x1d + e_self
+
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
         # label points (supervision only; no gradient path through the solve)
         solv3d = None
@@ -504,4 +566,6 @@ class PB1DBackend:
             "prior_solve": prior_s,
             "delta_p": delta_p,
             "solv3d": solv3d,
+            "e_cav": e_cav_t,
+            "e_s3d": e_s3d_t,
         }
