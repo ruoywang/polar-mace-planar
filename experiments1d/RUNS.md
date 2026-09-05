@@ -273,3 +273,27 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   ceiling is unreachable for any transferable model). Lever to close it:
   joint training (residual loss backprops into the trunk) = the planned
   stage-2 integration; or accept ~0.47 and integrate as-is.
+
+## 2026-09-05 stage-2 solvent energy terms (branch pb-s3d-energy, clone pmp-s3denergy)
+- Motivation: twin diagnostic (2026-09-04) — DFT E_solv-E_vac = +2.944 =
+  A_cav +3.839 + A_solv -1.011 + SCF relax +0.116; the model's solvent
+  energy path is 1-D electrostatic only (+0.037, A_solv part wrong-signed).
+  Sizing run (solvent_energy_3d_vs_1d.py, job 3416856): linear-response
+  E_int_3D/2 = -0.758 covers 74% of A_solv; the 1-D level gives +0.050
+  (wrong sign, 7% amplitude) — the term must be 3-D.
+- Code @5503789 (default-off flags, pure energy additions):
+  * solvent_cavity_energy: E_cav = TAU * int|grad s_diel3| dV from the live
+    cavity (TAU from the solvation json = the DFT setting, 0.009 eV/A^2).
+  * solvent3d_energy: E_3d = int[delta*(-cvhar3)] + int[delta*phi(rho_1d)]
+    + 0.5*int[delta*phi(delta)], delta = env*m from the solvent3d head on
+    the PB grid, per-channel charge-conservation projection
+    (delta -= (int delta / int env) * env). Lagged-SCF convention mirrors
+    the 1-D compensation energy: solvent state detached, cvhar3 live.
+  * save_latest_every: rolling restart checkpoint every N epochs (plateau-
+    starved dev chains; never deletes the best checkpoint).
+  * Supervision loss unchanged (detached baselines/envelopes stay).
+- Unit factor (measured): grid GTO assembly = point evaluator * volume
+  (ratio/V = 1.0003; periodic-image tails 3e-4).
+- Guards: solvent3d_energy requires head + weight>0; cavity requires pb1d.
+- NOTE: flags change the energy of every solvated frame by ~+3 eV — only
+  fresh trainings or restarts of runs that already had the flags on.
