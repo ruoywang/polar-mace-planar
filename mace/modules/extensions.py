@@ -1817,7 +1817,7 @@ class PolarMACE(ScaleShiftMACE):
                 continue
 
             layer = result["rho_layer_z"].to(positions.dtype)
-            mu_g = result["q_ion_t"] * result["layer_mean_t"] + result["mu_bound_t"]
+            mu_g = result["ion_dipole_t"] + result["mu_bound_t"]
             prof_feat[g] = resample_profile_periodic_torch(
                 layer, H_g, 1024, False).detach()
             prof_energy[g] = resample_profile_periodic_torch(
