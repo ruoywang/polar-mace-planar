@@ -273,3 +273,24 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   ceiling is unreachable for any transferable model). Lever to close it:
   joint training (residual loss backprops into the trunk) = the planned
   stage-2 integration; or accept ~0.47 and integrate as-is.
+
+## 2026-09-05 s3d_prod500 ENDPOINT (500 epochs COMPLETE, dev-chain lane)
+- Winner lane: prod500_findev chain (a100 30h lane TIMEOUT@ep475 with a
+  terminal epoch-time degradation 5.8->24.6 min; continuation from ckpt
+  ep457 raced a100 requeue vs dev chain; chain hit ep499 first, warden
+  cross-cancelled the a100 job). Final model prod500_findev/models/
+  s3d_prod500.model; run tables in its run.log.
+- Valid ep499 vs train800 ep499: E 8.34 vs 7.96 meV, F 21.6 vs 19.9,
+  pot 0.1230 vs 0.1128, fermi 0.0630 vs 0.0515, Phi1D 0.0794 vs 0.0719,
+  rho1d par, density_3d par.
+- TEST per config (s3d vs t800): pot better 3/4 (NiN44 0.093 vs 0.120,
+  neusol 0.098 vs 0.123, NiN88 0.100 vs 0.104; vac WORSE 0.130 vs 0.063);
+  fermi mixed (NiN44 better, neusol/vac worse); E worse on NiN44/neusol,
+  better on vac/NiN88; F worse on neusol/vac (+4.7/+3.4).
+- solvent3d endpoint: b 1.023e-3 / i 0.82e-4 vs 1D-only measured reference
+  2.022e-3 / 1.213e-4 -> x0.51 / x0.68. The head's target metric holds at
+  production scale with legacy metrics close but slightly behind train800
+  on valid; test-set picture is mixed rather than uniformly worse.
+- Twin-offset pathology present in BOTH models by construction (E vac 3.7
+  vs neusol 10.5 meV split) — the stage-2 energy terms (pb-s3d-energy)
+  are the fix; see pmp-s3denergy RUNS.md.
