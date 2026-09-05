@@ -297,3 +297,29 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - Guards: solvent3d_energy requires head + weight>0; cavity requires pb1d.
 - NOTE: flags change the energy of every solvated frame by ~+3 eV — only
   fresh trainings or restarts of runs that already had the flags on.
+
+## 2026-09-05 neutral-frame fallback defect + twin validation (fixed code @be722aa)
+- DEFECT FOUND: the pb-solvent3d line missed trainall's 2026-08-31 fix
+  2b149d6 (neutral-safe layer_mean). Old code: layer_mean = moment/1e-12 on
+  q_ion~0 -> health gate rejected EVERY neutral solvated frame -> silent
+  planar fallback through the whole s3d gate + 500-ep production. Fallout:
+  the solvent3d head never trained/scored on neusol frames (published
+  bound x0.51 is charged-frames-only), neusol Phi1D/rho_b supervision saw
+  planar outputs. train800 is clean (ran post-fix code). "Zero fallback"
+  ledger checks were blind: fallbacks only print with MACE_PB_DEBUG.
+- Fix ported verbatim (3-branch layer_mean + mu from ion_dipole_t);
+  backend otherwise diff-clean vs trainall.
+- Twin validation, gate_w1dev model, fixed code (job 3416946, 2 pairs,
+  MACE_PB_DEBUG=1, ZERO fallbacks):
+    flags off: dE = +0.252 +/- 0.001 (healthy-solve baseline of this model)
+    flags on:  dE = +3.914; e_cav = +3.863 +/- 0.05 vs DFT A_cav
+    3.839 +/- 0.055 (0.6%, live model density); e_s3d = -0.20 (right sign;
+    small because the head is charged-frames-trained = neutral extrapolation;
+    retraining with the fix closes toward the -0.9 label value).
+- Unit battery (jobs 3416874/86/900/10): grid=point*V (3e-4), Poisson
+  helper = sizing script (0.1%), l0_inv sign fixed (+net_phys*V), projection
+  1e-19, E_cav formula bitwise vs VASPsol++ print (433.82=433.82).
+- Smoke gate submitted: gate_s2e (3 ep, 3-GPU DDP, warmup 0, both flags,
+  save_latest_every 1).
+- RECOMMENDATION: production rerun on fixed code with the energy terms,
+  folding all fixes into one run (user decision).
