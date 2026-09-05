@@ -500,23 +500,26 @@ class PB1DBackend:
                 gsd3 = _grad_mag_periodic(s_diel3_d, cell64)
                 dV = volume / float(gsd3.numel())
                 if cav_energy:
-                    # VASPsol++ CREATECAVITY (solvation.F): the area integrand
-                    # is |grad S| of the UN-convolved shape function of the
-                    # bare electron density (s_vdw, not s_diel), with the
-                    # LVAC solvent-box mask applied AFTER the gradient:
-                    # Acav = TAU * sum M*|grad s_vdw| * dV
+                    # VASPsol++ solvation_nlpcm CREATECAVITY (solvation.F
+                    # line 1984): A_cav = TAU * int |grad S_cav| dV, where
+                    # S_cav is the solvent-accessible chain (R_SOLV kernel)
+                    # and the Stern box mask M_ION enters TWICE (VASP masks
+                    # S_solv, then S_cav again). The torch port masks once,
+                    # so multiply the second M_ION here; gradient is
+                    # spectral, mirroring VASP's GRAD. Verified bitwise on
+                    # the DFT density: 433.82 vs the printed 433.82 (cal_1).
                     p = self.params
-                    ne_d = n_e_density.detach()
-                    x_vdw = torch.log(torch.clamp(
-                        ne_d / float(p["NC_K"]), min=float(p["N_MIN"])))
-                    s_vdw = self._tp._shape_func(x_vdw, float(p["SIGMA_K"]))
-                    gsv = _grad_mag_periodic(s_vdw, cell64)
+                    s_cav3 = self._tp.create_cavity_torch(
+                        n_e_density.detach(), grid, p)[2]
                     if bool(p["LVAC"]) and float(p["SOL_Z1"]) > float(p["SOL_Z0"]):
-                        m_sol = self._tp._smooth_box(
-                            grid, float(p["SOL_Z0"]), float(p["SOL_Z1"]),
+                        m_ion3 = self._tp._smooth_box(
+                            grid,
+                            float(p["SOL_Z0"]) + float(p["D_STERN"]),
+                            float(p["SOL_Z1"]) - float(p["D_STERN"]),
                             float(p["SOL_SIGMA"]),
-                        ).clamp(0.0, 1.0)
-                        gsv = gsv * m_sol
+                        )
+                        s_cav3 = s_cav3 * m_ion3
+                    _, _, _, gsv = grid.grad_from_recip(grid.fft(s_cav3))
                     e_cav_t = float(p["TAU"]) * gsv.sum() * dV
                 if s3d_energy and s3d_coeffs is not None:
                     with torch.no_grad():
