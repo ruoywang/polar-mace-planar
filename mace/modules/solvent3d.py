@@ -157,6 +157,8 @@ class Solvent3DChargeHead(torch.nn.Module):
     existing density evaluators consume). Zero-initialized; ion channel gated
     by the frame's total charge."""
 
+    # class-level fallback: models pickled before 2026-09-06 carried no
+    # instance attribute and were trained at 100
     OUT_SCALE = 100.0
 
     def __init__(self, node_feats_irreps, sigmas, cueq_config=None):
@@ -164,6 +166,13 @@ class Solvent3DChargeHead(torch.nn.Module):
         from e3nn import o3
         from .wrapper_ops import Linear
 
+        # output-scale reparameterization (energy expression invariant in
+        # W*scale; only the optimizer geometry changes). Forensic 3419252
+        # measured the warmup->PB activation shock: first-Adam-step
+        # self-energy follows (lr*scale)^2 exactly — 95.5 / 0.88 / 0.25 eV
+        # at scale 100 / 10 / 5 — and scale 100 is what blew up the joint
+        # gates (3418577/3418909/3419006). 10 keeps the shock sub-eV.
+        self.out_scale = 10.0
         self.sigmas = [float(s) for s in sigmas]
         n_out = 2 * len(self.sigmas)
         self.n_out = n_out
@@ -184,7 +193,8 @@ class Solvent3DChargeHead(torch.nn.Module):
             blocks[:, :, ell * ell:(ell + 1) * (ell + 1)] = \
                 flat[:, off:off + self.n_out * w].view(n, self.n_out, w)
             off += self.n_out * w
-        c = blocks.view(n, 2, len(self.sigmas), 9) * self.OUT_SCALE
+        c = blocks.view(n, 2, len(self.sigmas), 9) * getattr(
+            self, "out_scale", self.OUT_SCALE)
         return torch.stack([c[:, 0], c[:, 1] * q_gate.view(-1, 1, 1)], dim=1)
 
 
