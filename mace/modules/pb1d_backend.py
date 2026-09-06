@@ -614,12 +614,22 @@ class PB1DBackend:
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
                         dc_b, dc_i, dc_sup_b, dc_sup_i)
 
-            live = bool(want_grad or pos_frac.requires_grad)
+            # positions in the energy assemblies: LIVE only in runtime mode,
+            # where the baseline itself is differentiable and the position
+            # derivatives are physical (tier-ii FD: 0.2-1.4%). In cached-
+            # baseline (training) mode the frozen per-sid baseline makes the
+            # grid position derivatives artifactual (tier-i FD measured up
+            # to ~1 eV/A of frozen-baseline response), and gate 3419752
+            # showed the force loss degrading (F 62-81 vs 35 meV/A) as the
+            # growing delta rode that channel -> detach positions there,
+            # exactly the passing-gate training physics.
+            pf_e = pos_frac if use_runtime_baseline else pos_frac.detach()
+            live = bool(want_grad or pf_e.requires_grad)
             if live:
                 outs = _ckpt2(_stage2_energy, radial_coeffs, cb, ci,
-                              pos_frac, use_reentrant=False)
+                              pf_e, use_reentrant=False)
             else:
-                outs = _stage2_energy(radial_coeffs, cb, ci, pos_frac)
+                outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
              dc_b, dc_i, dc_sup_b, dc_sup_i) = outs
             if cav_energy:
