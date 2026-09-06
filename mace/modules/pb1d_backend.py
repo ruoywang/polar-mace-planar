@@ -527,11 +527,31 @@ class PB1DBackend:
             nz_pl = int(grid.shape[2])
             z_pl = torch.arange(nz_pl, device=pos_frac.device, dtype=dt) * (
                 length_z / float(nz_pl))
+            # frozen-envelope copies (the loss's convention): used for the
+            # SUPERVISION-side projection ratio, so the loss's backward is
+            # the exact derivative of its own frozen-envelope forward while
+            # the energy keeps its fully-live ratio (values identical)
+            cavd = getattr(grid, "_solv3d_cavity", None)
+            env_bf = None
+            env_if = None
+            if do_s3d and cavd is not None:
+                gsdf = _grad_mag_periodic(cavd[1], cell64)
+                env_bf = gsdf / torch.clamp(gsdf.max(), min=1.0e-30)
+                env_if = torch.clamp(cavd[0], 0.0, 1.0)
 
             def _stage2_energy(cfd, cbt, cit, pf):
+                # runtime mode: the baseline tables are pure-torch structure
+                # factors -> regenerate the baseline LIVE in positions; the
+                # per-sid cached baseline (training) stays the declared
+                # frozen input
+                if use_runtime_baseline:
+                    neutral_e, phi_base_e = self._rt_tables.fields(
+                        pf, node_z, pf.device)
+                else:
+                    neutral_e, phi_base_e = neutral_v, phi_base
                 net_g2 = self._gto_net_density_g(grid, pf, cfd.to(dt), sigmas)
                 ne2 = torch.clamp(
-                    (neutral_v - grid.ifft_real(net_g2)) / volume, min=0.0)
+                    (neutral_e - grid.ifft_real(net_g2)) / volume, min=0.0)
                 s_ion3e, s_diel3e, s_cav3e = self._tp.create_cavity_torch(
                     ne2, grid, p)
                 if m_ion3 is not None:
@@ -544,7 +564,7 @@ class PB1DBackend:
                 if not do_s3d:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
-                    return area, zero, zero, zv, zv, zero, zero
+                    return area, zero, zero, zv, zv, zero, zero, zero, zero
                 # LIVE envelopes (value-identical to the loss's detached
                 # stash; here the density response is in the graph)
                 gsd = _grad_mag_periodic(s_diel3e, cell64)
@@ -556,10 +576,18 @@ class PB1DBackend:
                     grid, pf, cit, s3d_sigmas)) / volume
                 raw_b = env_b * mb
                 raw_i = env_i * mi
-                # charge-conservation projection; the DC ratios are shared
-                # with the supervision loss (same projected field both sides)
+                # charge-conservation projection (energy side: fully live)
                 dc_b = raw_b.sum() / torch.clamp(env_b.sum(), min=1.0e-30)
                 dc_i = raw_i.sum() / torch.clamp(env_i.sum(), min=1.0e-30)
+                # supervision-side ratio: frozen envelopes, live m — the
+                # exact derivative of the loss's frozen-envelope forward
+                if env_bf is not None:
+                    dc_sup_b = (env_bf * mb).sum() / torch.clamp(
+                        env_bf.sum(), min=1.0e-30)
+                    dc_sup_i = (env_if * mi).sum() / torch.clamp(
+                        env_if.sum(), min=1.0e-30)
+                else:
+                    dc_sup_b, dc_sup_i = dc_b, dc_i
                 delta_b = raw_b - dc_b * env_b
                 delta_i = raw_i - dc_i * env_i
                 delta = delta_b + delta_i
@@ -567,11 +595,11 @@ class PB1DBackend:
                 # solute cross: cvhar rebuilt from the same live assembly
                 # (VASP electron-PE convention -> potential = -cvhar; sign
                 # validated by the label-charge unit test)
-                cvhar_e = phi_base - grid.ifft_real(grid.l0_inv_op(net_g2))
+                cvhar_e = phi_base_e - grid.ifft_real(grid.l0_inv_op(net_g2))
                 e_xsol_raw = -(delta * cvhar_e).sum()
                 return (area, e_xsol_raw, e_self_raw,
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
-                        dc_b, dc_i)
+                        dc_b, dc_i, dc_sup_b, dc_sup_i)
 
             live = bool(want_grad or pos_frac.requires_grad)
             if live:
@@ -579,7 +607,8 @@ class PB1DBackend:
                               pos_frac, use_reentrant=False)
             else:
                 outs = _stage2_energy(radial_coeffs, cb, ci, pos_frac)
-            area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl, dc_b, dc_i = outs
+            (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
+             dc_b, dc_i, dc_sup_b, dc_sup_i) = outs
             if cav_energy:
                 e_cav_t = float(p["TAU"]) * area * dV
             if do_s3d:
@@ -598,6 +627,8 @@ class PB1DBackend:
                     "mu_delta": (delta_pl * z_pl).sum() * (volume / float(nz_pl)),
                     "dc_b": dc_b,
                     "dc_i": dc_i,
+                    "dc_sup_b": dc_sup_b,
+                    "dc_sup_i": dc_sup_i,
                 }
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled

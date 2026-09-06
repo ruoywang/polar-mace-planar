@@ -1884,8 +1884,12 @@ class PolarMACE(ScaleShiftMACE):
             if e_s3d_g is not None and result.get("e_s3d") is not None:
                 e_s3d_g[g] = result["e_s3d"].to(positions.dtype)
             if sv_obs is not None:
-                s3d_dc_b[g] = sv_obs["dc_b"].to(positions.dtype)
-                s3d_dc_i[g] = sv_obs["dc_i"].to(positions.dtype)
+                # loss-facing ratios are the SUPERVISION-side ones (frozen
+                # envelopes, live m): the loss backward is then the exact
+                # derivative of its frozen-envelope forward. Values equal
+                # the energy-side ratios (stash == live rebuild pointwise).
+                s3d_dc_b[g] = sv_obs["dc_sup_b"].to(positions.dtype)
+                s3d_dc_i[g] = sv_obs["dc_sup_i"].to(positions.dtype)
                 s3d_mu_delta[g] = sv_obs["mu_delta"].to(positions.dtype)
             if s3d_coeffs is not None and s3d_cg is not None:
                 s3d_coeffs[atom_mask] = s3d_cg.to(s3d_coeffs.dtype)
