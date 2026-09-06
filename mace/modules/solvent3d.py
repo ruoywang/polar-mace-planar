@@ -83,7 +83,10 @@ def _grad_mag_periodic(field: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     for j in range(3):
         gj = gf[0] * inv[j, 0] + gf[1] * inv[j, 1] + gf[2] * inv[j, 2]
         out += gj * gj
-    return torch.sqrt(out)
+    # eps floor: |grad| is exactly zero on saturated shape-function plateaus
+    # and sqrt(0) has an infinite backward (NaN forces); the 1e-30 floor
+    # shifts values by ~1e-15 relative, far below every tolerance here
+    return torch.sqrt(out + 1.0e-30)
 
 
 def solvent3d_probe_fields(

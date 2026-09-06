@@ -558,9 +558,10 @@ class PB1DBackend:
                     s_cav3e = s_cav3e * m_ion3
                 # VASPsol++ solvation_nlpcm CREATECAVITY (solvation.F 1984):
                 # A_cav = TAU * int |grad S_cav| dV, Stern mask doubled,
-                # spectral gradient
-                _, _, _, gsv = grid.grad_from_recip(grid.fft(s_cav3e))
-                area = gsv.sum()
+                # spectral gradient. |grad| recomposed with an eps floor:
+                # sqrt(0) on the saturated plateaus has an infinite backward
+                gx, gy, gz, _ = grid.grad_from_recip(grid.fft(s_cav3e))
+                area = torch.sqrt(gx * gx + gy * gy + gz * gz + 1.0e-30).sum()
                 if not do_s3d:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
