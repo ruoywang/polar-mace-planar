@@ -630,6 +630,10 @@ class PB1DBackend:
                     "dc_i": dc_i,
                     "dc_sup_b": dc_sup_b,
                     "dc_sup_i": dc_sup_i,
+                    # diagnostics only (detached floats): energy split
+                    "e_xsol": float(e_xsol_raw.detach()) * dV,
+                    "e_self": float(e_self_raw.detach()) * dV,
+                    "e_x1d": float(e_x1d.detach()),
                 }
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
