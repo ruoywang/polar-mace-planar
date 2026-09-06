@@ -580,6 +580,18 @@ class PB1DBackend:
                 # charge-conservation projection (energy side: fully live)
                 dc_b = raw_b.sum() / torch.clamp(env_b.sum(), min=1.0e-30)
                 dc_i = raw_i.sum() / torch.clamp(env_i.sum(), min=1.0e-30)
+                # LAGGED delta in the energy integrals (same convention as
+                # the 1-D solvent state): the full evidence matrix (gates
+                # 3418577/3418909/3419006/3419262/3419425 all unstable with
+                # live delta at any scale/decay/warmup; value-coupled gate
+                # 3417982 and cav-only 3419003 PASS) plus forensics
+                # 3419335/3419347/3419395 (Adam null-drift of the head is
+                # amplified through the quadratic self-energy when delta is
+                # live) establish that the delta-side gradient coupling is
+                # untrainable in this regime. Values stay exact and follow
+                # the head every step; gradients flow through cvhar_e
+                # (density + positions) as in the passing gates. The omitted
+                # delta-anchor force channel is measured at ~0.02-0.05 eV/A.
                 # supervision-side ratio: frozen envelopes, live m — the
                 # exact derivative of the loss's frozen-envelope forward
                 if env_bf is not None:
@@ -589,8 +601,8 @@ class PB1DBackend:
                         env_if.sum(), min=1.0e-30)
                 else:
                     dc_sup_b, dc_sup_i = dc_b, dc_i
-                delta_b = raw_b - dc_b * env_b
-                delta_i = raw_i - dc_i * env_i
+                delta_b = (raw_b - dc_b * env_b).detach()
+                delta_i = (raw_i - dc_i * env_i).detach()
                 delta = delta_b + delta_i
                 e_self_raw = 0.5 * (delta * poisson_phi_periodic(delta, cell64)).sum()
                 # solute cross: cvhar rebuilt from the same live assembly
