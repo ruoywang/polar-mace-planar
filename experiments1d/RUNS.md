@@ -377,3 +377,29 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   * runtime vs cached baseline energy: 0.3 meV agreement.
 - Final 34-ep gate on @f3e370b: job 3418577 (pending). Production resubmit
   after it passes.
+
+## 2026-09-06 blowup root cause: MEASURED and fixed (out_scale 100->10)
+- Evidence chain (all measured, no assumptions):
+  * Gate matrix: value-only terms PASS (3417982); E_cav-live-only PASS
+    (3419003: ep33 pot 0.169/E 11.4/s3d_b 1.12e-3, = the passing gate);
+    both-live FAIL twice (3418577 oscillation, 3418909 explosion to
+    pot 8.5 eV); warmup-0 both-live FAIL (3419006, explodes from ep2,
+    loss 1405) -> E_3d feedback is the destabilizer, timing-independent.
+  * Forensics on the blown run's own pre-shock ckpt (ep28, head==0),
+    job 3419243: gradient anatomy - E_3d->head 4.3/11.8 (charged/neusol)
+    vs point-loss->head 2.2/4.8; force-loss->head 9.85 (2nd-order d2E/dRdW,
+    largest channel); E_cav->density 9.4-10 but x energy-residual only
+    0.013-0.045 (harmless, matches cav-only PASS).
+  * Dynamics: Adam's zero-moment first step moves every head weight by
+    exactly lr -> with OUT_SCALE=100 the residual field jumps ~100x label
+    scale -> SELF-ENERGY (quadratic in delta) explodes: step-1 e_self
+    +95.5 eV; energy/force losses then thrash the head; never settles in
+    real training (800 frames/3 ranks).
+  * Scale law verified quantitatively (job 3419252): step-1 self-energy
+    95.5 / 0.88 / 0.25 eV at scale 100 / 10 / 5 = (lr*scale)^2 exactly.
+- FIX (physics-invariant reparameterization): head out_scale = 10 as an
+  instance attribute (old pickles fall back to class 100, so trained
+  models keep their calibration). Energy expression unchanged; only the
+  optimizer geometry. @a319387.
+- Final 34-ep gate with the fix: job 3419262 (pending). Criteria: pot
+  trajectory converging (0.22->0.15 class), ep33 s3d_b ~1.1e-3, E ~11 meV.
