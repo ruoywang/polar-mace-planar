@@ -1847,11 +1847,22 @@ class PolarMACE(ScaleShiftMACE):
             d_feat = None
             d_rb = None
             if sv_obs is not None:
-                mu_g = mu_g + sv_obs["mu_delta"].to(positions.dtype)
-                d_pl = (sv_obs["delta_b_pl"] + sv_obs["delta_i_pl"]).to(positions.dtype)
+                # VALUE-complete observables, DETACHED for loss routing: the
+                # residual's plane content and dipole enter every observable,
+                # but the Phi1D/potential/fermi/rho_b losses keep training
+                # their own pipelines (gate 3418577 measured what happens
+                # otherwise: four losses pulling the head apart -> global
+                # oscillation, Phi1D x2, solvent3d_b +60%). The head's
+                # training signals are its charge loss and the energy terms;
+                # FORCES stay the exact energy derivative (the energy path
+                # carries live mu_delta separately).
+                mu_g = mu_g + sv_obs["mu_delta"].detach().to(positions.dtype)
+                d_pl = (sv_obs["delta_b_pl"]
+                        + sv_obs["delta_i_pl"]).detach().to(positions.dtype)
                 d_feat = resample_profile_periodic_torch(d_pl, H_g, 1024, False)
                 d_rb = resample_profile_periodic_torch(
-                    sv_obs["delta_b_pl"].to(positions.dtype), H_g, 512, False)
+                    sv_obs["delta_b_pl"].detach().to(positions.dtype),
+                    H_g, 512, False)
             prof_feat[g] = (
                 resample_profile_periodic_torch(layer, H_g, 1024, False)
                 + (d_feat if d_feat is not None else 0.0)
