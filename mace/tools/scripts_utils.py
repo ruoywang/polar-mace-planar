@@ -1101,6 +1101,30 @@ def get_params_options(
         for param in group["params"]:
             assigned_param_ids.add(id(param))
 
+    # solvent3d head: its own decay group. Forensics 3419335/3419395 measured
+    # an unbounded Adam drift of the head weights along sampling-insensitive
+    # directions (|W|max linear at ~0.65*lr/step, flags on or off); harmless
+    # under pure supervision but detonating the quadratic E_3d self-energy
+    # once the energy terms are on. weight_decay 1e-2 caps the drift at the
+    # decay-gradient equilibrium (|W|~0.45 measured) with no loss/energy harm.
+    s3d_head_params = []
+    if getattr(model, "solvent3d_head", None) is not None:
+        for _, param in model.solvent3d_head.named_parameters():
+            if param.requires_grad and id(param) not in assigned_param_ids:
+                s3d_head_params.append(param)
+                assigned_param_ids.add(id(param))
+    if s3d_head_params:
+        param_options["params"].append(
+            {
+                "name": "solvent3d_head",
+                "params": s3d_head_params,
+                "weight_decay": float(
+                    getattr(args, "solvent3d_head_weight_decay", 1.0e-2)
+                ),
+                "lr": args.lr,
+            }
+        )
+
     extra_decay = []
     extra_no_decay = []
     for name, param in model.named_parameters():

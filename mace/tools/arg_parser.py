@@ -527,6 +527,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "(equivariant GTO coefficients from the mixed node feats)",
     )
     parser.add_argument(
+        "--solvent3d_head_weight_decay", type=float, default=1.0e-2,
+        help="weight decay for the solvent3d head parameter group (caps the "
+        "measured Adam null-direction drift that detonates the E_3d "
+        "self-energy; forensics 3419395: drift saturates at |W|~0.45)",
+    )
+    parser.add_argument(
         "--solvent3d_energy", type=str2bool, default=False,
         help="pb1d: add the residual-3D solvent electrostatic coupling to the "
         "total energy (cross with the solute potential + cross with the 1-D "
