@@ -323,3 +323,20 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   save_latest_every 1).
 - RECOMMENDATION: production rerun on fixed code with the energy terms,
   folding all fixes into one run (user decision).
+
+## 2026-09-05 34-ep paired gate PASS (gate_s2e34, job 3417982, code @d77d161)
+- Same recipe/seed as gate_w1_dev; three new flags (neutral fix baked in the
+  branch, solvent3d_energy + solvent_cavity_energy + save_latest_every 5).
+- ep33 paired vs w1: F 33.3/34.0, pot 0.148/0.148, fermi 0.113/0.107,
+  Phi1D 0.123/0.120, density/occ par, solvent3d_b 1.081/1.069e-3 par
+  (now pooling neusol points too), solvent3d_i 0.86/1.00e-4 BETTER.
+  E 11.1 vs 8.5 meV: understood transient - the energy terms switch on at
+  ep30 (warmup end) adding ~+3.6 eV to every solvated frame; 4 PB epochs
+  cannot re-equilibrate E0s (production has 470).
+- Fallbacks: 15, ALL in transition epoch 30 (mu_bound trips on first fresh
+  solves, mixed charged+neusol), zero in ep31-33 - visible via the new
+  always-on counter. Rolling ckpts epoch-25/33 + best coexist correctly.
+- Epoch time 3.3-4.9 min (first PB epoch heaviest) - production compatible.
+- READY FOR PRODUCTION RERUN (user decision): recipe = prod500 config
+  + solvent3d_energy + solvent_cavity_energy + save_latest_every 5,
+  code pb-s3d-energy @d77d161, dual-lane as before.
