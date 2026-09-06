@@ -340,3 +340,12 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
 - READY FOR PRODUCTION RERUN (user decision): recipe = prod500 config
   + solvent3d_energy + solvent_cavity_energy + save_latest_every 5,
   code pb-s3d-energy @d77d161, dual-lane as before.
+
+## 2026-09-05 s3d production RERUN v2 SUBMITTED (user-approved, dual-lane)
+- Recipe: prod500 config + solvent3d_energy + solvent_cavity_energy +
+  save_latest_every 5; code pb-s3d-energy @d77d161; seed 123; 500 epochs.
+- Lanes: prod500v2 (a100 3418149, 36h) + prod500v2_dev (2h chain,
+  link 1 = 3418156, warden-managed with zero-epoch autopsy + user-dev
+  priority). Cross-stop at Epoch 499; rolling ckpts cap restart loss at 5 ep.
+- Sentinel v3: epoch-gap 18min cap, log staleness, stderr, ghost jobs,
+  fallback-count alarm (>60 = persistent fallbacks beyond the transition).
