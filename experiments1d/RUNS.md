@@ -349,3 +349,31 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   priority). Cross-stop at Epoch 499; rolling ckpts cap restart loss at 5 ep.
 - Sentinel v3: epoch-gap 18min cap, log staleness, stderr, ghost jobs,
   fallback-count alarm (>60 = persistent fallbacks beyond the transition).
+
+## 2026-09-06 review fixes: complete gradients + force validation (@f3e370b)
+- User review found real gaps in the "fully live" claim, all fixed:
+  (1) call-site pos detach (extensions) meant anchors got no explicit force
+  (user's synthetic check: autograd 0 vs FD 0.02072); positions now enter
+  live, every pre-existing solve consumer detaches itself. (2) E_cav/env
+  now differentiate through the density: ONE checkpointed rebuild
+  (net -> cavity -> envelopes -> delta -> couplings). (3) slab-correction
+  energy passes gradient through the residual dipole (1-D part lagged).
+  (4) supervision-consistent projection: the loss gets its own DC ratio
+  (frozen envelopes, live m) so its backward is the exact derivative of
+  its forward; the energy keeps the fully-live ratio (values identical).
+  (5) runtime-mode energy regenerates the baseline LIVE (rt tables are
+  pure-torch structure factors). (6) NaN fix: eps floor on both |grad S|
+  (sqrt(0) on saturated plateaus has infinite backward - caught by the
+  first live-force run).
+- Force validation (job 3418548, gate_w1dev model, neusol frame):
+  * tier(ii) runtime mode, FULL field refresh per FD displacement:
+    autograd vs FD gap = +0.003/+0.019/+0.002 eV/A (Ni/C/H, 0.2-1.4%) -
+    the remaining lagged-1D-solve share, same scale as the 20 meV/A force
+    RMSE. Energy-force consistency HOLDS on the MD path.
+  * tier(i) cached-baseline surface: FD-autograd gap up to 1.2 eV/A =
+    the measured size of the frozen per-sid baseline approximation
+    (training-path forces are supervised by DFT labels, not this
+    derivative; same situation as the whole 1-D lineage).
+  * runtime vs cached baseline energy: 0.3 meV agreement.
+- Final 34-ep gate on @f3e370b: job 3418577 (pending). Production resubmit
+  after it passes.
