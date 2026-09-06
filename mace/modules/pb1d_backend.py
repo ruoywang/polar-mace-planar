@@ -410,7 +410,7 @@ class PB1DBackend:
         delta_stats = {"c_absmax": 0.0, "dp_rms": 0.0}
         if head is not None and node_feats is not None:
             lz_t = float(cell_np[2, 2])
-            z_atoms = pos_frac[:, 2] * lz_t
+            z_atoms = pos_frac.detach()[:, 2] * lz_t
             z_grid_c = torch.arange(nz, device=device, dtype=dt) * (length_z / nz)
             coeff = head.coefficients(
                 node_feats, z_atoms, clo["w_env"], clo["u"], clo["prior"],
@@ -426,7 +426,8 @@ class PB1DBackend:
             delta_p = torch.zeros_like(prior_s)
         p_off = prior_s + delta_p
 
-        val_dip_z = solute_dipole_z(prof_ne_z, pos_frac, z_valence.to(dt), cell64)
+        val_dip_z = solute_dipole_z(
+            prof_ne_z, pos_frac.detach(), z_valence.to(dt), cell64)
         q_sol = float(-total_charge)
         solver = self._solver_for(cell_np, nz_s, device)
         center_z = 0.5 * (cell_np[0, 2] + cell_np[1, 2] + cell_np[2, 2])
@@ -490,135 +491,114 @@ class PB1DBackend:
                 msg = " ".join(f"{k}={v:.1f}" for k, v in snap.items())
                 print(f"PB1DTIMING calls={self.timing_calls} "
                       f"fwd_total={total:.1f}ms/graph {msg}", flush=True)
-        # ---- stage-2 energy terms (FULLY LIVE) --------------------------
-        # Both terms carry gradients into parameters AND positions:
-        #   * parameters: through n_e_density/cvhar3 (density coefficients)
-        #     and through the head coefficients (delta), each of which also
-        #     depends on positions via the network -> network-mediated forces;
-        #   * explicit positions: the GTO anchors of delta and of the net
-        #     density are assembled with LIVE pos_frac in this block (the
-        #     solve itself keeps its detached assembly, unchanged).
-        # The frozen per-sid baseline fields (neutral_v, phi_base) remain the
-        # one position-frozen input, same as everywhere else in the model.
-        # Units physical throughout (validated: grid = point evaluator * V to
-        # 3e-4; Poisson helper = DFT-side sizing script to 0.1%; E_cav
-        # bitwise vs the VASPsol++ print).
+        # ---- stage-2 energy terms (live, single checkpointed rebuild) ----
+        # One rebuild carries every per-step-differentiable dependency:
+        # density coefficients AND explicit atom positions (run_graphs passes
+        # LIVE positions; each pre-existing solve consumer detaches itself)
+        # -> net density -> cavity (E_cav area + envelopes) -> delta ->
+        # couplings. Gradients reach the trunk through the coefficients
+        # (network path) and through the GTO anchors (explicit path).
+        # DECLARED frozen inputs (not recomputed per step, architecture-wide,
+        # NOT covered by the returned forces): the per-sid neutral baseline
+        # fields (neutral_v, phi_base) and the 1-D solve outputs inside the
+        # 1-D cross term (lagged-SCF, same treatment as e1d).
+        # Units physical throughout (validated: grid = point evaluator * V
+        # to 3e-4; Poisson helper = DFT-side sizing script to 0.1%; E_cav
+        # formula bitwise vs the VASPsol++ print, 433.82 = 433.82).
         e_cav_t: Optional[torch.Tensor] = None
         e_s3d_t: Optional[torch.Tensor] = None
         s3d_obs: Optional[Dict[str, torch.Tensor]] = None
-        if cav_energy or (s3d_energy and s3d_coeffs is not None):
-            cav = getattr(grid, "_solv3d_cavity", None)
-            if cav is not None:
-                from torch.utils.checkpoint import checkpoint as _ckpt2
-                from .solvent3d import (
-                    _grad_mag_periodic,
-                    poisson_phi_periodic,
+        do_s3d = bool(s3d_energy and s3d_coeffs is not None)
+        if cav_energy or do_s3d:
+            from torch.utils.checkpoint import checkpoint as _ckpt2
+            from .solvent3d import _grad_mag_periodic, poisson_phi_periodic
+            dV = volume / float(grid.ngrid)
+            p = self.params
+            m_ion3 = None
+            if bool(p["LVAC"]) and float(p["SOL_Z1"]) > float(p["SOL_Z0"]):
+                m_ion3 = self._tp._smooth_box(
+                    grid,
+                    float(p["SOL_Z0"]) + float(p["D_STERN"]),
+                    float(p["SOL_Z1"]) - float(p["D_STERN"]),
+                    float(p["SOL_SIGMA"]),
                 )
-                s_ion3_d, s_diel3_d = cav
-                dV = volume / float(s_ion3_d.numel())
-                p = self.params
-                m_ion3 = None
-                if bool(p["LVAC"]) and float(p["SOL_Z1"]) > float(p["SOL_Z0"]):
-                    m_ion3 = self._tp._smooth_box(
-                        grid,
-                        float(p["SOL_Z0"]) + float(p["D_STERN"]),
-                        float(p["SOL_Z1"]) - float(p["D_STERN"]),
-                        float(p["SOL_SIGMA"]),
-                    )
-                if cav_energy:
-                    # VASPsol++ solvation_nlpcm CREATECAVITY (solvation.F
-                    # 1984): A_cav = TAU * int |grad S_cav| dV; S_cav chain
-                    # with the Stern mask applied twice, spectral gradient.
-                    # Bitwise vs the DFT print (433.82 = 433.82, cal_1).
-                    # LIVE in n_e_density -> dE_cav/d(density coeffs) is the
-                    # torch analog of VASPsol's Vcav feedback; positions act
-                    # through the network path of the coefficients.
-                    def _cav_area(ne):
-                        s_cav3 = self._tp.create_cavity_torch(ne, grid, p)[2]
-                        if m_ion3 is not None:
-                            s_cav3 = s_cav3 * m_ion3
-                        _, _, _, gsv = grid.grad_from_recip(grid.fft(s_cav3))
-                        return gsv.sum()
-                    if want_grad and n_e_density.requires_grad:
-                        area = _ckpt2(_cav_area, n_e_density, use_reentrant=False)
-                    else:
-                        area = _cav_area(n_e_density)
-                    e_cav_t = float(p["TAU"]) * area * dV
-                if s3d_energy and s3d_coeffs is not None:
-                    gsd3 = _grad_mag_periodic(s_diel3_d, cell64)
-                    # envelopes stay detached masks (same normalization as
-                    # the supervision loss)
-                    env_b3 = gsd3 / torch.clamp(gsd3.max(), min=1.0e-30)
-                    env_i3 = torch.clamp(s_ion3_d, 0.0, 1.0)
-                    pf_live = pos_frac  # LIVE anchors: explicit force on delta
-                    cb = s3d_coeffs[:, 0].to(dt)
-                    ci = s3d_coeffs[:, 1].to(dt)
+            cb = s3d_coeffs[:, 0].to(dt) if do_s3d else pos_frac.new_zeros(0)
+            ci = s3d_coeffs[:, 1].to(dt) if do_s3d else pos_frac.new_zeros(0)
+            nz_pl = int(grid.shape[2])
+            z_pl = torch.arange(nz_pl, device=pos_frac.device, dtype=dt) * (
+                length_z / float(nz_pl))
 
-                    def _m_field(cf, pf):
-                        return grid.ifft_real(self._gto_net_density_g(
-                            grid, pf, cf, s3d_sigmas)) / volume
+            def _stage2_energy(cfd, cbt, cit, pf):
+                net_g2 = self._gto_net_density_g(grid, pf, cfd.to(dt), sigmas)
+                ne2 = torch.clamp(
+                    (neutral_v - grid.ifft_real(net_g2)) / volume, min=0.0)
+                s_ion3e, s_diel3e, s_cav3e = self._tp.create_cavity_torch(
+                    ne2, grid, p)
+                if m_ion3 is not None:
+                    s_cav3e = s_cav3e * m_ion3
+                # VASPsol++ solvation_nlpcm CREATECAVITY (solvation.F 1984):
+                # A_cav = TAU * int |grad S_cav| dV, Stern mask doubled,
+                # spectral gradient
+                _, _, _, gsv = grid.grad_from_recip(grid.fft(s_cav3e))
+                area = gsv.sum()
+                if not do_s3d:
+                    zero = area.new_zeros(())
+                    zv = area.new_zeros(nz_pl)
+                    return area, zero, zero, zv, zv, zero, zero
+                # LIVE envelopes (value-identical to the loss's detached
+                # stash; here the density response is in the graph)
+                gsd = _grad_mag_periodic(s_diel3e, cell64)
+                env_b = gsd / torch.clamp(gsd.max(), min=1.0e-30)
+                env_i = torch.clamp(s_ion3e, 0.0, 1.0)
+                mb = grid.ifft_real(self._gto_net_density_g(
+                    grid, pf, cbt, s3d_sigmas)) / volume
+                mi = grid.ifft_real(self._gto_net_density_g(
+                    grid, pf, cit, s3d_sigmas)) / volume
+                raw_b = env_b * mb
+                raw_i = env_i * mi
+                # charge-conservation projection; the DC ratios are shared
+                # with the supervision loss (same projected field both sides)
+                dc_b = raw_b.sum() / torch.clamp(env_b.sum(), min=1.0e-30)
+                dc_i = raw_i.sum() / torch.clamp(env_i.sum(), min=1.0e-30)
+                delta_b = raw_b - dc_b * env_b
+                delta_i = raw_i - dc_i * env_i
+                delta = delta_b + delta_i
+                e_self_raw = 0.5 * (delta * poisson_phi_periodic(delta, cell64)).sum()
+                # solute cross: cvhar rebuilt from the same live assembly
+                # (VASP electron-PE convention -> potential = -cvhar; sign
+                # validated by the label-charge unit test)
+                cvhar_e = phi_base - grid.ifft_real(grid.l0_inv_op(net_g2))
+                e_xsol_raw = -(delta * cvhar_e).sum()
+                return (area, e_xsol_raw, e_self_raw,
+                        delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
+                        dc_b, dc_i)
 
-                    live = want_grad or pf_live.requires_grad or cb.requires_grad
-                    if live:
-                        mb3 = _ckpt2(_m_field, cb, pf_live, use_reentrant=False)
-                        mi3 = _ckpt2(_m_field, ci, pf_live, use_reentrant=False)
-                    else:
-                        mb3 = _m_field(cb, pf_live)
-                        mi3 = _m_field(ci, pf_live)
-                    raw_b3 = env_b3 * mb3
-                    raw_i3 = env_i3 * mi3
-                    # charge-conservation projection; the DC ratios are also
-                    # returned so the supervision loss scores the SAME
-                    # projected field (loss subtracts dc*env at its points)
-                    dc_b = raw_b3.sum() / torch.clamp(env_b3.sum(), min=1.0e-30)
-                    dc_i = raw_i3.sum() / torch.clamp(env_i3.sum(), min=1.0e-30)
-                    delta_b3 = raw_b3 - dc_b * env_b3
-                    delta_i3 = raw_i3 - dc_i * env_i3
-                    delta3 = delta_b3 + delta_i3
-
-                    # self energy of the residual (live)
-                    def _self_e(d3):
-                        return (d3 * poisson_phi_periodic(d3, cell64)).sum()
-                    if live:
-                        e_self = 0.5 * _ckpt2(_self_e, delta3, use_reentrant=False) * dV
-                    else:
-                        e_self = 0.5 * _self_e(delta3) * dV
-                    # cross with the 1-D solvent profile (lagged: profile
-                    # detached; delta live)
-                    delta_pl = delta3.mean(dim=(0, 1))
-                    rho_l1 = (rho_ion_z + rho_bound_z).detach()
-                    phi_l1 = poisson_phi_periodic(
-                        rho_l1.view(1, 1, -1), cell64).view(-1)
-                    f_up = rho_l1.shape[0] // delta_pl.shape[0]
-                    nz_pl = delta_pl.shape[0]
-                    e_x1d = (delta_pl * phi_l1[::f_up]).sum() * (
-                        volume / float(nz_pl))
-                    # cross with the solute potential; the net-density part
-                    # of cvhar3 is REASSEMBLED with live positions so the
-                    # solute side carries its explicit anchor force too
-                    # (VASP electron-PE convention -> potential = -cvhar3;
-                    # sign validated by the label-charge unit test)
-                    def _cvhar_e(cf, pf):
-                        net_g2 = self._gto_net_density_g(grid, pf, cf.to(dt), sigmas)
-                        return phi_base - grid.ifft_real(grid.l0_inv_op(net_g2))
-                    if live:
-                        cvhar3_e = _ckpt2(_cvhar_e, radial_coeffs, pf_live,
-                                          use_reentrant=False)
-                    else:
-                        cvhar3_e = cvhar3
-                    e_xsol = -(delta3 * cvhar3_e).sum() * dV
-                    e_s3d_t = e_xsol + e_x1d + e_self
-                    # observables: the residual participates in the solvent
-                    # dipole and the scored 1-D profiles (plane content)
-                    z_pl = torch.arange(nz_pl, device=delta_pl.device,
-                                        dtype=dt) * (length_z / float(nz_pl))
-                    s3d_obs = {
-                        "delta_b_pl": delta_b3.mean(dim=(0, 1)),
-                        "delta_i_pl": delta_i3.mean(dim=(0, 1)),
-                        "mu_delta": (delta_pl * z_pl).sum() * (volume / float(nz_pl)),
-                        "dc_b": dc_b,
-                        "dc_i": dc_i,
-                    }
+            live = bool(want_grad or pos_frac.requires_grad)
+            if live:
+                outs = _ckpt2(_stage2_energy, radial_coeffs, cb, ci,
+                              pos_frac, use_reentrant=False)
+            else:
+                outs = _stage2_energy(radial_coeffs, cb, ci, pos_frac)
+            area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl, dc_b, dc_i = outs
+            if cav_energy:
+                e_cav_t = float(p["TAU"]) * area * dV
+            if do_s3d:
+                delta_pl = d_b_pl + d_i_pl
+                # 1-D cross term: solve outputs lagged (detached), delta live
+                rho_l1 = (rho_ion_z + rho_bound_z).detach()
+                phi_l1 = poisson_phi_periodic(
+                    rho_l1.view(1, 1, -1), cell64).view(-1)
+                f_up = rho_l1.shape[0] // nz_pl
+                e_x1d = (delta_pl * phi_l1[::f_up]).sum() * (
+                    volume / float(nz_pl))
+                e_s3d_t = (e_xsol_raw + e_self_raw) * dV + e_x1d
+                s3d_obs = {
+                    "delta_b_pl": d_b_pl,
+                    "delta_i_pl": d_i_pl,
+                    "mu_delta": (delta_pl * z_pl).sum() * (volume / float(nz_pl)),
+                    "dc_b": dc_b,
+                    "dc_i": dc_i,
+                }
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
         # label points (supervision only; no gradient path through the solve)

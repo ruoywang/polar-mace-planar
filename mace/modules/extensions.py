@@ -1651,6 +1651,9 @@ class PolarMACE(ScaleShiftMACE):
         # loss and energy score the same charge-conserving field)
         s3d_dc_b = positions.new_zeros(num_graphs)
         s3d_dc_i = positions.new_zeros(num_graphs)
+        # residual z-dipole, kept separately so the slab-correction energy
+        # can pass gradient through it while the 1-D part stays lagged
+        s3d_mu_delta = positions.new_zeros(num_graphs)
 
         for g in range(num_graphs):
             cell_g = cells[g]
@@ -1715,7 +1718,10 @@ class PolarMACE(ScaleShiftMACE):
                             "enc": enc + 1,
                         })
                     continue
-            pos_g = positions[atom_mask].detach()
+            # LIVE positions: the stage-2 energy terms differentiate through
+            # the GTO anchors; every pre-existing consumer inside solve_graph
+            # detaches explicitly, so the solve semantics are unchanged
+            pos_g = positions[atom_mask]
             coeffs_g = (
                 radial_blocks[atom_mask]
                 if want_grad else radial_blocks[atom_mask].detach()
@@ -1880,6 +1886,7 @@ class PolarMACE(ScaleShiftMACE):
             if sv_obs is not None:
                 s3d_dc_b[g] = sv_obs["dc_b"].to(positions.dtype)
                 s3d_dc_i[g] = sv_obs["dc_i"].to(positions.dtype)
+                s3d_mu_delta[g] = sv_obs["mu_delta"].to(positions.dtype)
             if s3d_coeffs is not None and s3d_cg is not None:
                 s3d_coeffs[atom_mask] = s3d_cg.to(s3d_coeffs.dtype)
                 sv3 = result.get("solv3d")
@@ -1931,6 +1938,7 @@ class PolarMACE(ScaleShiftMACE):
             out["solvent3d_energy_g"] = e_s3d_g
             out["solv3d_dc_b"] = s3d_dc_b
             out["solv3d_dc_i"] = s3d_dc_i
+            out["solvent3d_mu_delta_g"] = s3d_mu_delta
         return out
 
     @torch.jit.ignore
@@ -2876,9 +2884,18 @@ class PolarMACE(ScaleShiftMACE):
         # ENERGY path: the solvent dipole enters detached (the PB adjoint must
         # not sit in the force graph; energy/forces keep the lagged-SCF
         # treatment). Observables below use the grad-carrying total_dipole.
+        # ENERGY path dipole: the 1-D solvent dipole keeps the lagged
+        # treatment (detached), but the residual-3D dipole passes gradient —
+        # value = full solvent dipole, grad only through mu_delta
+        solvent_dipole_e = solvent_dipole.detach()
+        if pb_solvent_data is not None and "solvent3d_mu_delta_g" in pb_solvent_data:
+            md_vec = torch.zeros_like(solvent_dipole)
+            md_vec[:, self.solvent_potential_axis] = pb_solvent_data[
+                "solvent3d_mu_delta_g"].to(md_vec.dtype)
+            solvent_dipole_e = (solvent_dipole - md_vec).detach() + md_vec
         compensation_slab_correction_energy = _slab_dipole_correction_delta(
             explicit_dipole=explicit_dipole,
-            total_dipole=explicit_dipole + solvent_dipole.detach(),
+            total_dipole=explicit_dipole + solvent_dipole_e,
             volume=data["volume"],
             pbc=data["pbc"].view(-1, 3),
             axis=self.solvent_potential_axis,
