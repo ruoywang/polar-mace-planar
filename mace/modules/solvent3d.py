@@ -389,6 +389,12 @@ def solvent3d_residuals(ref, pred, sigmas):
     num_graphs = int(ptr.numel() - 1)
     cells = cells.view(num_graphs, 3, 3) if cells.dim() != 3 else cells
     positions = ref["positions"] if isinstance(ref, dict) else ref.positions
+    # DC projection ratios from the energy path (present when the energy
+    # terms are enabled): the loss then scores the SAME charge-conserving
+    # projected field the energy uses (delta - dc*env), keeping supervision
+    # and energy consistent by construction.
+    dc_b_g = pred.get("solv3d_dc_b")
+    dc_i_g = pred.get("solv3d_dc_i")
     res_b, res_i = [], []
     for g in range(num_graphs):
         m = (gidx == g) & valid
@@ -397,8 +403,14 @@ def solvent3d_residuals(ref, pred, sigmas):
         a0, a1 = int(ptr[g].item()), int(ptr[g + 1].item())
         pr = _gto_channels_at_points(
             points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
-        res_b.append(base_b[m] + env_b[m] * pr[0] - ref_b[m])
-        res_i.append(base_i[m] + env_i[m] * pr[1] - ref_i[m])
+        pb = base_b[m] + env_b[m] * pr[0]
+        pi = base_i[m] + env_i[m] * pr[1]
+        if dc_b_g is not None:
+            pb = pb - dc_b_g[g].to(pb.dtype) * env_b[m]
+        if dc_i_g is not None:
+            pi = pi - dc_i_g[g].to(pi.dtype) * env_i[m]
+        res_b.append(pb - ref_b[m])
+        res_i.append(pi - ref_i[m])
     if not res_b:
         return None
     return torch.cat(res_b), torch.cat(res_i)

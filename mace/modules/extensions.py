@@ -1647,6 +1647,10 @@ class PolarMACE(ScaleShiftMACE):
         s3d_e_on = s3d_on and bool(getattr(self, "solvent3d_energy", False))
         e_cav_g = positions.new_zeros(num_graphs)
         e_s3d_g = positions.new_zeros(num_graphs)
+        # DC projection ratios per graph (shared with the supervision loss so
+        # loss and energy score the same charge-conserving field)
+        s3d_dc_b = positions.new_zeros(num_graphs)
+        s3d_dc_i = positions.new_zeros(num_graphs)
 
         for g in range(num_graphs):
             cell_g = cells[g]
@@ -1828,27 +1832,54 @@ class PolarMACE(ScaleShiftMACE):
 
             layer = result["rho_layer_z"].to(positions.dtype)
             mu_g = result["ion_dipole_t"] + result["mu_bound_t"]
-            prof_feat[g] = resample_profile_periodic_torch(
-                layer, H_g, 1024, False).detach()
+            # residual-3D participation in the observables: the plane content
+            # of delta joins the scored 1-D profiles (potential/Phi1D/rho_b
+            # paths) and its z-dipole joins the solvent dipole. prof_energy
+            # (e1d's comp_profile) deliberately stays solver-only: delta's
+            # coupling to the solute is already counted in e_s3d.
+            sv_obs = result.get("s3d_obs")
+            d_feat = None
+            d_rb = None
+            if sv_obs is not None:
+                mu_g = mu_g + sv_obs["mu_delta"].to(positions.dtype)
+                d_pl = (sv_obs["delta_b_pl"] + sv_obs["delta_i_pl"]).to(positions.dtype)
+                d_feat = resample_profile_periodic_torch(d_pl, H_g, 1024, False)
+                d_rb = resample_profile_periodic_torch(
+                    sv_obs["delta_b_pl"].to(positions.dtype), H_g, 512, False)
+            prof_feat[g] = (
+                resample_profile_periodic_torch(layer, H_g, 1024, False)
+                + (d_feat if d_feat is not None else 0.0)
+            ).detach()
             prof_energy[g] = resample_profile_periodic_torch(
                 layer, H_g, 512, True).detach()
             rb_g = result["rho_bound_z"].to(positions.dtype)
             if prof_feat_grad is not None:
-                prof_feat_grad[g] = resample_profile_periodic_torch(layer, H_g, 1024, False)
+                prof_feat_grad[g] = (
+                    resample_profile_periodic_torch(layer, H_g, 1024, False)
+                    + (d_feat if d_feat is not None else 0.0)
+                )
                 q_ion[g] = result["q_ion_t"].to(positions.dtype)
                 solvent_mu[g] = mu_g.to(positions.dtype)
-                rho_bound_prof[g] = resample_profile_periodic_torch(rb_g, H_g, 512, False)
+                rho_bound_prof[g] = (
+                    resample_profile_periodic_torch(rb_g, H_g, 512, False)
+                    + (d_rb if d_rb is not None else 0.0)
+                )
             else:
                 q_ion[g] = float(result["q_ion"])
                 solvent_mu[g] = float(mu_g.detach())
-                rho_bound_prof[g] = resample_profile_periodic_torch(
-                    rb_g, H_g, 512, False).detach()
+                rho_bound_prof[g] = (
+                    resample_profile_periodic_torch(rb_g, H_g, 512, False)
+                    + (d_rb if d_rb is not None else 0.0)
+                ).detach()
             rho_bound_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
             if e_cav_g is not None and result.get("e_cav") is not None:
                 e_cav_g[g] = result["e_cav"].to(positions.dtype)
             if e_s3d_g is not None and result.get("e_s3d") is not None:
                 e_s3d_g[g] = result["e_s3d"].to(positions.dtype)
+            if sv_obs is not None:
+                s3d_dc_b[g] = sv_obs["dc_b"].to(positions.dtype)
+                s3d_dc_i[g] = sv_obs["dc_i"].to(positions.dtype)
             if s3d_coeffs is not None and s3d_cg is not None:
                 s3d_coeffs[atom_mask] = s3d_cg.to(s3d_coeffs.dtype)
                 sv3 = result.get("solv3d")
@@ -1898,6 +1929,8 @@ class PolarMACE(ScaleShiftMACE):
             out["cavity_energy_g"] = e_cav_g
         if s3d_e_on:
             out["solvent3d_energy_g"] = e_s3d_g
+            out["solv3d_dc_b"] = s3d_dc_b
+            out["solv3d_dc_i"] = s3d_dc_i
         return out
 
     @torch.jit.ignore
@@ -2921,7 +2954,8 @@ class PolarMACE(ScaleShiftMACE):
                       "solv3d_base_b", "solv3d_base_i", "solv3d_valid"):
                 solvent3d_out[k] = pb_solvent_data[k]
         if pb_solvent_data is not None:
-            for k in ("cavity_energy_g", "solvent3d_energy_g"):
+            for k in ("cavity_energy_g", "solvent3d_energy_g",
+                      "solv3d_dc_b", "solv3d_dc_i"):
                 if k in pb_solvent_data:
                     solvent3d_out[k] = pb_solvent_data[k]
 
