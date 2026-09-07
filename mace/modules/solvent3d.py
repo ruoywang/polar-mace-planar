@@ -404,12 +404,14 @@ def solvent3d_residuals(ref, pred, sigmas):
     num_graphs = int(ptr.numel() - 1)
     cells = cells.view(num_graphs, 3, 3) if cells.dim() != 3 else cells
     positions = ref["positions"] if isinstance(ref, dict) else ref.positions
-    # DC projection ratios from the energy path (present when the energy
-    # terms are enabled): the loss then scores the SAME charge-conserving
-    # projected field the energy uses (delta - dc*env), keeping supervision
-    # and energy consistent by construction.
-    dc_b_g = pred.get("solv3d_dc_b")
-    dc_i_g = pred.get("solv3d_dc_i")
+    # Per-plane projection profiles from the energy path (present when the
+    # energy terms are enabled): the loss then scores the SAME plane-projected
+    # field the energy uses (delta - r(z)*env), keeping supervision and
+    # energy consistent by construction. Profiles live on the solver grid's
+    # z planes; periodic linear interpolation at each sampled point's z.
+    r_b_g = pred.get("solv3d_rsup_b")
+    r_i_g = pred.get("solv3d_rsup_i")
+    r_nz_g = pred.get("solv3d_rsup_nz")
     res_b, res_i = [], []
     for g in range(num_graphs):
         m = (gidx == g) & valid
@@ -420,14 +422,24 @@ def solvent3d_residuals(ref, pred, sigmas):
             points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
         pb = base_b[m] + env_b[m] * pr[0]
         pi = base_i[m] + env_i[m] * pr[1]
-        # DC ratios LIVE: the exact gradient of the projected objective.
-        # (A detached ratio creates fictitious gradients along projection-
-        # annihilated directions — user's null-direction test, 2026-09-06;
-        # the earlier "dc hurts learning" attribution was confounded.)
-        if dc_b_g is not None:
-            pb = pb - dc_b_g[g].to(pb.dtype) * env_b[m]
-        if dc_i_g is not None:
-            pi = pi - dc_i_g[g].to(pi.dtype) * env_i[m]
+        # Projection profiles LIVE: the exact gradient of the projected
+        # objective. (A detached ratio creates fictitious gradients along
+        # projection-annihilated directions — user's null-direction test,
+        # 2026-09-06; the earlier "dc hurts learning" claim was confounded.)
+        nzp = 0
+        if r_b_g is not None:
+            nzp = int(r_nz_g[g]) if r_nz_g is not None else int(r_b_g.shape[1])
+        if nzp > 0:
+            zf = torch.remainder(torch.linalg.solve(
+                cells[g].T.to(points.dtype), points[m].T).T[:, 2], 1.0)
+            t = zf * nzp
+            k0 = torch.floor(t).to(torch.long) % nzp
+            w = (t - torch.floor(t)).to(pb.dtype)
+            k1 = (k0 + 1) % nzp
+            rb = r_b_g[g, :nzp].to(pb.dtype)
+            ri = r_i_g[g, :nzp].to(pb.dtype)
+            pb = pb - (rb[k0] * (1.0 - w) + rb[k1] * w) * env_b[m]
+            pi = pi - (ri[k0] * (1.0 - w) + ri[k1] * w) * env_i[m]
         res_b.append(pb - ref_b[m])
         res_i.append(pi - ref_i[m])
     if not res_b:

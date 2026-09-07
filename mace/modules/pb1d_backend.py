@@ -572,7 +572,7 @@ class PB1DBackend:
                 if not do_s3d:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
-                    return area, zero, zero, zv, zv, zero, zero, zero, zero
+                    return area, zero, zero, zv, zv, zv, zv
                 # LIVE envelopes (value-identical to the loss's detached
                 # stash; here the density response is in the graph)
                 gsd = _grad_mag_periodic(s_diel3e, cell64)
@@ -584,42 +584,49 @@ class PB1DBackend:
                     grid, pf, cit, s3d_sigmas)) / volume
                 raw_b = env_b * mb
                 raw_i = env_i * mi
-                # charge-conservation projection (energy side: fully live)
-                dc_b = raw_b.sum() / torch.clamp(env_b.sum(), min=1.0e-30)
-                dc_i = raw_i.sum() / torch.clamp(env_i.sum(), min=1.0e-30)
-                # LAGGED delta in the energy integrals (same convention as
-                # the 1-D solvent state): the full evidence matrix (gates
-                # 3418577/3418909/3419006/3419262/3419425 all unstable with
-                # live delta at any scale/decay/warmup; value-coupled gate
-                # 3417982 and cav-only 3419003 PASS) plus forensics
-                # 3419335/3419347/3419395 (Adam null-drift of the head is
-                # amplified through the quadratic self-energy when delta is
-                # live) establish that the delta-side gradient coupling is
-                # untrainable in this regime. Values stay exact and follow
-                # the head every step; gradients flow through cvhar_e
-                # (density + positions) as in the passing gates. The omitted
-                # delta-anchor force channel is measured at ~0.02-0.05 eV/A.
-                # supervision-side ratio: frozen envelopes, live m — the
-                # exact derivative of the loss's frozen-envelope forward
+                # PER-PLANE projection (user design 2026-09-07): every z
+                # plane of the residual sums to zero, so the 1-D pipeline
+                # owns ALL plane-averaged content BY CONSTRUCTION and the
+                # residual is purely lateral. Kills the loss-blind plane-
+                # dipole junk at the source (measured -6..-14 e*A, 97%
+                # spurious per the dipole-consistency check 3420722);
+                # subsumes the scalar charge projection; the full 3-D
+                # charge's dipole now equals the solver dipole exactly.
+                # Env-weighted, so the correction lives inside the envelope
+                # (no charge deposited on vacuum planes).
+                r_b = raw_b.mean(dim=(0, 1)) / torch.clamp(
+                    env_b.mean(dim=(0, 1)), min=1.0e-12)
+                r_i = raw_i.mean(dim=(0, 1)) / torch.clamp(
+                    env_i.mean(dim=(0, 1)), min=1.0e-12)
+                # supervision-side profiles: frozen envelopes, live m — the
+                # exact gradient of the loss's frozen-envelope forward
                 if env_bf is not None:
-                    dc_sup_b = (env_bf * mb).sum() / torch.clamp(
-                        env_bf.sum(), min=1.0e-30)
-                    dc_sup_i = (env_if * mi).sum() / torch.clamp(
-                        env_if.sum(), min=1.0e-30)
+                    r_sup_b = (env_bf * mb).mean(dim=(0, 1)) / torch.clamp(
+                        env_bf.mean(dim=(0, 1)), min=1.0e-12)
+                    r_sup_i = (env_if * mi).mean(dim=(0, 1)) / torch.clamp(
+                        env_if.mean(dim=(0, 1)), min=1.0e-12)
                 else:
-                    dc_sup_b, dc_sup_i = dc_b, dc_i
-                delta_b = (raw_b - dc_b * env_b).detach()
-                delta_i = (raw_i - dc_i * env_i).detach()
+                    r_sup_b, r_sup_i = r_b, r_i
+                # LAGGED delta in the energy integrals (same convention as
+                # the 1-D solvent state; evidence matrix: five live-delta
+                # gates unstable, value-coupled gates PASS; forensics
+                # 3419335/3419347/3419395). Values exact and per-step
+                # tracking; gradients flow through cvhar_e. The omitted
+                # delta-anchor force channel is measured (12-36 meV/A total
+                # MD-path gap, job 3420723).
+                delta_b = (raw_b - r_b[None, None, :] * env_b).detach()
+                delta_i = (raw_i - r_i[None, None, :] * env_i).detach()
                 delta = delta_b + delta_i
                 e_self_raw = 0.5 * (delta * poisson_phi_periodic(delta, cell64)).sum()
                 # solute cross: cvhar rebuilt from the same live assembly
                 # (VASP electron-PE convention -> potential = -cvhar; sign
-                # validated by the label-charge unit test)
+                # validated by the label-charge unit test). The 1-D cross
+                # term vanishes identically under the per-plane projection.
                 cvhar_e = phi_base_e - grid.ifft_real(grid.l0_inv_op(net_g2))
                 e_xsol_raw = -(delta * cvhar_e).sum()
                 return (area, e_xsol_raw, e_self_raw,
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
-                        dc_b, dc_i, dc_sup_b, dc_sup_i)
+                        r_sup_b, r_sup_i)
 
             # positions in the energy assemblies: LIVE only in runtime mode,
             # where the baseline itself is differentiable and the position
@@ -638,31 +645,25 @@ class PB1DBackend:
             else:
                 outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
-             dc_b, dc_i, dc_sup_b, dc_sup_i) = outs
+             r_sup_b, r_sup_i) = outs
             if cav_energy:
                 e_cav_t = float(p["TAU"]) * area * dV
             if do_s3d:
+                # per-plane projection makes the residual's plane content —
+                # and hence the 1-D cross term and its dipole — identically
+                # zero; d_*_pl and mu_delta stay exported as diagnostics
+                # (should read ~1e-15)
                 delta_pl = d_b_pl + d_i_pl
-                # 1-D cross term: solve outputs lagged (detached), delta live
-                rho_l1 = (rho_ion_z + rho_bound_z).detach()
-                phi_l1 = poisson_phi_periodic(
-                    rho_l1.view(1, 1, -1), cell64).view(-1)
-                f_up = rho_l1.shape[0] // nz_pl
-                e_x1d = (delta_pl * phi_l1[::f_up]).sum() * (
-                    volume / float(nz_pl))
-                e_s3d_t = (e_xsol_raw + e_self_raw) * dV + e_x1d
+                e_s3d_t = (e_xsol_raw + e_self_raw) * dV
                 s3d_obs = {
                     "delta_b_pl": d_b_pl,
                     "delta_i_pl": d_i_pl,
                     "mu_delta": (delta_pl * z_pl).sum() * (volume / float(nz_pl)),
-                    "dc_b": dc_b,
-                    "dc_i": dc_i,
-                    "dc_sup_b": dc_sup_b,
-                    "dc_sup_i": dc_sup_i,
+                    "r_sup_b": r_sup_b,
+                    "r_sup_i": r_sup_i,
                     # diagnostics only (detached floats): energy split
                     "e_xsol": float(e_xsol_raw.detach()) * dV,
                     "e_self": float(e_self_raw.detach()) * dV,
-                    "e_x1d": float(e_x1d.detach()),
                 }
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
