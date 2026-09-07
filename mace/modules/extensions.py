@@ -1846,10 +1846,17 @@ class PolarMACE(ScaleShiftMACE):
             sv_obs = result.get("s3d_obs")
             d_feat = None
             d_rb = None
-            # BOTH modes: train/eval-asymmetric injection double-counts
-            # against the label-calibrated pipelines (flat +5 V pot /
-            # +3.2 eV Phi1D from ep30, gates 3420115/3420358)
-            inject_obs = sv_obs is not None
+            # NO observable injection (final, three schemes measured):
+            # eval-only double-counts (+5 V flat, 3420115/3420358);
+            # both-modes detached is a sudden 5 V moving target that the
+            # potential losses hammer the trunk over (3420554: E 194 meV,
+            # pot 8.7 eV); live gradients tug-of-war on the head (3418577).
+            # The residual's plane/dipole content is the SAME physics the
+            # label-calibrated 1-D observable pipeline already owns (it
+            # matches labels at 0.148 eV); division of labor: 1-D pipeline
+            # owns observables, the head owns lateral structure + energy.
+            # The residual dipole stays exported as a pure diagnostic.
+            inject_obs = False
             if inject_obs:
                 # residual joins the observables at EVAL/deployment only
                 # (value-complete physics: dipole + scored 1-D profiles).
@@ -2840,14 +2847,10 @@ class PolarMACE(ScaleShiftMACE):
         md_g = None
         if pb_solvent_data is not None and "solvent3d_mu_delta_g" in pb_solvent_data:
             md_g = pb_solvent_data["solvent3d_mu_delta_g"]
-        # injected in BOTH modes: eval-only injection double-counts — the
-        # trainable potential/fermi pipeline calibrates against the labels
-        # WITH whatever mu it sees in training, so a term added only at eval
-        # re-introduces corrections the heads already absorbed (measured:
-        # flat +5 V from the first PB epoch in gates 3420115/3420358,
-        # unchanged by head weight decay -> not drift, bookkeeping).
-        if md_g is not None:
-            solvent_mu = solvent_mu + md_g.to(solvent_mu.dtype)
+        # solvent_mu stays solver-pure in BOTH modes (passing-gate
+        # semantics). The residual dipole md_g is exported as a diagnostic
+        # only — every injection scheme measurably conflicted with the
+        # label-calibrated observable pipeline (see run_graphs note).
         solvent_dipole = torch.zeros_like(explicit_dipole)
         solvent_dipole[:, self.solvent_potential_axis] = solvent_mu.to(
             solvent_dipole.dtype
