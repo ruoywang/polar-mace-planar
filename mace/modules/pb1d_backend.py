@@ -313,6 +313,18 @@ class PB1DBackend:
                 and self._bl_shape == shape)
             else None
         )
+        # MACE_PB1D_DFORCE: energy-derivative-force mode (user experiment
+        # 2026-09-07) — forces become the derivative of the energy through
+        # the 1-D solvent response. The frozen per-sid baseline cannot carry
+        # position gradients (measured artifact forces), so this mode uses
+        # the runtime tables even when a cache row exists, and keeps
+        # positions LIVE into the solve inputs below. Remaining truncations:
+        # SCF features (scheme C cache) and layer_mean (float).
+        live_resp = bool(os.environ.get("MACE_PB1D_DFORCE"))
+        if live_resp and bl_row is not None:
+            rt = self._get_runtime_baseline()
+            if rt is not None and node_z is not None and rt.matches(cell_np, shape):
+                bl_row = None
         use_runtime_baseline = False
         if bl_row is None:
             rt = self._get_runtime_baseline()
@@ -333,11 +345,14 @@ class PB1DBackend:
         cell64 = torch.as_tensor(cell_np, device=device, dtype=dt)
         pos64 = positions.to(dt)
         pos_frac = torch.remainder(pos64 @ torch.linalg.inv(cell64), 1.0)
+        # positions into the SOLVE inputs: detached by default (lagged-force
+        # convention); LIVE in energy-derivative-force mode
+        pf_in = pos_frac if live_resp else pos_frac.detach()
 
         if use_runtime_baseline:
             with self._Phase(self, "1_baseline", device):
                 neutral_v, phi_base = self._rt_tables.fields(
-                    pos_frac.detach(), node_z, device
+                    pf_in, node_z, device
                 )
         else:
           with self._Phase(self, "1_baseline", device):
@@ -360,7 +375,7 @@ class PB1DBackend:
 
         with self._Phase(self, "2_assembly", device):
             def _assemble(coeffs):
-                return self._gto_net_density_g(grid, pos_frac.detach(), coeffs.to(dt), sigmas)
+                return self._gto_net_density_g(grid, pf_in, coeffs.to(dt), sigmas)
 
             if want_grad:
                 from torch.utils.checkpoint import checkpoint as _ckpt
@@ -410,7 +425,7 @@ class PB1DBackend:
         delta_stats = {"c_absmax": 0.0, "dp_rms": 0.0}
         if head is not None and node_feats is not None:
             lz_t = float(cell_np[2, 2])
-            z_atoms = pos_frac.detach()[:, 2] * lz_t
+            z_atoms = pf_in[:, 2] * lz_t
             z_grid_c = torch.arange(nz, device=device, dtype=dt) * (length_z / nz)
             coeff = head.coefficients(
                 node_feats, z_atoms, clo["w_env"], clo["u"], clo["prior"],
@@ -427,7 +442,7 @@ class PB1DBackend:
         p_off = prior_s + delta_p
 
         val_dip_z = solute_dipole_z(
-            prof_ne_z, pos_frac.detach(), z_valence.to(dt), cell64)
+            prof_ne_z, pf_in, z_valence.to(dt), cell64)
         q_sol = float(-total_charge)
         solver = self._solver_for(cell_np, nz_s, device)
         center_z = 0.5 * (cell_np[0, 2] + cell_np[1, 2] + cell_np[2, 2])

@@ -1882,8 +1882,13 @@ class PolarMACE(ScaleShiftMACE):
                 resample_profile_periodic_torch(layer, H_g, 1024, False)
                 + (d_feat if d_feat is not None else 0.0)
             ).detach()
-            prof_energy[g] = resample_profile_periodic_torch(
-                layer, H_g, 512, True).detach()
+            prof_energy_live = resample_profile_periodic_torch(
+                layer, H_g, 512, True)
+            # e1d compensation profile: detached (lagged) by default; LIVE in
+            # energy-derivative-force mode so dE/dR includes the 1-D response
+            prof_energy[g] = (
+                prof_energy_live if os.environ.get("MACE_PB1D_DFORCE")
+                else prof_energy_live.detach())
             rb_g = result["rho_bound_z"].to(positions.dtype)
             if prof_feat_grad is not None:
                 prof_feat_grad[g] = (
@@ -2932,7 +2937,9 @@ class PolarMACE(ScaleShiftMACE):
         # the energy-side term). Train/eval-identical; empirically safe
         # (gate 3420358 trained healthily with it: E 12.73 meV). The 1-D
         # part keeps the lagged treatment; md_g values are lagged upstream.
-        solvent_dipole_e = solvent_dipole.detach()
+        solvent_dipole_e = (
+            solvent_dipole if os.environ.get("MACE_PB1D_DFORCE")
+            else solvent_dipole.detach())
         if md_g is not None:
             md_vec = torch.zeros_like(solvent_dipole)
             md_vec[:, self.solvent_potential_axis] = md_g.to(md_vec.dtype)
