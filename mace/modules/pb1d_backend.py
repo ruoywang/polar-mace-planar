@@ -511,7 +511,8 @@ class PB1DBackend:
         do_s3d = bool(s3d_energy and s3d_coeffs is not None)
         if cav_energy or do_s3d:
             from torch.utils.checkpoint import checkpoint as _ckpt2
-            from .solvent3d import _grad_mag_periodic, poisson_phi_periodic
+            from .solvent3d import (
+                normalized_gradient_envelope, poisson_phi_periodic)
             dV = volume / float(grid.ngrid)
             p = self.params
             m_ion3 = None
@@ -535,8 +536,7 @@ class PB1DBackend:
             env_bf = None
             env_if = None
             if do_s3d and cavd is not None:
-                gsdf = _grad_mag_periodic(cavd[1], cell64)
-                env_bf = gsdf / torch.clamp(gsdf.max(), min=1.0e-30)
+                env_bf = normalized_gradient_envelope(cavd[1], cell64)
                 env_if = torch.clamp(cavd[0], 0.0, 1.0)
 
             def _stage2_energy(cfd, cbt, cit, pf):
@@ -572,11 +572,11 @@ class PB1DBackend:
                 if not do_s3d:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
-                    return area, zero, zero, zv, zv, zv, zv
+                    zg = area.new_zeros((1, 1, 1))
+                    return area, zero, zero, zv, zv, zv, zv, zg, zg
                 # LIVE envelopes (value-identical to the loss's detached
                 # stash; here the density response is in the graph)
-                gsd = _grad_mag_periodic(s_diel3e, cell64)
-                env_b = gsd / torch.clamp(gsd.max(), min=1.0e-30)
+                env_b = normalized_gradient_envelope(s_diel3e, cell64)
                 env_i = torch.clamp(s_ion3e, 0.0, 1.0)
                 mb = grid.ifft_real(self._gto_net_density_g(
                     grid, pf, cbt, s3d_sigmas)) / volume
@@ -598,15 +598,24 @@ class PB1DBackend:
                     env_b.mean(dim=(0, 1)), min=1.0e-12)
                 r_i = raw_i.mean(dim=(0, 1)) / torch.clamp(
                     env_i.mean(dim=(0, 1)), min=1.0e-12)
-                # supervision-side profiles: frozen envelopes, live m — the
-                # exact gradient of the loss's frozen-envelope forward
+                # supervision-side PROJECTED GRID FIELDS (frozen envelopes,
+                # live m): the loss interpolates THESE at its sampled points,
+                # so loss and energy score literally the same discrete
+                # projected field. Subtracting an interpolated r(z) from a
+                # directly-evaluated GTO density is NOT equivalent between
+                # planes (a pure plane mode is annihilated on the grid but
+                # not at off-plane points — user-reproduced 2026-09-07).
                 if env_bf is not None:
                     r_sup_b = (env_bf * mb).mean(dim=(0, 1)) / torch.clamp(
                         env_bf.mean(dim=(0, 1)), min=1.0e-12)
                     r_sup_i = (env_if * mi).mean(dim=(0, 1)) / torch.clamp(
                         env_if.mean(dim=(0, 1)), min=1.0e-12)
+                    d_sup_b = env_bf * mb - r_sup_b[None, None, :] * env_bf
+                    d_sup_i = env_if * mi - r_sup_i[None, None, :] * env_if
                 else:
                     r_sup_b, r_sup_i = r_b, r_i
+                    d_sup_b = raw_b - r_b[None, None, :] * env_b
+                    d_sup_i = raw_i - r_i[None, None, :] * env_i
                 # LAGGED delta in the energy integrals (same convention as
                 # the 1-D solvent state; evidence matrix: five live-delta
                 # gates unstable, value-coupled gates PASS; forensics
@@ -626,7 +635,7 @@ class PB1DBackend:
                 e_xsol_raw = -(delta * cvhar_e).sum()
                 return (area, e_xsol_raw, e_self_raw,
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
-                        r_sup_b, r_sup_i)
+                        r_sup_b, r_sup_i, d_sup_b, d_sup_i)
 
             # positions in the energy assemblies: LIVE only in runtime mode,
             # where the baseline itself is differentiable and the position
@@ -645,7 +654,7 @@ class PB1DBackend:
             else:
                 outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
-             r_sup_b, r_sup_i) = outs
+             r_sup_b, r_sup_i, d_sup_b, d_sup_i) = outs
             if cav_energy:
                 e_cav_t = float(p["TAU"]) * area * dV
             if do_s3d:
@@ -661,6 +670,9 @@ class PB1DBackend:
                     "mu_delta": (delta_pl * z_pl).sum() * (volume / float(nz_pl)),
                     "r_sup_b": r_sup_b,
                     "r_sup_i": r_sup_i,
+                    # loss-facing projected grid fields (LIVE in m)
+                    "d_sup_b": d_sup_b,
+                    "d_sup_i": d_sup_i,
                     # diagnostics only (detached floats): energy split
                     "e_xsol": float(e_xsol_raw.detach()) * dV,
                     "e_self": float(e_self_raw.detach()) * dV,

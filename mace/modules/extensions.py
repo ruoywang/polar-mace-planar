@@ -1647,12 +1647,11 @@ class PolarMACE(ScaleShiftMACE):
         s3d_e_on = s3d_on and bool(getattr(self, "solvent3d_energy", False))
         e_cav_g = positions.new_zeros(num_graphs)
         e_s3d_g = positions.new_zeros(num_graphs)
-        # per-plane projection profiles (shared with the supervision loss so
-        # loss and energy score the same plane-projected field); allocated
-        # lazily on the first healthy solvated graph (nz from the grid)
-        s3d_r_b = None
-        s3d_r_i = None
-        s3d_r_nz = None
+        # supervision-side projected grid fields per graph (the loss
+        # interpolates these at its sampled points, so loss and energy score
+        # the same discrete plane-projected field); dict keyed by graph —
+        # grids may differ between cells
+        s3d_dsup = None
         # residual z-dipole (identically ~0 under the per-plane projection;
         # kept as a diagnostic and for the slab-energy wiring)
         s3d_mu_delta = positions.new_zeros(num_graphs)
@@ -1911,27 +1910,13 @@ class PolarMACE(ScaleShiftMACE):
             if e_s3d_g is not None and result.get("e_s3d") is not None:
                 e_s3d_g[g] = result["e_s3d"].to(positions.dtype)
             if sv_obs is not None:
-                # loss-facing profiles are the SUPERVISION-side ones (frozen
+                # loss-facing fields are the SUPERVISION-side ones (frozen
                 # envelopes, live m): the loss backward is then the exact
                 # derivative of its frozen-envelope forward. Values equal
-                # the energy-side ratios (stash == live rebuild pointwise).
-                rb_prof = sv_obs["r_sup_b"].to(positions.dtype)
-                ri_prof = sv_obs["r_sup_i"].to(positions.dtype)
-                nzp = int(rb_prof.shape[0])
-                if s3d_r_b is None:
-                    s3d_r_b = positions.new_zeros(num_graphs, nzp)
-                    s3d_r_i = positions.new_zeros(num_graphs, nzp)
-                    s3d_r_nz = torch.zeros(
-                        num_graphs, dtype=torch.long, device=positions.device)
-                elif nzp > s3d_r_b.shape[1]:
-                    # mixed cells in one batch -> different grid nz: pad the
-                    # stash; the loss slices each row to its own nz
-                    pad = nzp - s3d_r_b.shape[1]
-                    s3d_r_b = torch.nn.functional.pad(s3d_r_b, (0, pad))
-                    s3d_r_i = torch.nn.functional.pad(s3d_r_i, (0, pad))
-                s3d_r_b[g, :nzp] = rb_prof
-                s3d_r_i[g, :nzp] = ri_prof
-                s3d_r_nz[g] = nzp
+                # the energy-side field (stash == live rebuild pointwise).
+                if s3d_dsup is None:
+                    s3d_dsup = {}
+                s3d_dsup[g] = (sv_obs["d_sup_b"], sv_obs["d_sup_i"])
                 s3d_mu_delta[g] = sv_obs["mu_delta"].to(positions.dtype)
             if s3d_coeffs is not None and s3d_cg is not None:
                 s3d_coeffs[atom_mask] = s3d_cg.to(s3d_coeffs.dtype)
@@ -1982,10 +1967,8 @@ class PolarMACE(ScaleShiftMACE):
             out["cavity_energy_g"] = e_cav_g
         if s3d_e_on:
             out["solvent3d_energy_g"] = e_s3d_g
-            if s3d_r_b is not None:
-                out["solv3d_rsup_b"] = s3d_r_b
-                out["solv3d_rsup_i"] = s3d_r_i
-                out["solv3d_rsup_nz"] = s3d_r_nz
+            if s3d_dsup is not None:
+                out["solv3d_dsup"] = s3d_dsup
             out["solvent3d_mu_delta_g"] = s3d_mu_delta
         return out
 
@@ -3033,8 +3016,7 @@ class PolarMACE(ScaleShiftMACE):
                 solvent3d_out[k] = pb_solvent_data[k]
         if pb_solvent_data is not None:
             for k in ("cavity_energy_g", "solvent3d_energy_g",
-                      "solv3d_rsup_b", "solv3d_rsup_i", "solv3d_rsup_nz",
-                      "solvent3d_mu_delta_g"):
+                      "solv3d_dsup", "solvent3d_mu_delta_g"):
                 if k in pb_solvent_data:
                     solvent3d_out[k] = pb_solvent_data[k]
 

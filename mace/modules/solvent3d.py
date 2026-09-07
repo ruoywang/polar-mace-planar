@@ -89,6 +89,20 @@ def _grad_mag_periodic(field: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(out + 1.0e-30)
 
 
+def normalized_gradient_envelope(field: torch.Tensor,
+                                 cell: torch.Tensor) -> torch.Tensor:
+    """Interface envelope |grad field| / max|grad field|, guarded for the
+    interface-free cavity: on a CONSTANT field the eps floor inside
+    _grad_mag_periodic makes |grad| = 1e-15 everywhere, and dividing by the
+    max would open the envelope to all-ones where it should be closed
+    (user-reproduced 2026-09-07). The guard returns a zero envelope instead;
+    the 1e-12 threshold sits far below a physical interface gradient (~1/A)
+    and above the floor. The NaN-safe backward of the floor is kept."""
+    g = _grad_mag_periodic(field, cell)
+    mx = g.max()
+    return (g / torch.clamp(mx, min=1.0e-30)) * (mx > 1.0e-12).to(field.dtype)
+
+
 def solvent3d_probe_fields(
     s_ion3: torch.Tensor,
     s_diel3: torch.Tensor,
@@ -98,9 +112,7 @@ def solvent3d_probe_fields(
     rho_ion_z: torch.Tensor,
 ) -> Dict[str, torch.Tensor]:
     frac = torch.remainder(torch.linalg.solve(cell.T, points.T).T, 1.0)
-    gsd3 = _grad_mag_periodic(s_diel3, cell)
-    env_b = _interp3_periodic(gsd3, frac)
-    env_b = env_b / torch.clamp(gsd3.max(), min=1e-30)
+    env_b = _interp3_periodic(normalized_gradient_envelope(s_diel3, cell), frac)
     env_i = _interp3_periodic(s_ion3, frac).clamp(0.0, 1.0)
     base_b = _interp1_periodic(rho_bound_z, frac[:, 2])
     base_i = _interp1_periodic(rho_ion_z, frac[:, 2])
@@ -404,42 +416,35 @@ def solvent3d_residuals(ref, pred, sigmas):
     num_graphs = int(ptr.numel() - 1)
     cells = cells.view(num_graphs, 3, 3) if cells.dim() != 3 else cells
     positions = ref["positions"] if isinstance(ref, dict) else ref.positions
-    # Per-plane projection profiles from the energy path (present when the
-    # energy terms are enabled): the loss then scores the SAME plane-projected
-    # field the energy uses (delta - r(z)*env), keeping supervision and
-    # energy consistent by construction. Profiles live on the solver grid's
-    # z planes; periodic linear interpolation at each sampled point's z.
-    r_b_g = pred.get("solv3d_rsup_b")
-    r_i_g = pred.get("solv3d_rsup_i")
-    r_nz_g = pred.get("solv3d_rsup_nz")
+    # Supervision-side projected grid fields from the energy path (present
+    # when the energy terms are enabled): the residual part of the loss is
+    # then the trilinear interpolation of the SAME discrete plane-projected
+    # field the energy uses. Evaluating the GTO density directly at points
+    # and subtracting an interpolated r(z) is NOT the same between grid
+    # planes (a pure plane mode: annihilated on the grid, nonzero at
+    # off-plane points — user-reproduced 2026-09-07). Grid fields LIVE in
+    # the coefficients: the loss backward is the exact derivative of this
+    # forward (no fictitious gradients — the dc.detach lesson, 2026-09-06).
+    dsup = pred.get("solv3d_dsup")
     res_b, res_i = [], []
     for g in range(num_graphs):
         m = (gidx == g) & valid
         if not bool(m.any()):
             continue
-        a0, a1 = int(ptr[g].item()), int(ptr[g + 1].item())
-        pr = _gto_channels_at_points(
-            points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
-        pb = base_b[m] + env_b[m] * pr[0]
-        pi = base_i[m] + env_i[m] * pr[1]
-        # Projection profiles LIVE: the exact gradient of the projected
-        # objective. (A detached ratio creates fictitious gradients along
-        # projection-annihilated directions — user's null-direction test,
-        # 2026-09-06; the earlier "dc hurts learning" claim was confounded.)
-        nzp = 0
-        if r_b_g is not None:
-            nzp = int(r_nz_g[g]) if r_nz_g is not None else int(r_b_g.shape[1])
-        if nzp > 0:
-            zf = torch.remainder(torch.linalg.solve(
-                cells[g].T.to(points.dtype), points[m].T).T[:, 2], 1.0)
-            t = zf * nzp
-            k0 = torch.floor(t).to(torch.long) % nzp
-            w = (t - torch.floor(t)).to(pb.dtype)
-            k1 = (k0 + 1) % nzp
-            rb = r_b_g[g, :nzp].to(pb.dtype)
-            ri = r_i_g[g, :nzp].to(pb.dtype)
-            pb = pb - (rb[k0] * (1.0 - w) + rb[k1] * w) * env_b[m]
-            pi = pi - (ri[k0] * (1.0 - w) + ri[k1] * w) * env_i[m]
+        if dsup is not None and g in dsup:
+            db_g, di_g = dsup[g]
+            frac = torch.remainder(torch.linalg.solve(
+                cells[g].T.to(points.dtype), points[m].T).T, 1.0)
+            pb = base_b[m] + _interp3_periodic(db_g, frac).to(base_b.dtype)
+            pi = base_i[m] + _interp3_periodic(di_g, frac).to(base_i.dtype)
+        else:
+            # energy terms off (plain s3d recipe): direct GTO evaluation at
+            # the sampled points, no projection to be consistent with
+            a0, a1 = int(ptr[g].item()), int(ptr[g + 1].item())
+            pr = _gto_channels_at_points(
+                points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
+            pb = base_b[m] + env_b[m] * pr[0]
+            pi = base_i[m] + env_i[m] * pr[1]
         res_b.append(pb - ref_b[m])
         res_i.append(pi - ref_i[m])
     if not res_b:
