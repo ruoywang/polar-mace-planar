@@ -2924,11 +2924,17 @@ class PolarMACE(ScaleShiftMACE):
         # ENERGY path: the solvent dipole enters detached (the PB adjoint must
         # not sit in the force graph; energy/forces keep the lagged-SCF
         # treatment). Observables below use the grad-carrying total_dipole.
-        # ENERGY path dipole: solvent_mu now includes the residual dipole in
-        # BOTH modes, so the plain lagged detach is value-complete and
-        # train/eval-identical (user review 2026-09-06). The 1-D part keeps
-        # the lagged treatment; md_g values are already lagged upstream.
+        # ENERGY path dipole: value-complete in BOTH modes — the residual
+        # dipole stays in the ENERGY even though the observables are
+        # solver-pure (user review: the observable rollback must not delete
+        # the energy-side term). Train/eval-identical; empirically safe
+        # (gate 3420358 trained healthily with it: E 12.73 meV). The 1-D
+        # part keeps the lagged treatment; md_g values are lagged upstream.
         solvent_dipole_e = solvent_dipole.detach()
+        if md_g is not None:
+            md_vec = torch.zeros_like(solvent_dipole)
+            md_vec[:, self.solvent_potential_axis] = md_g.to(md_vec.dtype)
+            solvent_dipole_e = solvent_dipole_e + md_vec
         compensation_slab_correction_energy = _slab_dipole_correction_delta(
             explicit_dipole=explicit_dipole,
             total_dipole=explicit_dipole + solvent_dipole_e,
