@@ -420,14 +420,14 @@ def solvent3d_residuals(ref, pred, sigmas):
             points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
         pb = base_b[m] + env_b[m] * pr[0]
         pi = base_i[m] + env_i[m] * pr[1]
-        # DC values only: the loss scores the same projected field the
-        # energy uses, but the global-coupling gradient of the ratio is not
-        # routed (it degraded head learning, s3d_b 2.09->2.55e-3 in gate
-        # 3419977 vs 2.13->1.07e-3 in the dc-free passing gate)
+        # DC ratios LIVE: the exact gradient of the projected objective.
+        # (A detached ratio creates fictitious gradients along projection-
+        # annihilated directions — user's null-direction test, 2026-09-06;
+        # the earlier "dc hurts learning" attribution was confounded.)
         if dc_b_g is not None:
-            pb = pb - dc_b_g[g].detach().to(pb.dtype) * env_b[m]
+            pb = pb - dc_b_g[g].to(pb.dtype) * env_b[m]
         if dc_i_g is not None:
-            pi = pi - dc_i_g[g].detach().to(pi.dtype) * env_i[m]
+            pi = pi - dc_i_g[g].to(pi.dtype) * env_i[m]
         res_b.append(pb - ref_b[m])
         res_i.append(pi - ref_i[m])
     if not res_b:

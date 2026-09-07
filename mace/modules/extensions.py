@@ -1858,8 +1858,10 @@ class PolarMACE(ScaleShiftMACE):
                 # values: pot 0.79-0.83 vs 0.148 clean). The losses train
                 # the solver pipeline on its own outputs, as in every
                 # passing gate; eval metrics and deployed observables carry
-                # the full correction.
-                mu_g = mu_g + sv_obs["mu_delta"].detach().to(positions.dtype)
+                # the full correction. NOTE: the residual dipole is NOT
+                # added to mu here — the assembly adds it centrally (to the
+                # observables at eval, to the slab ENERGY always), so the
+                # energy stays value-identical between training and eval.
                 d_pl = (sv_obs["delta_b_pl"]
                         + sv_obs["delta_i_pl"]).detach().to(positions.dtype)
                 d_feat = resample_profile_periodic_torch(d_pl, H_g, 1024, False)
@@ -2829,6 +2831,15 @@ class PolarMACE(ScaleShiftMACE):
                 upper=l_axis,
             )
             solvent_mu = (-input_total_charge.view(-1)) * layer_mean
+        # residual-3D dipole: joins the OBSERVABLES (potential/fermi/dipole)
+        # at eval/deployment; during training the observable losses keep
+        # scoring the solver pipeline (see run_graphs note). The slab
+        # ENERGY below is value-complete in BOTH modes.
+        md_g = None
+        if pb_solvent_data is not None and "solvent3d_mu_delta_g" in pb_solvent_data:
+            md_g = pb_solvent_data["solvent3d_mu_delta_g"]
+        if md_g is not None and not training:
+            solvent_mu = solvent_mu + md_g.to(solvent_mu.dtype)
         solvent_dipole = torch.zeros_like(explicit_dipole)
         solvent_dipole[:, self.solvent_potential_axis] = solvent_mu.to(
             solvent_dipole.dtype
@@ -2902,15 +2913,16 @@ class PolarMACE(ScaleShiftMACE):
         # ENERGY path: the solvent dipole enters detached (the PB adjoint must
         # not sit in the force graph; energy/forces keep the lagged-SCF
         # treatment). Observables below use the grad-carrying total_dipole.
-        # ENERGY path dipole: the 1-D solvent dipole keeps the lagged
-        # treatment (detached), but the residual-3D dipole passes gradient —
-        # value = full solvent dipole, grad only through mu_delta
+        # ENERGY path dipole: ALWAYS value-complete — training and eval score
+        # the SAME slab-correction energy (user review 2026-09-06 caught the
+        # train/eval mismatch when the residual dipole rode the observable
+        # switch). The 1-D part keeps the lagged treatment; md_g values are
+        # already lagged (delta detached upstream).
         solvent_dipole_e = solvent_dipole.detach()
-        if pb_solvent_data is not None and "solvent3d_mu_delta_g" in pb_solvent_data:
+        if md_g is not None and training:
             md_vec = torch.zeros_like(solvent_dipole)
-            md_vec[:, self.solvent_potential_axis] = pb_solvent_data[
-                "solvent3d_mu_delta_g"].to(md_vec.dtype)
-            solvent_dipole_e = (solvent_dipole - md_vec).detach() + md_vec
+            md_vec[:, self.solvent_potential_axis] = md_g.to(md_vec.dtype)
+            solvent_dipole_e = solvent_dipole_e + md_vec
         compensation_slab_correction_energy = _slab_dipole_correction_delta(
             explicit_dipole=explicit_dipole,
             total_dipole=explicit_dipole + solvent_dipole_e,
