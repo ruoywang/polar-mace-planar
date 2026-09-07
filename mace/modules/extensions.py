@@ -1846,16 +1846,19 @@ class PolarMACE(ScaleShiftMACE):
             sv_obs = result.get("s3d_obs")
             d_feat = None
             d_rb = None
-            if sv_obs is not None:
-                # VALUE-complete observables, DETACHED for loss routing: the
-                # residual's plane content and dipole enter every observable,
-                # but the Phi1D/potential/fermi/rho_b losses keep training
-                # their own pipelines (gate 3418577 measured what happens
-                # otherwise: four losses pulling the head apart -> global
-                # oscillation, Phi1D x2, solvent3d_b +60%). The head's
-                # training signals are its charge loss and the energy terms;
-                # FORCES stay the exact energy derivative (the energy path
-                # carries live mu_delta separately).
+            inject_obs = sv_obs is not None and not bool(
+                getattr(self, "_pb1d_training_flag", False))
+            if inject_obs:
+                # residual joins the observables at EVAL/deployment only
+                # (value-complete physics: dipole + scored 1-D profiles).
+                # During TRAINING the injection is skipped: with a not-yet-
+                # converged head these values are per-step noise added to
+                # the potential/Phi1D/rho_b loss targets, and both injected
+                # gates degraded (3418577 live, 3419752/3419977 detached
+                # values: pot 0.79-0.83 vs 0.148 clean). The losses train
+                # the solver pipeline on its own outputs, as in every
+                # passing gate; eval metrics and deployed observables carry
+                # the full correction.
                 mu_g = mu_g + sv_obs["mu_delta"].detach().to(positions.dtype)
                 d_pl = (sv_obs["delta_b_pl"]
                         + sv_obs["delta_i_pl"]).detach().to(positions.dtype)

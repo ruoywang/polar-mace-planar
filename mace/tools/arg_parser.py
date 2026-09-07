@@ -527,10 +527,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "(equivariant GTO coefficients from the mixed node feats)",
     )
     parser.add_argument(
-        "--solvent3d_head_weight_decay", type=float, default=1.0e-2,
-        help="weight decay for the solvent3d head parameter group (caps the "
-        "measured Adam null-direction drift that detonates the E_3d "
-        "self-energy; forensics 3419395: drift saturates at |W|~0.45)",
+        "--solvent3d_head_weight_decay", type=float, default=0.0,
+        help="weight decay for the solvent3d head parameter group. Default "
+        "off (the lagged-delta design needs FAST head convergence; decay "
+        "slowed it and stretched the value-noise window, gate 3419977). "
+        "The null-direction |W| drift (forensics 3419395) is monitored in "
+        "production via the c_absmax diagnostic instead.",
     )
     parser.add_argument(
         "--solvent3d_energy", type=str2bool, default=False,

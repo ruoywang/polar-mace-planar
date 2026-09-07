@@ -166,13 +166,15 @@ class Solvent3DChargeHead(torch.nn.Module):
         from e3nn import o3
         from .wrapper_ops import Linear
 
-        # output-scale reparameterization (energy expression invariant in
-        # W*scale; only the optimizer geometry changes). Forensic 3419252
-        # measured the warmup->PB activation shock: first-Adam-step
-        # self-energy follows (lr*scale)^2 exactly — 95.5 / 0.88 / 0.25 eV
-        # at scale 100 / 10 / 5 — and scale 100 is what blew up the joint
-        # gates (3418577/3418909/3419006). 10 keeps the shock sub-eV.
-        self.out_scale = 10.0
+        # output scale: with the LAGGED delta (values only in the energy),
+        # fast head convergence is the stabilizer — the value-noise window
+        # scales inversely with learning speed. The passing gate 3417982
+        # ran scale 100 (head at 1.07e-3 within 4 PB epochs, energy value
+        # footprint +2.85 meV decaying); scale 10 stretched the noisy
+        # window and degraded everything (gates 3419752/3419977).
+        # (With LIVE delta scale 100 detonates the self-energy — that
+        # configuration is retired; forensic 3419252.)
+        self.out_scale = 100.0
         self.sigmas = [float(s) for s in sigmas]
         n_out = 2 * len(self.sigmas)
         self.n_out = n_out
@@ -418,10 +420,14 @@ def solvent3d_residuals(ref, pred, sigmas):
             points[m], positions[a0:a1], cells[g], coeffs[a0:a1], sigmas)
         pb = base_b[m] + env_b[m] * pr[0]
         pi = base_i[m] + env_i[m] * pr[1]
+        # DC values only: the loss scores the same projected field the
+        # energy uses, but the global-coupling gradient of the ratio is not
+        # routed (it degraded head learning, s3d_b 2.09->2.55e-3 in gate
+        # 3419977 vs 2.13->1.07e-3 in the dc-free passing gate)
         if dc_b_g is not None:
-            pb = pb - dc_b_g[g].to(pb.dtype) * env_b[m]
+            pb = pb - dc_b_g[g].detach().to(pb.dtype) * env_b[m]
         if dc_i_g is not None:
-            pi = pi - dc_i_g[g].to(pi.dtype) * env_i[m]
+            pi = pi - dc_i_g[g].detach().to(pi.dtype) * env_i[m]
         res_b.append(pb - ref_b[m])
         res_i.append(pi - ref_i[m])
     if not res_b:

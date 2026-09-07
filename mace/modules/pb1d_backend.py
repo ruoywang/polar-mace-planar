@@ -552,8 +552,15 @@ class PB1DBackend:
                 net_g2 = self._gto_net_density_g(grid, pf, cfd.to(dt), sigmas)
                 ne2 = torch.clamp(
                     (neutral_e - grid.ifft_real(net_g2)) / volume, min=0.0)
+                # cavity: LIVE only in runtime mode (Vcav-analog feedback and
+                # cavity force with the differentiable baseline, tier-ii
+                # validated). In training the cavity enters as values —
+                # exactly the passing-gate (3417982/3419003-training-side)
+                # semantics; the live-in-training variants degraded the
+                # trunk (gates 3419752/3419977 F 62-81 vs 35 meV/A).
+                ne_cav = ne2 if use_runtime_baseline else ne2.detach()
                 s_ion3e, s_diel3e, s_cav3e = self._tp.create_cavity_torch(
-                    ne2, grid, p)
+                    ne_cav, grid, p)
                 if m_ion3 is not None:
                     s_cav3e = s_cav3e * m_ion3
                 # VASPsol++ solvation_nlpcm CREATECAVITY (solvation.F 1984):
