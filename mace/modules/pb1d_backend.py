@@ -623,8 +623,15 @@ class PB1DBackend:
                 # tracking; gradients flow through cvhar_e. The omitted
                 # delta-anchor force channel is measured (12-36 meV/A total
                 # MD-path gap, job 3420723).
-                delta_b = (raw_b - r_b[None, None, :] * env_b).detach()
-                delta_i = (raw_i - r_i[None, None, :] * env_i).detach()
+                delta_b = raw_b - r_b[None, None, :] * env_b
+                delta_i = raw_i - r_i[None, None, :] * env_i
+                if not os.environ.get("MACE_S3D_LIVE_DELTA"):
+                    # MACE_S3D_LIVE_DELTA is a MEASUREMENT-ONLY toggle for
+                    # cost probes (wall time / peak memory of the live-delta
+                    # response channel); production always trains lagged
+                    # (five live-delta gates unstable, forensics 3419335+)
+                    delta_b = delta_b.detach()
+                    delta_i = delta_i.detach()
                 delta = delta_b + delta_i
                 e_self_raw = 0.5 * (delta * poisson_phi_periodic(delta, cell64)).sum()
                 # solute cross: cvhar rebuilt from the same live assembly
