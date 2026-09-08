@@ -823,6 +823,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent3d_head: bool = False,
         solvent3d_sigmas: str = "[0.5, 1.0, 2.0]",
         solvent3d_energy: bool = False,
+        solvent_baseline_coupling: bool = False,
         solvent_cavity_energy: bool = False,
         occ_aug_enabled: bool = False,
         occ_aug_channel_spec: str = None,
@@ -1241,6 +1242,14 @@ class PolarMACE(ScaleShiftMACE):
         # DFT E_solv-E_vac = A_cav 3.84 + A_solv -1.01 + relax 0.12).
         self.solvent_cavity_energy = bool(solvent_cavity_energy)
         self.solvent3d_energy = bool(solvent3d_energy)
+        # baseline-coupling energy (audit 2026-09-08): solvent profile x
+        # baseline solute potential, the 1-D term the compensation (net-only)
+        # never contained; zero-mean-potential convention (G0 pends the
+        # reference audit)
+        self.solvent_baseline_coupling = bool(solvent_baseline_coupling)
+        if self.solvent_baseline_coupling and solvent_model != "pb1d":
+            raise ValueError(
+                "solvent_baseline_coupling requires solvent_model='pb1d'")
         if self.solvent_cavity_energy and solvent_model != "pb1d":
             raise ValueError("solvent_cavity_energy requires solvent_model='pb1d'")
         if self.solvent3d_energy and self.solvent3d_head is None:
@@ -1645,8 +1654,10 @@ class PolarMACE(ScaleShiftMACE):
         # them; warmup/fallback graphs stay at zero
         cav_on = use_head and bool(getattr(self, "solvent_cavity_energy", False))
         s3d_e_on = s3d_on and bool(getattr(self, "solvent3d_energy", False))
+        bl_on = use_head and bool(getattr(self, "solvent_baseline_coupling", False))
         e_cav_g = positions.new_zeros(num_graphs)
         e_s3d_g = positions.new_zeros(num_graphs)
+        e_bl_g = positions.new_zeros(num_graphs)
         # supervision-side projected grid fields per graph (the loss
         # interpolates these at its sampled points, so loss and energy score
         # the same discrete plane-projected field); dict keyed by graph —
@@ -1774,6 +1785,7 @@ class PolarMACE(ScaleShiftMACE):
                     ),
                     s3d_energy=s3d_e_on,
                     cav_energy=cav_on,
+                    bl_energy=bl_on,
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1912,6 +1924,8 @@ class PolarMACE(ScaleShiftMACE):
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
             if e_cav_g is not None and result.get("e_cav") is not None:
                 e_cav_g[g] = result["e_cav"].to(positions.dtype)
+            if result.get("e_bl") is not None:
+                e_bl_g[g] = result["e_bl"].to(positions.dtype)
             if e_s3d_g is not None and result.get("e_s3d") is not None:
                 e_s3d_g[g] = result["e_s3d"].to(positions.dtype)
             if sv_obs is not None:
@@ -1970,6 +1984,8 @@ class PolarMACE(ScaleShiftMACE):
             out["solv3d_valid"] = s3d_valid
         if cav_on:
             out["cavity_energy_g"] = e_cav_g
+        if bl_on:
+            out["baseline_coupling_energy_g"] = e_bl_g
         if s3d_e_on:
             out["solvent3d_energy_g"] = e_s3d_g
             if s3d_dsup is not None:
@@ -2964,6 +2980,8 @@ class PolarMACE(ScaleShiftMACE):
             total_energy = total_energy + pb_solvent_data["cavity_energy_g"]
         if pb_solvent_data is not None and "solvent3d_energy_g" in pb_solvent_data:
             total_energy = total_energy + pb_solvent_data["solvent3d_energy_g"]
+        if pb_solvent_data is not None and "baseline_coupling_energy_g" in pb_solvent_data:
+            total_energy = total_energy + pb_solvent_data["baseline_coupling_energy_g"]
 
         forces, virials, stress, hessian, edge_forces = get_outputs(
             energy=total_energy,
@@ -3023,6 +3041,7 @@ class PolarMACE(ScaleShiftMACE):
                 solvent3d_out[k] = pb_solvent_data[k]
         if pb_solvent_data is not None:
             for k in ("cavity_energy_g", "solvent3d_energy_g",
+                      "baseline_coupling_energy_g",
                       "solv3d_dsup", "solvent3d_mu_delta_g"):
                 if k in pb_solvent_data:
                     solvent3d_out[k] = pb_solvent_data[k]

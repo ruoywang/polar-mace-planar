@@ -296,6 +296,7 @@ class PB1DBackend:
         s3d_sigmas=None,
         s3d_energy: bool = False,
         cav_energy: bool = False,
+        bl_energy: bool = False,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -488,6 +489,23 @@ class PB1DBackend:
         else:
             layer_mean_t = q_ion_t.detach() * 0.0 + 0.5 * length_z
         mu_bound_t = (rho_bound_z * z).sum() * dz * area
+
+        # ---- baseline-coupling energy (audit 2026-09-08): the compensation
+        # term couples only the NET model charge to the solvent profile; the
+        # BASELINE solute charge x solvent coupling was missing (measured
+        # -0.41 eV on the neutral cal vs its -0.62 eV 1-D gap). Definition:
+        # E_bl = sum rho_solv(z) * (-<phi_base>(z)) * A dz with a ZERO-MEAN
+        # potential — the G0 piece on charged frames (q_ion x reference) is
+        # deliberately excluded until the potential-reference / dipole
+        # bookkeeping audit settles its owner. Disjoint from the compensation
+        # term (net-only) by construction. Lagged by default; LIVE under
+        # MACE_PB1D_DFORCE like every other solve consumer.
+        e_bl_t: Optional[torch.Tensor] = None
+        if bl_energy:
+            pbz_s = fourier_upsample(phi_base.mean(dim=(0, 1)), f)
+            pbz_s = pbz_s - pbz_s.mean()
+            e_bl_raw = ((rho_ion_z + rho_bound_z) * (-pbz_s)).sum() * dz * area
+            e_bl_t = e_bl_raw if live_resp else e_bl_raw.detach()
 
         self.last_diagnostics = {
             "rms_last": float(out["rms_last"]),
@@ -733,6 +751,7 @@ class PB1DBackend:
             "delta_p": delta_p,
             "solv3d": solv3d,
             "e_cav": e_cav_t,
+            "e_bl": e_bl_t,
             "e_s3d": e_s3d_t,
             "s3d_obs": s3d_obs,
         }

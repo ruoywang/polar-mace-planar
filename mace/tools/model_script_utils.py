@@ -352,6 +352,8 @@ def _build_model(
             solvent3d_sigmas=getattr(args, "solvent3d_sigmas", "[0.5, 1.0, 2.0]"),
             solvent3d_energy=getattr(args, "solvent3d_energy", False),
             solvent_cavity_energy=getattr(args, "solvent_cavity_energy", False),
+            solvent_baseline_coupling=getattr(
+                args, "solvent_baseline_coupling", False),
             solvent_pb1d_fresh_stage1=getattr(args, "solvent_pb1d_fresh_stage1", False),
             occ_aug_enabled=float(getattr(args, "occ_aug_weight", 0.0)) > 1.0e-12,
             occ_aug_channel_spec=getattr(args, "occ_aug_channel_spec", None),

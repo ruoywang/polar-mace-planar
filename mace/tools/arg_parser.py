@@ -547,6 +547,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "solvation params json, mirrors VASPsol A_cav)",
     )
     parser.add_argument(
+        "--solvent_baseline_coupling", type=str2bool, default=False,
+        help="pb1d: add the baseline-coupling energy sum rho_solv(z) * "
+        "(-<phi_base>(z)) A dz (zero-mean potential; the net-charge coupling "
+        "lives in the compensation term, this adds the missing baseline part)",
+    )
+    parser.add_argument(
         "--save_latest_every", type=int, default=0,
         help="also save a rolling restart checkpoint every N epochs "
         "regardless of validation improvement (0 = off); keeps chained "
