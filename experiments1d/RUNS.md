@@ -403,3 +403,20 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   optimizer geometry. @a319387.
 - Final 34-ep gate with the fix: job 3419262 (pending). Criteria: pot
   trajectory converging (0.22->0.15 class), ep33 s3d_b ~1.1e-3, E ~11 meV.
+
+## 2026-09-08 migration to UT workstation tmi-a77203 (gate_bl_repro)
+- Machine: 2 x RTX 4090 (24 GB), no SLURM; conda env pmp39 (py3.9, torch 2.2.1+cu121).
+  Code pb-s3d-energy @ b4eb669 (bundle == GitHub head). Data = migration_kit
+  bundle800 (symlinked); density3d manifest rewritten to local absolute paths.
+- Reproduction gate: ~/jobs/1-3DPB/gate_bl_repro, recipe = jobs/gate_bl
+  (34 ep, seed 123). world_size=2 (one rank per GPU, NCCL) -> effective batch
+  2 instead of the LS6 run's 3 (320 vs 214 steps/epoch); ep33 numbers are
+  expected close, not identical. First attempt kept world_size=3 (ranks 0,2 on
+  GPU0, gloo backend via claude/run_train_gloo.py, repo untouched): Initial
+  valid loss 1301722262.544966 vs LS6 1301722262.544977 (rel 1e-14) and
+  PB1D-FALLBACK 5/rank as on LS6, but OOM on GPU0 at the first backward
+  (2 x ~11.2 GiB > 23.5 GiB).
+- Environment check without training: LS6 gate_bl ep33 checkpoint re-evaluated
+  with eval_offset_ab.py -> identical to cohbl.o3422505 (RMSE 11.65;
+  cohort bias NiN44 +20.00 / neusol -6.91 / vac -7.14 / NiN88 -5.32).
+- Reference for ep33: E 11.75 / F 32.75 / pot 0.1227 / fermi 0.0912 / Phi1D 0.1086.
