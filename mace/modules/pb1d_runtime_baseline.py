@@ -15,6 +15,7 @@ checked before use).
 from __future__ import annotations
 
 import math
+import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -187,8 +188,16 @@ class RuntimeBaselineTables:
                 continue
             s_el = torch.zeros(nk, dtype=torch.complex128, device=device)
             # atom chunk: 16 fits the login node's 8 GB vmem; GPUs take 64
-            # (transient phase block 1.5e6 x 64 complex128 ~ 1.5 GiB)
+            # (transient phase block 1.5e6 x 64 complex128 ~ 1.5 GiB).
+            # MACE_PB1D_BASELINE_CHUNK overrides it: under MACE_PB1D_DFORCE the
+            # positions are live, so every chunk's phase/exp block is retained
+            # for backward (~7 GiB total at 207 atoms on the 100x100x300 grid)
+            # and only the transient peak is tunable. Measured 2026-09-08 on a
+            # 24 GB RTX 4090, where chunk=64 OOMs at the first PB epoch.
             chunk = 64 if device.type == "cuda" else 16
+            _env_chunk = os.environ.get("MACE_PB1D_BASELINE_CHUNK")
+            if _env_chunk:
+                chunk = max(1, int(_env_chunk))
             for c0 in range(0, sel.shape[0], chunk):
                 phase = H @ sel[c0:c0 + chunk].T
                 s_el += torch.exp(-2j * math.pi * phase).sum(dim=1)
