@@ -490,15 +490,47 @@ Q3 density: the mismatch class has model n_e higher than DFT by +0.0046 /
   density is put through the MODEL's cavity parameters, so this isolates the
   density input and cannot alone rule out a recipe/parameter mismatch.
 
-## 3426137  envelope_alignment   code (this commit)
-Tests the mechanism the above points at: env_b = |grad s_diel| / max peaks
-where the cavity is steepest, which may not be the 1.5-2.5 A shell that holds
-the charge. If the charge share far exceeds the envelope share there, reaching
-the reference cross energy needs large coefficients in a weak-envelope region,
-and large coefficients cost self-energy -- which is exactly the charged-frame
-obstruction (min attainable self 2.28-7.79 x reference, while neutral reaches
-it). Reports charge/envelope share ratios per distance bin and per s_diel bin,
-for env_b and env^0.5, plus envelope- and charge-weighted mean distances.
+## 3426137  envelope_alignment v1 -- CANCELLED before running, superseded
+Four defects, all found by the user in review, all real:
+ (a) "the cavity is excluded" was premature. The classification called
+     s_diel <= 0.5 "closed", so the charge-carrying transition region (mean
+     s_diel ~ 0.18) was inside "closed"; agreement of that binary label says
+     nothing about whether the CONTINUOUS s_diel and its GRADIENT agree, and
+     the bound charge is -div P, hence gradient-dependent. A 0.43%-of-volume
+     mismatch carrying 27% of the gap cannot be dismissed as small. Neither
+     exonerated nor convicted.
+ (b) ARITHMETIC ERROR in the reporting: int|bg + delta| is not int|bg| +
+     int|delta|. "The model already puts about the right amount of charge
+     there" rested on 0.592 + 0.839 ~ 1.407 and is withdrawn. The sum field
+     must be formed before taking the absolute value; the script never
+     produced that quantity.
+ (c) the charge-share / envelope-share ratio cannot confirm or refute a
+     mechanism: the envelope is not a prediction of the charge, and large
+     coefficients do not imply large self-energy (a functional of the final
+     distribution). The script also compared RHOB+RHOION against the BOUND
+     channel's env_b, remixing the two charge types just separated.
+ (d) "the earlier 90% was an interpolation artifact" is wrong. The earlier
+     figure was 90% of the lateral charge within 2.5 A (17.8% + 10.9% of
+     volume), not within 1.5 A; the native grid gives 26.8% + 61.5% = 88.2%
+     within 2.5 A, which agrees. No artifact; I misread my own table.
+
+## 3426230  envelope_alignment v2 (corrected accounting)   code (this commit)
+ T1 bound and ionic kept apart, each against its own reference (RHOB /
+    RHOION): net and int|.| of the model's TOTAL channel field, formed as
+    bg + delta BEFORE the absolute value; int|bg| and int|delta| printed as
+    components and never added.
+ T2 bound split into plane-average and lateral on both sides, so the part of
+    the gap owned by the 1-D pipeline is separated from the part the 3-D
+    residual is responsible for.
+ T3 in the regions that carry the cross-energy gap, the CONTINUOUS cavity
+    value and its gradient magnitude, model vs DFT, plus correlations inside
+    the DFT transition shell -- the test the binary classification skipped.
+ T4 position diagnostic only, no pass/fail: RHOB against env_b and env^0.5,
+    RHOION against s_ion, with the native-grid |grad s| distribution so the
+    interpolation smoothing cannot contaminate it.
+Backend: MACE_S3D_EXPORT_DELTA now exports delta_b and delta_i SEPARATELY
+(delta_grid kept as their sum); merging them made it impossible to compare
+against RHOB and RHOION as distinct references.
 
 ## 3426002  neutral_feasible_amp   code 4b61668   5m07s
 Neutral verdict: NO capacity obstruction. All three bases hit cross = ref and

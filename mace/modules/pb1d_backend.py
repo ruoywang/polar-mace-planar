@@ -606,7 +606,8 @@ class PB1DBackend:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
                     zg = area.new_zeros((1, 1, 1))
-                    return area, zero, zero, zv, zv, zv, zv, zg, zg, zg
+                    return (area, zero, zero, zv, zv, zv, zv, zg, zg,
+                            zg, zg)
                 # LIVE envelopes (value-identical to the loss's detached
                 # stash; here the density response is in the graph)
                 env_b = normalized_gradient_envelope(s_diel3e, cell64)
@@ -678,11 +679,19 @@ class PB1DBackend:
                 # upsampled supervision grid, so they are the wrong field to
                 # score energy-side statistics against. Off in production
                 # (returns a 1-element dummy, so the tuple shape is fixed).
-                d_out = (delta.detach() if os.environ.get(
-                    "MACE_S3D_EXPORT_DELTA") else delta.new_zeros((1, 1, 1)))
+                # bound and ionic residuals are exported SEPARATELY: they
+                # belong to different physics (bound charge is -div P, the
+                # ionic charge is the diffuse screening layer) and a
+                # diagnostic that merges them cannot be compared against
+                # RHOB and RHOION as separate references.
+                if os.environ.get("MACE_S3D_EXPORT_DELTA"):
+                    d_out_b, d_out_i = delta_b.detach(), delta_i.detach()
+                else:
+                    z1 = delta.new_zeros((1, 1, 1))
+                    d_out_b, d_out_i = z1, z1
                 return (area, e_xsol_raw, e_self_raw,
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
-                        r_sup_b, r_sup_i, d_sup_b, d_sup_i, d_out)
+                        r_sup_b, r_sup_i, d_sup_b, d_sup_i, d_out_b, d_out_i)
 
             # positions in the energy assemblies: LIVE only in runtime mode,
             # where the baseline itself is differentiable and the position
@@ -701,7 +710,8 @@ class PB1DBackend:
             else:
                 outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
-             r_sup_b, r_sup_i, d_sup_b, d_sup_i, d_grid) = outs
+             r_sup_b, r_sup_i, d_sup_b, d_sup_i,
+             d_grid_b, d_grid_i) = outs
             if cav_energy:
                 e_cav_t = float(p["TAU"]) * area * dV
             if do_s3d:
@@ -725,7 +735,9 @@ class PB1DBackend:
                     "e_self": float(e_self_raw.detach()) * dV,
                 }
                 if os.environ.get("MACE_S3D_EXPORT_DELTA"):
-                    s3d_obs["delta_grid"] = d_grid
+                    s3d_obs["delta_b_grid"] = d_grid_b
+                    s3d_obs["delta_i_grid"] = d_grid_i
+                    s3d_obs["delta_grid"] = d_grid_b + d_grid_i
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
         # label points (supervision only; no gradient path through the solve)
