@@ -98,6 +98,13 @@ torch.cuda.synchronize()
 ms = (time.time() - t0) / 20 * 1e3
 bench["fft64_100x100x300_ms"] = round(ms, 3)
 gbig = torch.randn(168, 168, 500, dtype=torch.float64, device=device)
+# WARM UP before timing. Without this the loop absorbs cuFFT plan creation for
+# a shape that is not a power of two (168 = 2^3*3*7, 500 = 2^2*5^3), which is
+# plan-dependent and differs by machine -- measured 57.90 ms on the A100
+# against 9.85 ms on the 4090 with no warmup, an inversion that is not a
+# throughput comparison. The small-FFT and DGEMM numbers were already warmed.
+for _ in range(3):
+    torch.fft.irfftn(torch.fft.rfftn(gbig), s=gbig.shape)
 torch.cuda.synchronize()
 t0 = time.time()
 for _ in range(10):
