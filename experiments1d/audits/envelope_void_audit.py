@@ -36,7 +36,9 @@ the volume holding 78.67% of the envelope weight, with the model already at
 91% of the reference charge there. So the dominant part of the gap sits where
 the residual IS free to act, which makes it a fitting, basis or objective
 question rather than a representation impossibility. The representation
-defect is real and it is 15%, not the majority.
+defect is real and the existing gap attributable to it is 15%, not the
+majority -- and "attributable" here means "currently located there", not
+"unfixable".
 
 Two anomalies from the same run are also measured here, because both are
 cheap on fields already loaded and neither can be a basis-capacity effect:
@@ -67,11 +69,14 @@ B. Inside the slab at z 6.0-7.5 A the DFT plane-averaged bound charge is zero
    becomes -0.074 / -0.067 eV of spurious coupling -- nearly identical in
    both frames, hence structural. The neighbouring bins carry the opposite
    sign, so it is charge-neutral, converted into energy by the huge interior
-   potential. GIBBS RINGING FROM BAND-LIMITED UPSAMPLING IS REFUTED: the
-   spectrum this script prints shows the model carrying 280x (charged) and
-   340x (neutral) LESS power in the top quarter of the band than the DFT
-   reference, so the model profile is smoother up there, not ringing. Cause
-   open. Threshold-free restatement of the artefact, from the interior slice:
+   potential. CAUSE UNDETERMINED. The spectrum this script prints shows the
+   model carrying 280x (charged) and 340x (neutral) less power in the top
+   quarter of the band than the DFT reference. An earlier draft called that a
+   REFUTATION of Gibbs ringing from band-limited upsampling; DOWNGRADED
+   2026-09-09, because ringing from a band-limited reconstruction appears at
+   the band limit of that reconstruction, which can sit well below the DFT
+   grid's Nyquist, and the compared band here is defined by the profile
+   length. Less high-frequency power therefore does not exclude it. Threshold-free restatement of the artefact, from the interior slice:
    1.241e-02 e of plane-averaged charge over 97 of 300 planes where DFT has
    3.346e-08 e, nearly charge-neutral, costing -0.0674 eV against a 2.090 V
    mean interior potential, and -0.0550 eV on the neutral frame.
@@ -269,10 +274,12 @@ for sid, dftdir, tag in FRAMES:
               f"background against {float((db.abs()*m).sum()*dVm):.4f} e of "
               f"residual, and {float((gap*m).sum()*dVm):+.4f} eV of the gap",
               flush=True)
-    print(f"  (the last column is a FLOOR on what no refit of the 3-D "
-          f"coefficients can recover: the residual has essentially no\n"
-          f"   weight there, so those regions are 1-D background whatever the "
-          f"coefficients are. It is not a claim about cause.)")
+    print(f"  (DOWNGRADED 2026-09-09: the last column is the EXISTING gap in "
+          f"each region, NOT a floor on what a refit could recover. A small\n"
+          f"   envelope and a currently small residual do not imply that no "
+          f"coefficients could correct it -- the coefficients multiply the\n"
+          f"   envelope, and env_b < 1e-4 is not zero. 'The cost would be "
+          f"self-energy' is a separate argument and not a theorem.)")
 
     # ---- 2. anomaly A: is s_diel saturated in the far field? ----
     print(f"\n[V2] s_diel and |grad s_diel| along z (model vs DFT), to see "

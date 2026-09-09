@@ -740,3 +740,55 @@ identical to the digit against its earlier run. 3426545 would have produced
 only a warmed A100 big-FFT benchmark value -- a hardware number, not physics,
 already excluded from the gate and documented as absent in the reference JSON.
 Nothing in the record depends on any of the three.
+
+## THREE DOWNGRADES to the final summary (user review 2026-09-09)
+All three are the same category error in different clothes: converting a
+recovered fraction, or a currently-absent quantity, into a causal share or an
+impossibility claim.
+
+(a) "+0.278 eV is an unrecoverable floor" -- WITHDRAWN. A small envelope and a
+    currently small residual do not imply that no coefficients could correct
+    that region: the coefficients multiply the envelope and env_b < 1e-4 is
+    not zero. "The cost would be self-energy" is a separate argument and one
+    already conceded not to be a theorem. Correct statement: the EXISTING gap
+    in that region is +0.278 eV, 15.2% of the 1.832 eV bound gap.
+
+(b) "the bound channel is three fifths position, two fifths shape" --
+    WITHDRAWN, and the original log contradicts it. I converted "shifting by
+    the measured +0.450 A recovers 62.1% of the cross-energy deficit" into a
+    causal apportionment. The profile-best shift is +0.075 A with the residual
+    moving only 48.5% -> 48.3%, and at +0.450 A the residual RISES to 53.5%:
+    the shift that recovers most of the energy makes the shape fit worse. So
+    no share of the defect "is position". What stands is the IONIC channel,
+    where the evidence is much stronger: both criteria agree at +0.40/+0.45 A
+    and the residual collapses 21.2% -> 1.4% at scale 0.9911.
+
+(c) "Gibbs ringing is refuted" -- DOWNGRADED to cause undetermined. Ringing
+    from a band-limited reconstruction appears at the band limit of that
+    reconstruction, which can sit well below the DFT grid's Nyquist, and the
+    band compared here is defined by the profile length. Less high-frequency
+    power than the reference does not exclude it. No new job for this.
+
+## Plan fixed by the user 2026-09-09: density check first, then substitution
+Not starting: repeat validation, long training, basis extension.
+
+Step 1, density check, with the criteria corrected by the user: use the actual
+parameters, the actual grid and the FULL cavity generation pipeline, pointwise,
+and aggregate afterwards -- do NOT substitute a mean density into a switch
+formula. Reproducing 0.9444 proves only that the computation path matches.
+Support for "the density tail causes the plateau deficit" requires that
+replacing ONLY the suspect tail restores the plateau. A failure to reproduce
+means finding which step differs, not declaring the recipe or parameters
+wrong. This must not turn into a large waiting project.
+
+Step 2, substitution experiment, and it must keep a refit-on-the-ORIGINAL-
+cavity control. With potential, 1-D background and grid fixed, a 2x2:
+  envelope source | original coefficients | jointly refit by the same method
+  model cavity    | baseline              | is the present representation usable
+  DFT cavity      | effect of substitution| is it fittable after substitution
+Every cell reports point error, cross energy, self energy and charge
+amplitude together. If only DFT-cavity-with-refit succeeds, that cannot be
+attributed to "just the loss function"; if both fail, that does not prove
+full-basis capacity is insufficient. The 1-D solver's cavity substitution is
+recorded SEPARATELY, checking whether the ionic layer displacement and the
+0.525 eV improve, so it is not mixed with the lateral 1.307 eV.
