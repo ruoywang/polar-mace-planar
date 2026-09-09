@@ -1,0 +1,132 @@
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+
+=================== NiN44 q=-1.00 ===================
+
+[V1] bound cross-energy gap +1.8321 eV, binned by the envelope value itself (no threshold imposed).
+     env_b range   vol%   env%  int|bg|  int|del|   DFT|q|   mdl|q|   gap eV  cum gap
+   0e+00-1e-04    83.86   0.00    1.318     0.000    1.050    1.318   +0.278   +0.278
+   1e-04-1e-03     2.68   0.03    0.061     0.001    0.022    0.060   -0.039   +0.239
+   1e-03-1e-02     3.12   0.37    0.094     0.012    0.042    0.085   -0.235   +0.004
+   1e-02-3e-02     1.58   0.86    0.073     0.025    0.049    0.063   -0.162   -0.159
+   3e-02-1e-01     2.35   4.52    0.103     0.076    0.113    0.102   -0.094   -0.253
+   1e-01-3e-01     2.35  15.54    0.118     0.196    0.259    0.198   +0.189   -0.064
+   3e-01-1e+00     4.06  78.67    0.261     1.363    1.558    1.411   +1.896   +1.832
+  where env_b < 1e-04: 83.86% of volume holds 1.318 e of background against 0.0001 e of residual, and +0.2780 eV of the gap
+  where env_b < 1e-03: 86.54% of volume holds 1.379 e of background against 0.0013 e of residual, and +0.2390 eV of the gap
+  where env_b < 1e-02: 89.66% of volume holds 1.473 e of background against 0.0130 e of residual, and +0.0036 eV of the gap
+  where env_b < 3e-02: 91.23% of volume holds 1.546 e of background against 0.0384 e of residual, and -0.1587 eV of the gap
+  (the last column is a FLOOR on what no refit of the 3-D coefficients can recover: the residual has essentially no
+   weight there, so those regions are 1-D background whatever the coefficients are. It is not a claim about cause.)
+
+[V2] s_diel and |grad s_diel| along z (model vs DFT), to see where the far-field envelope weight comes from
+          z (A)   <s^m>   <s^D>  <|gs|^m>  <|gs|^D>  gs^m %  gs^D %    <phi>
+    0.00-1.50    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.062
+    1.50-3.00    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.321
+    3.00-4.50    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.599
+    4.50-6.00    0.0000  0.0000  1.78e-13  8.83e-14    0.00    0.00   -0.173
+    6.00-7.50    0.0000  0.0000  2.05e-15  1.00e-15    0.00    0.00   15.302
+    7.50-9.00    0.0000  0.0000  1.21e-06  1.18e-11    0.00    0.00    1.823
+    9.00-10.50   0.0010  0.0010  4.30e-03  4.97e-03    0.31    0.33    1.389
+   10.50-12.00   0.0010  0.0054  4.16e-03  1.95e-02    0.30    1.29   -0.034
+   12.00-13.50   0.0000  0.0062  4.44e-06  2.43e-02    0.00    1.61   -0.144
+   13.50-15.00   0.0008  0.0079  6.95e-03  3.28e-02    0.51    2.17   -0.775
+   15.00-16.50   0.1193  0.1692  2.49e-01  3.08e-01   18.10   20.40   -1.430
+   16.50-18.00   0.6527  0.7612  4.49e-01  4.43e-01   32.68   29.31   -3.901
+   18.00-19.50   0.9372  0.9982  3.17e-02  1.18e-02    2.30    0.78   -3.540
+   19.50-21.00   0.9447  1.0000  7.45e-05  2.63e-07    0.01    0.00   -2.943
+   21.00-22.50   0.9447  1.0000  1.04e-07  3.93e-10    0.00    0.00   -2.393
+   22.50-24.00   0.9447  1.0000  1.14e-10  4.50e-13    0.00    0.00   -1.889
+   24.00-25.50   0.9447  1.0000  1.12e-13  1.31e-15    0.00    0.00   -1.434
+   25.50-27.00   0.9447  1.0000  1.13e-15  1.00e-15    0.00    0.00   -1.026
+   27.00-28.50   0.9447  1.0000  1.09e-15  1.00e-15    0.00    0.00   -0.666
+   28.50-30.00   0.9447  1.0000  1.08e-15  1.00e-15    0.00    0.00   -0.353
+   30.00-31.50   0.9447  1.0000  1.06e-15  1.00e-15    0.00    0.00   -0.088
+   31.50-33.00   0.9447  1.0000  1.05e-15  1.00e-15    0.00    0.00    0.129
+   33.00-34.50   0.9447  1.0000  1.05e-15  1.00e-15    0.00    0.00    0.298
+   34.50-36.00   0.9447  1.0000  1.06e-15  1.00e-15    0.00    0.00    0.420
+   36.00-37.50   0.9447  1.0000  7.01e-11  9.27e-11    0.00    0.00    0.494
+   37.50-39.00   0.9444  0.9996  2.59e-03  3.10e-03    0.19    0.21    0.521
+   39.00-40.50   0.6590  0.6802  5.34e-01  5.77e-01   38.82   38.21    0.500
+   40.50-42.00   0.0183  0.0169  9.33e-02  8.61e-02    6.79    5.70    0.431
+   42.00-43.50   0.0000  0.0000  6.80e-07  3.71e-07    0.00    0.00    0.314
+   43.50-45.00   0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00    0.150
+  where s_diel^model > 0.99 (0.0% of volume): mean |grad s| nan /A, carrying 0.00% of the total. A saturated switch should carry almost none.
+
+[V3] spectrum of the model's rho_bound_z on its own grid (Gibbs ringing from band-limited upsampling would show as power near the Nyquist)
+  profile length 600, model 3-D grid nz 300
+    modes    0-37   (0.00-0.12 Nyquist): mean |amp| 2.701e-01, max 1.000e+00
+    modes   37-75   (0.12-0.25 Nyquist): mean |amp| 5.153e-02, max 1.166e-01
+    modes   75-150  (0.25-0.50 Nyquist): mean |amp| 1.579e-02, max 4.179e-02
+    modes  150-225  (0.50-0.75 Nyquist): mean |amp| 9.291e-04, max 1.938e-02
+    modes  225-301  (0.75-1.00 Nyquist): mean |amp| 2.699e-07, max 1.189e-06
+    DFT <RHOB>_xy on the same length, top-quarter modes: mean 7.641e-05 (model 2.699e-07)
+  interior slice (DFT plane average below 1e-9 e/A^3, 97 of 300 planes):
+    DFT  int|.| 3.346e-08 e  coupling -0.0000 eV
+    model int|.| 1.241e-02 e  coupling -0.0674 eV
+    net model charge there +2.592e-04 e, mean |phi| 2.090 V -- a near-neutral profile times a large interior potential
+
+=================== neutral ===================
+
+[V1] bound cross-energy gap -0.3113 eV, binned by the envelope value itself (no threshold imposed).
+     env_b range   vol%   env%  int|bg|  int|del|   DFT|q|   mdl|q|   gap eV  cum gap
+   0e+00-1e-04    84.05   0.00    0.140     0.000    0.121    0.140   -0.408   -0.408
+   1e-04-1e-03     2.66   0.03    0.018     0.001    0.033    0.019   -0.001   -0.409
+   1e-03-1e-02     3.10   0.37    0.035     0.012    0.059    0.038   -0.031   -0.440
+   1e-02-3e-02     1.54   0.85    0.025     0.025    0.062    0.034   -0.028   -0.468
+   3e-02-1e-01     2.33   4.54    0.036     0.072    0.133    0.070   -0.009   -0.477
+   1e-01-3e-01     2.32  15.59    0.040     0.188    0.274    0.184   +0.043   -0.435
+   3e-01-1e+00     3.98  78.61    0.084     1.372    1.312    1.382   +0.123   -0.311
+  where env_b < 1e-04: 84.05% of volume holds 0.140 e of background against 0.0001 e of residual, and -0.4078 eV of the gap
+  where env_b < 1e-03: 86.72% of volume holds 0.158 e of background against 0.0013 e of residual, and -0.4089 eV of the gap
+  where env_b < 1e-02: 89.82% of volume holds 0.193 e of background against 0.0130 e of residual, and -0.4399 eV of the gap
+  where env_b < 3e-02: 91.37% of volume holds 0.217 e of background against 0.0380 e of residual, and -0.4681 eV of the gap
+  (the last column is a FLOOR on what no refit of the 3-D coefficients can recover: the residual has essentially no
+   weight there, so those regions are 1-D background whatever the coefficients are. It is not a claim about cause.)
+
+[V2] s_diel and |grad s_diel| along z (model vs DFT), to see where the far-field envelope weight comes from
+          z (A)   <s^m>   <s^D>  <|gs|^m>  <|gs|^D>  gs^m %  gs^D %    <phi>
+    0.00-1.50    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.452
+    1.50-3.00    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.346
+    3.00-4.50    0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.212
+    4.50-6.00    0.0000  0.0000  1.81e-13  1.01e-13    0.00    0.00    0.664
+    6.00-7.50    0.0000  0.0000  1.94e-15  1.01e-15    0.00    0.00   16.524
+    7.50-9.00    0.0000  0.0000  6.70e-08  2.46e-11    0.00    0.00    3.267
+    9.00-10.50   0.0002  0.0011  1.06e-03  5.26e-03    0.08    0.35    2.997
+   10.50-12.00   0.0004  0.0056  1.61e-03  1.99e-02    0.12    1.32    2.009
+   12.00-13.50   0.0000  0.0061  2.10e-05  2.39e-02    0.00    1.58    2.173
+   13.50-15.00   0.0006  0.0095  5.00e-03  3.68e-02    0.37    2.43    1.352
+   15.00-16.50   0.1151  0.1790  2.45e-01  3.20e-01   18.02   21.12    0.463
+   16.50-18.00   0.6542  0.7742  4.47e-01  4.31e-01   32.91   28.48   -2.276
+   18.00-19.50   0.9380  0.9985  2.88e-02  1.02e-02    2.12    0.68   -2.354
+   19.50-21.00   0.9447  1.0000  6.38e-05  2.32e-07    0.00    0.00   -2.243
+   21.00-22.50   0.9447  1.0000  8.80e-08  3.46e-10    0.00    0.00   -2.138
+   22.50-24.00   0.9447  1.0000  9.58e-11  3.94e-13    0.00    0.00   -2.033
+   24.00-25.50   0.9447  1.0000  9.42e-14  1.27e-15    0.00    0.00   -1.927
+   25.50-27.00   0.9447  1.0000  1.12e-15  1.00e-15    0.00    0.00   -1.822
+   27.00-28.50   0.9447  1.0000  1.09e-15  1.00e-15    0.00    0.00   -1.717
+   28.50-30.00   0.9447  1.0000  1.09e-15  1.00e-15    0.00    0.00   -1.611
+   30.00-31.50   0.9447  1.0000  1.10e-15  1.00e-15    0.00    0.00   -1.506
+   31.50-33.00   0.9447  1.0000  1.10e-15  1.00e-15    0.00    0.00   -1.401
+   33.00-34.50   0.9447  1.0000  1.10e-15  1.00e-15    0.00    0.00   -1.295
+   34.50-36.00   0.9447  1.0000  1.10e-15  1.00e-15    0.00    0.00   -1.190
+   36.00-37.50   0.9447  1.0000  7.01e-11  9.27e-11    0.00    0.00   -1.084
+   37.50-39.00   0.9444  0.9996  2.59e-03  3.10e-03    0.19    0.21   -0.979
+   39.00-40.50   0.6590  0.6802  5.34e-01  5.77e-01   39.32   38.15   -0.874
+   40.50-42.00   0.0183  0.0169  9.33e-02  8.61e-02    6.87    5.69   -0.768
+   42.00-43.50   0.0000  0.0000  6.80e-07  3.71e-07    0.00    0.00   -0.663
+   43.50-45.00   0.0000  0.0000  1.00e-15  1.00e-15    0.00    0.00   -0.557
+  where s_diel^model > 0.99 (0.0% of volume): mean |grad s| nan /A, carrying 0.00% of the total. A saturated switch should carry almost none.
+
+[V3] spectrum of the model's rho_bound_z on its own grid (Gibbs ringing from band-limited upsampling would show as power near the Nyquist)
+  profile length 600, model 3-D grid nz 300
+    modes    0-37   (0.00-0.12 Nyquist): mean |amp| 4.104e-01, max 1.000e+00
+    modes   37-75   (0.12-0.25 Nyquist): mean |amp| 2.788e-01, max 4.785e-01
+    modes   75-150  (0.25-0.50 Nyquist): mean |amp| 1.020e-01, max 2.385e-01
+    modes  150-225  (0.50-0.75 Nyquist): mean |amp| 7.119e-03, max 1.179e-01
+    modes  225-301  (0.75-1.00 Nyquist): mean |amp| 9.738e-07, max 9.359e-06
+    DFT <RHOB>_xy on the same length, top-quarter modes: mean 3.304e-04 (model 9.738e-07)
+  interior slice (DFT plane average below 1e-9 e/A^3, 96 of 300 planes):
+    DFT  int|.| 2.590e-08 e  coupling -0.0000 eV
+    model int|.| 1.028e-02 e  coupling -0.0550 eV
+    net model charge there +2.128e-05 e, mean |phi| 2.502 V -- a near-neutral profile times a large interior potential
+DONE

@@ -53,3 +53,33 @@ run to run on identical code and identical input. Two runs here gave
 the 1e-6 tolerance, so comparing that field will report SMOKE FAIL regardless
 of whether the port is correct. Every energy term, by contrast, was bit-identical
 across the two runs.
+
+## Update: gate evaluated (mace HEAD 060ef30, pb 9b3b9ba)
+
+`smoke_060ef30_GATED.log` — **SMOKE PASS** against
+`reference_values_a100.json` (NVIDIA A100-PCIE-40GB): worst relative
+difference 1.72e-09 over 52 gated numbers, 0 over the 1e-6 tolerance. The
+three cancellation-limited residuals are reported by order of magnitude as
+intended (0.15, 0.25, 0.15 decades on sid 1; 0.21, 0.01, 0.21 on sid 601).
+Solver provenance identical to the A100: both loops exit on tolerance on both
+frames, fixed point 7 steps of a 60 cap, Newton 8 (sid 1) and 7 (sid 601)
+outer of a 12 cap.
+
+Note on the benchmark line: the reference's `fft64_168x168x500_ms` = 57.902 ms
+was recorded at 2ad0d55, BEFORE the big-FFT warm-up was added at 3b289ba, so
+it still contains cuFFT plan creation for a non-power-of-two shape. Our warmed
+number is 4.58 ms, and smoke_test.py therefore prints "0.1x slower here",
+which reads as this card being 10x faster at that FFT. That comparison is an
+artefact of the stale reference field, not a throughput result. The reference
+needs regenerating at 3b289ba or later before that line means anything. The
+DGEMM comparison (1176 vs 9757 GFLOP/s, 8.3x) and the small FFT (0.88 vs
+0.46 ms) are both warmed on each side and are the honest ones.
+
+`envelope_void_audit_060ef30.log`, `profile_shift_scan_060ef30.log` — the two
+diagnostics. Numbers only; no verdict attached. Two script defects found while
+running them are described in the cross-session report and should be fixed
+before these outputs are quoted: the "% of deficit recovered by shift alone"
+figure overflows to -5.2e31% on the charged bound channel (correct value
+98.9%), and the `s_diel > 0.99` summary line divides by an empty set and
+prints nan because the model's switch saturates at 0.9447 and never reaches
+0.99 at all.

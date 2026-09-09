@@ -1,0 +1,51 @@
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+device: NVIDIA GeForce RTX 4090  23.5 GiB  torch 2.2.1+cu121 cuda 12.1
+interpreter: /home/rw28343/softwares/anaconda3/envs/pmp39/bin/python
+cwd: /home/rw28343/jobs/1-3DPB/claude/kitrun/run  ckpt dir: checkpoints  data dir: data
+double precision: DGEMM 1176 GFLOP/s | FFT 100x100x300 0.88 ms | FFT 168x168x500 4.58 ms
+
+== sid 1 (q=-1.00) ==  1.08 s, peak 3.03 GiB
+            energy -1.30606226e+03
+           comp_1d -1.55384397e+00
+             e_cav +3.89594476e+00
+              e_bl +3.96949357e-01
+             e_s3d -3.23176680e-01
+            e_xsol -9.34994930e-01
+            e_self +6.11818249e-01
+      delta_absint +6.25573430e+02
+   delta_plane_max +2.64449018e-15
+       pb_rms_last +1.90706276e-13
+  solver exit: fixed-point tol after 7 steps (min 5, cap 60), residual 1.709e-12 against 1.000e-07
+               Newton tol with 8 total outer iterations (cap 12 per call), rms 1.907e-13 against tol 1.000e-03
+
+== sid 601 (q=+0.00) ==  0.84 s, peak 3.34 GiB
+            energy -1.30559678e+03
+           comp_1d +1.16124005e-01
+             e_cav +3.84621696e+00
+              e_bl -6.38649115e-01
+             e_s3d -1.58241054e-01
+            e_xsol -7.64381835e-01
+            e_self +6.06140781e-01
+      delta_absint +5.87060144e+02
+   delta_plane_max +4.06703019e-16
+       pb_rms_last +6.93751005e-13
+  solver exit: fixed-point tol after 7 steps (min 5, cap 60), residual 2.849e-10 against 3.068e-07
+               Newton tol with 7 total outer iterations (cap 12 per call), rms 6.938e-13 against tol 1.000e-03
+
+comparing against /home/rw28343/jobs/1-3DPB/claude/kitrun/code/pmp-s3denergy/experiments1d/audits/reference_values_a100.json (recorded on NVIDIA A100-PCIE-40GB)
+  dgemm_GFLOPs: this 1176 vs A100 9757 (8.3x slower here)
+  fft64_100x100x300_ms: this 0.88 ms vs A100 0.46 ms (1.9x slower here)
+  fft64_168x168x500_ms: this 4.58 ms vs A100 57.90 ms (0.1x slower here)
+
+   frame             term       this machine               A100   rel diff
+
+  not gated (cancellation-limited; order of magnitude only):
+       1      pb_rms_last   +1.907062762e-13   +2.687221277e-13     0.15 decades
+       1       pb_fix_res   +1.708966302e-12   +3.044675623e-12     0.25 decades
+       1 pb_newton_rms_last   +1.907062762e-13   +2.687221277e-13     0.15 decades
+     601      pb_rms_last   +6.937510045e-13   +1.135462900e-12     0.21 decades
+     601       pb_fix_res   +2.849329661e-10   +2.894502416e-10     0.01 decades
+     601 pb_newton_rms_last   +6.937510045e-13   +1.135462900e-12     0.21 decades
+
+worst relative difference 1.72e-09 over 52 numbers (excluding 6 cancellation-limited ones), 0 over the 1e-06 tolerance
+SMOKE PASS
