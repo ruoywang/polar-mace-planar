@@ -430,3 +430,29 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   User ruling: this ep33 is the local baseline; LS6 numbers are direction
   reference only. pot/fermi ep32->33 rebound (0.1337->0.1759) attributed to
   effective-batch 3->2 trajectory jitter.
+
+## 3426061  cavity_compare (raw vs lateral separation)   code 7ae44ae
+Cancelled 3426020/3426042 and replaced them: the earlier version binned only
+the LATERAL charge (rho_solv - <rho_solv>_xy), which is non-zero inside a
+closed cavity purely to cancel the plane average. Reading "28.5% of the
+lateral charge sits where the cavity is closed, therefore the cavity is
+wrong" is RETRACTED (user correction 2026-09-09).
+Now measured, raw and lateral kept in separate tables:
+  Q1-raw   RHOB binned by s_diel, RHOION binned by s_ion, full solvent by
+           s_diel (native DFT grid, no interpolation). No requirement that
+           the bound charge vanish at small s_diel: it is -div P with a
+           non-local convolution.
+  Q1-lat   the old lateral binning, relabelled.
+  Q2       cavity agreement classes (both open / both closed / model closed
+           DFT open / model open DFT closed).
+  Q2-raw   per class: TRUE raw solvent charge vs the model's broadcast 1-D
+           background vs its 3-D residual, with cross energies. Separates
+           "cavity wrong" (real charge where the model's cavity is closed)
+           from "1-D background + envelope-restricted residual cannot work
+           together" (real charge ~0, background not, |delta| small).
+  Q3       density comparison, with the caveat recorded in the output that
+           the DFT density goes through the MODEL's cavity parameters, so it
+           isolates the density input only.
+Backend: MACE_S3D_EXPORT_DELTA (diagnostics only, off in production) exports
+the exact energy-side residual on the ENERGY grid; d_sup_* live on the
+upsampled supervision grid and are the wrong field for this.
