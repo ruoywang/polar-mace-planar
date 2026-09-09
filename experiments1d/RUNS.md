@@ -646,3 +646,47 @@ Convergence provenance now exported and clean on both frames: fixed-point
 exits on tolerance after 7 steps (minimum 5, cap 60), Newton on tolerance
 with 7-8 total outer iterations (cap 12 per call). The 80-round-idling
 concern is closed for this path with evidence rather than by assertion.
+
+## CORRECTION to the cross-run entry above: the gated fields are not bit-identical
+Reported by the workstation session 2026-09-09, correcting its own earlier
+claim which I had propagated into commit messages ea430d5 onward and into the
+NONGATED rationale in smoke_test.py. Two runs on the SAME machine with
+identical code and identical input differ on every float except q_tot and the
+integer-valued provenance fields:
+  e_bl (sid 1)                2.2e-09 relative
+  rho_layer_z_absint (sid 1)  1.3e-10
+  delta_plane_max (sid 1)     1.1e-10
+  comp_1d (sid 1)             8.5e-11
+  e_s3d (sid 1)               4.6e-11
+  e_xsol (sid 1)              1.4e-11
+  everything else             <= 1e-12
+The 1e-6 gate is unaffected (2.2e-09 is 2.7 orders inside it) and SMOKE PASS
+stands, but: the tolerance must NOT be tightened below about 1e-7 on an
+assumption of determinism, and a failure at the 1e-8 level would be this
+jitter rather than a port defect. It also explains the worst gated deviation
+moving 1.72e-09 -> 2.75e-10 between two runs with no code change: the same
+e_bl field both times. The exit reason and iteration counts ARE exactly
+reproducible across runs and machines and remain gated.
+
+## Reruns at 40866f6 (workstation): no substantive number moved
+V1 identical to the digit on both frames, including the floor lines
++0.2780 / +0.2390 / +0.0036 / -0.1587 eV charged and -0.4078 / -0.4089 /
+-0.4399 / -0.4681 neutral, and the 3e-01-1e+00 bin at +1.896 eV on 4.06% of
+volume and 78.67% of the envelope. V3 identical: 2.699e-07 near the Nyquist
+against DFT 7.641e-05, interior slice 1.241e-02 e against 3.346e-08 e costing
+-0.0674 eV (neutral 1.028e-02 e, -0.0550 eV). Shift-scan BEST-by-residual
+lines unchanged: charged bound +0.075 A / 0.8711 / 48.3%, charged ionic
++0.400 A / 0.9911 / 1.4%, neutral bound +0.150 A / 0.6773 / 64.9%. Outside
+the three fixed lines the only difference anywhere is 1e-15-level jitter in
+the bulk gradient bins. Neutral ionic is now skipped by the tightened guard.
+Smoke at 40866f6: SMOKE PASS, worst 2.75e-10 over 52 gated numbers.
+
+## Second wording defect of mine, fixed in this commit
+envelope_void_audit printed the WITHDRAWN creeping-switch hypothesis as an
+assertion immediately above the two lines that refute it: the model carries
+1.06% of its gradient weight inside its own plateau region against DFT's
+1.15% -- less, not more (neutral 1.07% against 1.16%). The block is a test of
+the plateau LEVEL only and is now labelled as such; the far-field envelope
+share is accounted for in full by the second dielectric interface. Those
+numbers also close that account from the other side: 1.06% in the plateau
+plus about 45.8% beyond z = 37.5 A leaves nothing unexplained.

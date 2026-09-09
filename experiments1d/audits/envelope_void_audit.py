@@ -298,10 +298,21 @@ for sid, dftdir, tag in FRAMES:
     # plateaus at about 0.9447 in the bulk while DFT saturates at 1.0000, both
     # frames. So report each switch's own ceiling and use a relative cut.
     mx_m = float(s_diel_m.max()); mx_d = float(s_dm.max())
+    # This block tests the plateau LEVEL only. It is NOT a test of the
+    # far-field envelope weight: that is accounted for in full by a second
+    # dielectric interface at the far face of the solvent slab (z ~ 39-42 A),
+    # which both fields have and which lies beyond 5 A from every atom simply
+    # because the solvent layer is about 20 A thick. An earlier draft asserted
+    # here that a switch short of saturation must carry non-vanishing gradient
+    # where it is still creeping; the two lines below REFUTE that -- the model
+    # carries about 1.06% of its gradient weight inside its own plateau
+    # region against DFT's 1.15%, i.e. less, not more.
     print(f"  switch ceiling: model max s_diel {mx_m:.4f}, DFT max {mx_d:.4f}"
           f"  -> model plateau deficit {100.0*(mx_d-mx_m)/max(mx_d,1e-30):.2f}%"
-          f" of unity. A switch that does not saturate has a non-vanishing "
-          f"normalized gradient wherever it is still creeping.", flush=True)
+          f" of unity. This is a level difference; the plateau region carries "
+          f"almost no gradient weight on either field, so it does not explain "
+          f"the far-field envelope share (the second interface does).",
+          flush=True)
     for nm2, fld, mx, tot in (("model", s_diel_m, mx_m, gm_tot),
                               ("DFT", s_dm, mx_d, gd_tot)):
         g = gm_m if nm2 == "model" else g_dm

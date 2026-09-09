@@ -275,14 +275,30 @@ for k in ("fft64_100x100x300_ms", "fft64_168x168x500_ms"):
 TOL = 1.0e-6
 # Cancellation-limited quantities are NOT gate-able. A converged residual of
 # ~1e-13 against fields of order 1 is a difference of nearly-equal numbers, so
-# it moves run to run on identical code and identical input while every energy
-# term stays bit-identical (measured on the workstation: pb_rms_last 3.56e-13
-# then 6.89e-13 for sid 1, 6.07e-13 then 1.57e-12 for sid 601 -- relative
-# differences of 3.3e-5 and 9.6e-5 against the 1e-8 denominator floor, which
-# would fail the 1e-6 gate no matter how correct the port is). They are
-# reported by order of magnitude instead. What the convergence rule actually
-# cares about -- the exit reason and the iteration count -- IS reproducible
-# and stays gated.
+# it moves by a large FACTOR run to run on identical code and identical input
+# (measured on the workstation: pb_rms_last 3.56e-13 then 6.89e-13 for sid 1,
+# 6.07e-13 then 1.57e-12 for sid 601 -- relative differences of 3.3e-5 and
+# 9.6e-5 against the 1e-8 denominator floor, which would fail the 1e-6 gate no
+# matter how correct the port is). They are reported by order of magnitude
+# instead.
+#
+# CORRECTION (2026-09-09): an earlier version of this comment said the energy
+# terms are "bit-identical" across such runs. They are NOT. That was read off
+# an 8-decimal console printout rather than the full-precision JSON. Comparing
+# two runs on the same machine, every float except q_tot and the
+# integer-valued provenance fields differs: e_bl 2.2e-09 relative,
+# rho_layer_z_absint 1.3e-10, delta_plane_max 1.1e-10, comp_1d 8.5e-11,
+# e_s3d 4.6e-11, e_xsol 1.4e-11, the rest at or below 1e-12. The gate is
+# unaffected -- 2.2e-09 is 2.7 orders inside 1e-6 -- but two consequences
+# follow: the tolerance must NOT be tightened below about 1e-7 on an
+# assumption of determinism, and a future failure at the 1e-8 level would be
+# this jitter rather than a port defect. It also explains why the worst gated
+# deviation moved between two runs (1.72e-09 then 2.75e-10) with no code
+# change: both are that same e_bl field.
+#
+# What the convergence rule cares about -- the exit reason and the iteration
+# count -- IS exactly reproducible, across runs and across machines, and
+# stays gated.
 NONGATED = {"pb_rms_last", "pb_fix_res", "pb_newton_rms_last"}
 worst, nbad = 0.0, 0
 info = []
