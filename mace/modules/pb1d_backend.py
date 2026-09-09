@@ -606,7 +606,7 @@ class PB1DBackend:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
                     zg = area.new_zeros((1, 1, 1))
-                    return area, zero, zero, zv, zv, zv, zv, zg, zg
+                    return area, zero, zero, zv, zv, zv, zv, zg, zg, zg
                 # LIVE envelopes (value-identical to the loss's detached
                 # stash; here the density response is in the graph)
                 env_b = normalized_gradient_envelope(s_diel3e, cell64)
@@ -673,9 +673,16 @@ class PB1DBackend:
                 # term vanishes identically under the per-plane projection.
                 cvhar_e = phi_base_e - grid.ifft_real(grid.l0_inv_op(net_g2))
                 e_xsol_raw = -(delta * cvhar_e).sum()
+                # MACE_S3D_EXPORT_DELTA: diagnostics-only export of the exact
+                # energy-side residual on the ENERGY grid. d_sup_* live on the
+                # upsampled supervision grid, so they are the wrong field to
+                # score energy-side statistics against. Off in production
+                # (returns a 1-element dummy, so the tuple shape is fixed).
+                d_out = (delta.detach() if os.environ.get(
+                    "MACE_S3D_EXPORT_DELTA") else delta.new_zeros((1, 1, 1)))
                 return (area, e_xsol_raw, e_self_raw,
                         delta_b.mean(dim=(0, 1)), delta_i.mean(dim=(0, 1)),
-                        r_sup_b, r_sup_i, d_sup_b, d_sup_i)
+                        r_sup_b, r_sup_i, d_sup_b, d_sup_i, d_out)
 
             # positions in the energy assemblies: LIVE only in runtime mode,
             # where the baseline itself is differentiable and the position
@@ -694,7 +701,7 @@ class PB1DBackend:
             else:
                 outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
-             r_sup_b, r_sup_i, d_sup_b, d_sup_i) = outs
+             r_sup_b, r_sup_i, d_sup_b, d_sup_i, d_grid) = outs
             if cav_energy:
                 e_cav_t = float(p["TAU"]) * area * dV
             if do_s3d:
@@ -717,6 +724,8 @@ class PB1DBackend:
                     "e_xsol": float(e_xsol_raw.detach()) * dV,
                     "e_self": float(e_self_raw.detach()) * dV,
                 }
+                if os.environ.get("MACE_S3D_EXPORT_DELTA"):
+                    s3d_obs["delta_grid"] = d_grid
 
         # solvent3d probe: detached envelopes + 1-D baselines at the sampled
         # label points (supervision only; no gradient path through the solve)
