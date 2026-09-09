@@ -22,12 +22,22 @@ CRITERIA FIXED BY THE USER, and they change what counts as support:
 
 So, four parts, all on fields already loaded:
 
-A. PATH CONSISTENCY. Recompute the cavity from the model's own captured n_e
-   through create_cavity_torch with the captured params on the model grid, and
-   compare POINTWISE against the cavity the model actually used. A max
-   difference near zero says the path matches and nothing more. If it does
-   not, the difference is localised by z and by s_diel value, which is the
-   "which step differs" diagnostic rather than a verdict.
+A. PATH CONSISTENCY, self-calibrated. Recompute the cavity from the model's
+   own captured n_e through create_cavity_torch with the captured params on
+   the model grid, and compare POINTWISE against the cavity the model actually
+   used. No fixed tolerance is chosen: the full pipeline is called TWICE on
+   the identical input and the call-to-call difference is the noise floor the
+   comparison is judged against. This matters because the code is known to be
+   irreproducible run to run at up to 2.2e-09 relative on energy scalars, so
+   any fixed criterion at or below about 1e-8 could not separate a real path
+   difference from noise -- and a single run would then be unable to say
+   which. Note the 2.2e-09 was measured BETWEEN runs on energy scalars, not
+   on two cavity fields inside one run, which is why the floor is measured
+   here rather than borrowed. Three verdicts are possible: below the measured
+   floor (path matches as far as one run can tell), above the floor but under
+   1e-8 (INDETERMINATE from one run, reported as neither agreement nor
+   finding), or clearly above (localised by z and by s_diel value, which is
+   the "which step differs" diagnostic and not a verdict).
 
 B. IS THE SWITCH ITSELF THE SAME MAP? Bin s_diel by n_e for both fields on
    their own grids and report the mean AND the spread within each bin. If the
@@ -181,17 +191,45 @@ for sid, dftdir, tag in FRAMES:
           + f"  (all keys: {sorted(list(params.keys()))[:14]}...)", flush=True)
 
     # ---------------- A. path consistency, pointwise ----------------
+    # SELF-CALIBRATED, no chosen tolerance. The workstation pointed out that a
+    # fixed threshold here is unsafe: this code is known not to be reproducible
+    # run to run (up to 2.2e-09 relative on e_bl), so any criterion at or below
+    # about 1e-8 cannot separate a real path difference from noise, and a
+    # single run then cannot say which it is. But that 2.2e-09 was measured
+    # BETWEEN runs on energy scalars, which is not the quantity compared here:
+    # part A compares two cavity fields built from the SAME captured n_e inside
+    # ONE run. That noise floor has never been measured, so measure it instead
+    # of guessing: call the full pipeline twice on the identical input and use
+    # the call-to-call difference as the floor the comparison is judged against.
     _si, s_re, _x = tp.create_cavity_torch(ne_m, gm, params)
     s_re = torch.clamp(s_re, 0.0, 1.0)
+    _si_b, s_re_b, _x_b = tp.create_cavity_torch(ne_m, gm, params)
+    s_re_b = torch.clamp(s_re_b, 0.0, 1.0)
+    noise = float((s_re - s_re_b).abs().max())
     d = (s_re - s_used).abs()
+    dmax = float(d.max())
     print(f"\n[A] recomputed the cavity from the model's own captured n_e "
           f"through the full pipeline, same grid and params")
-    print(f"  pointwise |s_recomputed - s_used|: max {float(d.max()):.3e}, "
+    print(f"  call-to-call noise floor on IDENTICAL input, same run: "
+          f"max |s_a - s_b| {noise:.3e}")
+    print(f"  pointwise |s_recomputed - s_used|: max {dmax:.3e}, "
           f"mean {float(d.mean()):.3e}, 99th pct "
           f"{float(torch.quantile(d.flatten().float(), 0.99)):.3e}")
     print(f"  ceilings: recomputed {float(s_re.max()):.4f}, "
           f"as used {float(s_used.max()):.4f}")
-    if float(d.max()) > 1.0e-9:
+    if dmax <= max(10.0 * noise, 1.0e-14):
+        print(f"  path difference is INDISTINGUISHABLE from the call-to-call "
+              f"floor ({dmax:.3e} against {noise:.3e}). The path matches as "
+              f"far as one run can tell, which proves the computation path "
+              f"only and is NOT evidence for any hypothesis.")
+    elif dmax <= 1.0e-8:
+        print(f"  path difference {dmax:.3e} is above the call-to-call floor "
+              f"{noise:.3e} but within the band where this code is known to "
+              f"be irreproducible between runs (2.2e-09 observed on energy "
+              f"scalars). Reported as INDETERMINATE from a single run -- not "
+              f"agreement, and not a finding. Localisation follows for "
+              f"information only.")
+    if dmax > max(10.0 * noise, 1.0e-14):
         print(f"  PATH DIFFERS -- localising rather than concluding:")
         lz = float(torch.linalg.norm(torch.as_tensor(
             gm.cell, dtype=torch.float64, device=device)[2]))
@@ -207,9 +245,6 @@ for sid, dftdir, tag in FRAMES:
                       f"{float(d[m].max()):.3e} over "
                       f"{100.0*float(m.sum())/float(np.prod(shm)):.1f}% of vol",
                       flush=True)
-    else:
-        print(f"  path matches to {float(d.max()):.1e}. This proves the "
-              f"computation path only and is NOT evidence for any hypothesis.")
 
     # ---------------- DFT side, native ----------------
     latd, chg = read_grid(f"{dftdir}/CHGCAR")
