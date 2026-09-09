@@ -139,3 +139,25 @@ the solvent slab (z = 37.5-42 A, 45.80% model against 44.12% DFT, matching the
 T4 "beyond 5 A" columns of 45.79% and 44.11% to the last printed digit), not
 bulk creep. The plateau level, 0.9447 against 1.0000 across the solvent region
 on both frames, is a separate and real finding.
+
+## Final state
+
+`pb-s3d-energy` at **ca6c790** is the pinned final state of this exchange; every
+log in this directory was produced by code that is an ancestor of it, and the
+per-log HEADs above say which. Verified from this machine: ca6c790 is the branch
+tip, and its `experiments1d/RUNS.md` carries the run-to-run jitter table, the
+correction to the bit-identical claim, and the 0.72-decade NONGATED spread from
+the 40866f6 run.
+
+The three LS6 jobs that were queued at the end (3426543 void cross-check,
+3426544 shift cross-check, 3426545 reference regeneration) were cancelled rather
+than run. The reason: job 3426230 had already reproduced this machine's
+`envelope_alignment` output digit for digit on both frames, which validates the
+chain all three shared, so two would have been repeats and the third only a
+warmed A100 big-FFT benchmark that is excluded from the gate anyway. That is why
+`reference_values_a100.json` still carries the renamed-out
+`fft64_168x168x500_ms_UNWARMED_2ad0d55` key with its note instead of a warmed
+value, and why that one benchmark line is absent from the smoke output rather
+than wrong.
+
+Nothing in this directory is superseded by the cancellations.
