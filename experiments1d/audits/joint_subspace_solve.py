@@ -386,6 +386,11 @@ for sid, dftdir, tag, NPTS in FRAMES:
         rms_base = math.sqrt(max(r2b, 0.0) / NPTS) / rms_all_ref
         ok = (abs(cr / X_ref - 1) < 0.05 and abs(se / S_ref - 1) < 0.15
               and abs(am / Q_ref - 1) < 0.20 and rms <= 1.5 * rms_base)
+        np.savez(f"jss_{sid}_{bname.replace('+','p').replace('^','')}.npz",
+                 M=M.cpu().numpy(), b=bb.cpu().numpy(), S=Ssym.cpu().numpy(),
+                 x=x.cpu().numpy(), alpha=chosen.cpu().numpy(),
+                 coeffs=torch.stack(fam[bname]).cpu().numpy(),
+                 refs=np.array([X_ref, S_ref, Q_ref, rms_all_ref, rms_deep_ref]))
         print(f"\n  basis {bname}: family {m} vectors, self-Gram eigenvalues "
               f"{float(ev.min()):.2e} … {float(ev.max()):.2e}")
         print(f"    min attainable self at cross = ref : {min_self:+.4f} "
@@ -394,16 +399,12 @@ for sid, dftdir, tag, NPTS in FRAMES:
         print(f"    chosen point: rms/ref {rms:.3f} (plain fit {rms_base:.3f}, "
               f"cap {1.5*rms_base:.3f})  rms_deep/ref {rmsd:.3f}  "
               f"cross/ref {cr/X_ref:.3f}  self/ref {se/S_ref:.3f}  "
-              f"|q|/ref {am/Q_ref:.3f}   nu {nu_used:+.4e}{note}")
+              f"|q|/ref {am/Q_ref:.3f}   nu "
+              f"{('%+.4e' % nu_used) if nu_used is not None else 'n/a'}{note}")
         print(f"    VERDICT for basis {bname} on {tag}: "
               f"{'PASS (all four conditions)' if ok else 'FAIL'}", flush=True)
         summary.append((tag, bname, min_self / S_ref, rms, rms_base, rmsd,
                         cr / X_ref, se / S_ref, am / Q_ref, ok))
-        np.savez(f"jss_{sid}_{bname.replace('+','p').replace('^','')}.npz",
-                 M=M.cpu().numpy(), b=bb.cpu().numpy(), S=Ssym.cpu().numpy(),
-                 x=x.cpu().numpy(), alpha=chosen.cpu().numpy(),
-                 coeffs=torch.stack(fam[bname]).cpu().numpy(),
-                 refs=np.array([X_ref, S_ref, Q_ref, rms_all_ref, rms_deep_ref]))
         del f
     del flds, fam, small, n_lat, phi, env_b, s_ion, s_diel, env_sq, CH
     import gc; gc.collect(); torch.cuda.empty_cache()
