@@ -792,3 +792,65 @@ attributed to "just the loss function"; if both fail, that does not prove
 full-basis capacity is insufficient. The 1-D solver's cavity substitution is
 recorded SEPARATELY, checking whether the ionic layer displacement and the
 0.525 eV improve, so it is not mixed with the lateral 1.307 eV.
+
+## STEP 1 RESULT: the density-tail hypothesis is NOT supported
+Single run on the workstation, mace 2a2edb2, pb 9b3b9ba, executed file sha256
+a72d8b74cb502abfb61ae17f9a1ce06610a59bf2cff9690fd9721e769a2f73ff verified
+identical to the committed file. No cross-check (repeat validation ruled out).
+Log on kit-results-4080 at 1e54c24.
+
+Part A, path consistency: max, mean and 99th-percentile pointwise difference
+all exactly 0.000e+00, with the self-measured call-to-call floor also
+0.000e+00 -- within one run this path is bitwise reproducible, unlike the
+between-run energy scalars, so the jitter concern does not apply here. The
+workstation checked the code before trusting an exact zero: s_re is an
+independent create_cavity_torch call and s_used is the captured forward-pass
+cavity, so it is a genuine recompute. Ceilings 0.9447 both. Per the user's
+criterion this proves the computation path only and is NOT evidence.
+
+Part C, the decisive one: the tail swap closes 0.0% of the plateau gap in
+BOTH directions on BOTH frames. Model grid with the DFT tail inside the mask
+stays at 0.9444 (target 1.0000); native grid with the model tail inside the
+mask stays at 1.0000 (target 0.9444). The plateau moves by under 6e-09 while
+the two plateaus differ by 0.0556. The swap is real in code (torch.where then
+a fresh create_cavity_torch), so this is not a no-op. By the user's criterion
+-- support requires that replacing ONLY the suspect tail restores the plateau
+-- there is no support for the hypothesis.
+
+Part D: the suspect tail IS real. Model n_e inside the mask is about 4x DFT's
+at the mean (2.109e-05 vs 5.206e-06 charged) and 4.7x at the 99th percentile.
+But every percentile through the 99th is at least three orders below
+NC_K = 0.015 and even the maxima are below it, which is consistent with the
+swap doing nothing there. Parameters in use: NC_K=0.015, SIGMA_K=0.6,
+TAU=0.009.
+
+Part B contributed nothing; see the defect below.
+
+WHAT IS LOCATED: not the model's own cavity construction (part A is bitwise),
+and not n_e inside the mask (swapping it either way moves the plateau by under
+6e-09 while the plateaus still differ by 0.0556).
+WHAT IS NOT LOCATED: where the difference is carried. Both densities are deep
+below threshold throughout the mask and the pipeline is non-local, so the mask
+is not where the cavity in that region is decided -- a non-local pipeline can
+set s inside the mask from density OUTSIDE it, and the parameter list shows
+I_NLOC_SOL, LNLDIEL and LNLION in use. The workstation flags "swap outside the
+mask, or widen the mask until the plateau moves" as the next measurement, not
+as the answer, and did not write it. No pronouncement on the recipe or the
+parameters.
+
+## Two defects in density_tail_test, fixed in this commit
+1. The max(signed, 1e-30) overflow AGAIN, in part C's r2 -- the identical
+   pattern I had already been corrected on in profile_shift_scan, rewritten
+   from scratch in a new file. It printed -1.9e23% (neutral -5.7e23%) where
+   the correct value is +0.0% in both. Now a signed denominator with an
+   abs > 1e-12 guard printing "n/a" instead of a number.
+2. Part B offered two MUTUALLY EXCLUSIVE readings and the second voids the
+   first: the within-bin spread is 0.39-0.49 on a quantity bounded in [0,1],
+   so the pipeline is not a pointwise function of n_e, and under a non-local
+   map two fields with different spatial structure give different binned means
+   with the map identical. The table therefore separates nothing. It now
+   decides from the measured spread and prints that verdict rather than
+   leaving the reader to choose. Note for the record: the user's instruction
+   not to substitute a mean density into a switch formula was more far-reaching
+   than I understood -- the map is not local at all, so no "plug in a density"
+   reasoning was valid in either direction from the start.

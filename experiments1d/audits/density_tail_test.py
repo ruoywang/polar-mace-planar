@@ -286,10 +286,34 @@ for sid, dftdir, tag in FRAMES:
               f"{100.0*float(md.sum())/float(np.prod(shd)):7.2f}"
               if bool(md.any()) else f"{'-':>9} {'-':>8} {0.0:7.2f}")
         print(f"  {NEB[k]:9.1e}-{hi:<11} | {f1} | {f2}", flush=True)
-    print(f"  (same n_e -> same s_diel in both columns means the switch is "
-          f"identical and any plateau difference is the density's. A large sd "
-          f"inside a bin means the pipeline is NOT a pointwise function of "
-          f"n_e, and then no 'plug in a density' argument is valid either way.)")
+    # These two readings are MUTUALLY EXCLUSIVE and the printed legend used to
+    # offer both. If the spread is large the map is not pointwise, and then the
+    # column comparison cannot separate "different map" from "same map,
+    # different spatial structure" -- so the first reading is void whenever the
+    # second fires. Decide it here from the measured spread instead of leaving
+    # the reader to pick.
+    sd_max = 0.0
+    for k in range(len(NEB) - 1):
+        for f, msk in ((s_used, (ne_m >= NEB[k]) & (ne_m < NEB[k + 1])),
+                       (s_d, (ne_d >= NEB[k]) & (ne_d < NEB[k + 1]))):
+            if bool(msk.any()):
+                sd_max = max(sd_max, float(f[msk].std()))
+    if sd_max > 0.05:
+        print(f"  VERDICT: this table CANNOT answer its question. The largest "
+              f"within-bin spread is {sd_max:.3f} on a quantity bounded in "
+              f"[0,1], so the pipeline is NOT a pointwise function of n_e.\n"
+              f"  Under a non-local map two fields with different spatial "
+              f"structure give different binned means with the map identical, "
+              f"so the column difference separates nothing. It also means no\n"
+              f"  'plug in a density' argument is valid in either direction. "
+              f"That both cavities come from the same create_cavity_torch call "
+              f"with the same params object is an argument from the source, "
+              f"not from this table.")
+    else:
+        print(f"  within-bin spread stays below 0.05 (max {sd_max:.3f}), so "
+              f"the map is close to pointwise and the column comparison is "
+              f"meaningful: same n_e -> same s_diel means the switch is "
+              f"identical and any plateau difference is the density's.")
 
     # ---------------- C. the tail swap, both directions ----------------
     print(f"\n[C] tail swap through the FULL pipeline, both directions")
@@ -309,12 +333,20 @@ for sid, dftdir, tag in FRAMES:
           f"{float(s_hyb_d[M_d].mean()):.4f} (was {float(s_d[M_d].mean()):.4f}, "
           f"target {float(s_used[M_m].mean()):.4f}), ceiling "
           f"{float(s_hyb_d.max()):.4f}")
-    r1 = ((float(s_hyb_m[M_m].mean()) - float(s_used[M_m].mean()))
-          / max(float(s_d[M_d].mean()) - float(s_used[M_m].mean()), 1e-30))
-    r2 = ((float(s_hyb_d[M_d].mean()) - float(s_d[M_d].mean()))
-          / max(float(s_used[M_m].mean()) - float(s_d[M_d].mean()), 1e-30))
+    # SIGNED denominators. max(x, 1e-30) on a signed gap returns 1e-30 when
+    # the gap is negative and the percentage overflows -- the identical
+    # mistake already fixed once in profile_shift_scan, written again here in
+    # a new file. It printed -1.9e23% where the answer is +0.0%.
+    def _frac(num, den):
+        return (num / den * 100.0) if abs(den) > 1.0e-12 else float("nan")
+    r1 = _frac(float(s_hyb_m[M_m].mean()) - float(s_used[M_m].mean()),
+               float(s_d[M_d].mean()) - float(s_used[M_m].mean()))
+    r2 = _frac(float(s_hyb_d[M_d].mean()) - float(s_d[M_d].mean()),
+               float(s_used[M_m].mean()) - float(s_d[M_d].mean()))
+    f1 = f"{r1:.1f}%" if r1 == r1 else "n/a (gap below 1e-12)"
+    f2 = f"{r2:.1f}%" if r2 == r2 else "n/a (gap below 1e-12)"
     print(f"  fraction of the gap closed by swapping the tail alone: "
-          f"{100.0*r1:.1f}% (model grid), {100.0*r2:.1f}% (native grid)")
+          f"{f1} (model grid), {f2} (native grid)")
     print(f"  (both directions are reported because interpolation smooths "
           f"whichever density is carried across. Only if BOTH move most of "
           f"the way does the tail explain the plateau; the numbers above are "
