@@ -30,6 +30,45 @@ def _structure_factor_block(H: torch.Tensor, frac_blk: torch.Tensor) -> torch.Te
     phase = H @ frac_blk.T
     return torch.exp(-2j * math.pi * phase).sum(dim=1)
 
+
+class _StructureFactorSum(torch.autograd.Function):
+    """s_k = sum_a exp(-2i pi H_k . r_a) with an analytic, chunked backward.
+
+    Autograd's own graph for this sum keeps every chunk's phase and exp block
+    alive: 9.3 GiB at 207 atoms on the 100x100x300 PB grid (measured
+    2026-09-08 by allocation-trace attribution), which is the single largest
+    term under MACE_PB1D_DFORCE and OOMs a 24 GB card. Here nothing is stored
+    but H and r; the backward recomputes exp() chunk by chunk.
+
+    ds_k/dr_aj = -2i pi H_kj exp(-2i pi H_k . r_a), and for real inputs with a
+    real loss the accumulated gradient is Re(sum_k conj(g_k) ds_k/dr_aj).
+    """
+
+    @staticmethod
+    def forward(ctx, H, frac, chunk):
+        ctx.save_for_backward(H, frac)
+        ctx.chunk = int(chunk)
+        with torch.no_grad():
+            s = torch.zeros(H.shape[0], dtype=torch.complex128, device=H.device)
+            for c0 in range(0, frac.shape[0], ctx.chunk):
+                s += _structure_factor_block(H, frac[c0:c0 + ctx.chunk])
+        return s
+
+    @staticmethod
+    def backward(ctx, grad_s):
+        H, frac = ctx.saved_tensors
+        if not ctx.needs_input_grad[1]:
+            return None, None, None
+        gc = grad_s.conj()
+        Hc = H.to(gc.dtype)
+        grad_frac = torch.zeros_like(frac)
+        for c0 in range(0, frac.shape[0], ctx.chunk):
+            blk = frac[c0:c0 + ctx.chunk]
+            phase = H @ blk.T
+            coef = (-2j * math.pi) * (gc[:, None] * torch.exp(-2j * math.pi * phase))
+            grad_frac[c0:c0 + ctx.chunk] = torch.einsum("km,kj->mj", coef, Hc).real
+        return None, grad_frac, None
+
 class RuntimeBaselineTables:
     def __init__(self, path: str):
         d = np.load(path)
@@ -208,15 +247,11 @@ class RuntimeBaselineTables:
             # (measured 2026-09-08, RTX 4090). Recomputing each chunk in the
             # backward pass keeps only its nk-sized contribution (24 MiB).
             # Same ops, so values and gradients are unchanged.
-            grad_live = torch.is_grad_enabled() and sel.requires_grad
-            for c0 in range(0, sel.shape[0], chunk):
-                blk = sel[c0:c0 + chunk]
-                if grad_live:
-                    s_el = s_el + torch.utils.checkpoint.checkpoint(
-                        _structure_factor_block, H, blk, use_reentrant=False
-                    )
-                else:
-                    s_el = s_el + _structure_factor_block(H, blk)
+            if torch.is_grad_enabled() and sel.requires_grad:
+                s_el = _StructureFactorSum.apply(H, sel, chunk)
+            else:
+                for c0 in range(0, sel.shape[0], chunk):
+                    s_el = s_el + _structure_factor_block(H, sel[c0:c0 + chunk])
             f_neutral_g += t["fn"][e_i] * s_el
             f_phi_g += t["fp"][e_i] * s_el
         nx, ny, nz = self.shape
