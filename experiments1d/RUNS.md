@@ -456,3 +456,65 @@ Now measured, raw and lateral kept in separate tables:
 Backend: MACE_S3D_EXPORT_DELTA (diagnostics only, off in production) exports
 the exact energy-side residual on the ENERGY grid; d_sup_* live on the
 upsampled supervision grid and are the wrong field for this.
+
+## 3426068  cavity_compare, raw/lateral separated   code 4b61668   2m32s
+Cavity is essentially RIGHT: the two cavities disagree on 0.44% (charged) /
+0.53% (neutral) of the cell. So "the cavity prediction is wrong" is not the
+main story.
+Where the true raw solvent charge actually is (native grid, no interpolation):
+  by s_diel : 83% of int|rho| in the 5% of volume with 0.01 < s_diel < 0.90
+              (the dielectric transition shell). Only 12% at s_diel > 0.90.
+  by distance: 74.6% of int|rho| 1.5-2.5 A from the nearest solute atom
+              (10.9% of volume), carrying raw cross -6.549 eV of a -5.963 eV
+              total; mean s_diel there is only 0.18.
+              0-1.5 A holds 18.5% of int|rho| and +0.811 eV, OPPOSITE sign.
+  CORRECTS the earlier model-grid claim "90% of the lateral charge within
+  1.5 A": on the native grid it is 26.8% within 1.5 A and 61.5% at 1.5-2.5 A.
+  The earlier figure was substantially an interpolation artifact.
+Same-potential cross energy by cavity class (model potential, DFT charge):
+  charged  true -5.233 eV vs model -3.544 eV -> 32% short, of which
+           both-closed 1.221 eV (72%) and model-closed-DFT-open 0.458 eV (27%,
+           and the model has the WRONG SIGN there: +0.120 vs -0.338).
+  neutral  true -0.990 eV vs model -1.300 eV -> 31% OVER, with the sign of the
+           error flipped and misallocated between classes (both-open -0.189
+           vs -0.578 under, both-closed -1.319 vs -0.515 over).
+Representation vs cavity, per the user's criteria: NEITHER in strict form.
+  The residual is NOT excluded from the closed region (|delta| 0.839 e there),
+  and the model's net charge per class is close to true (+0.532 vs +0.603 in
+  both-closed). The failure is the DISTRIBUTION: right amount of charge, 37%
+  less attraction. Verified alongside: residual plane-sum 2.65e-15 / 4.07e-16
+  and 1-D background net matches the solver exactly (+1.000 / +0.000).
+Q3 density: the mismatch class has model n_e higher than DFT by +0.0046 /
+  +0.0052 e/A^3 against the NC_K = 0.015 threshold -- a threshold-grazing
+  density error on a small volume. Caveat printed in the output: the DFT
+  density is put through the MODEL's cavity parameters, so this isolates the
+  density input and cannot alone rule out a recipe/parameter mismatch.
+
+## 3426137  envelope_alignment   code (this commit)
+Tests the mechanism the above points at: env_b = |grad s_diel| / max peaks
+where the cavity is steepest, which may not be the 1.5-2.5 A shell that holds
+the charge. If the charge share far exceeds the envelope share there, reaching
+the reference cross energy needs large coefficients in a weak-envelope region,
+and large coefficients cost self-energy -- which is exactly the charged-frame
+obstruction (min attainable self 2.28-7.79 x reference, while neutral reaches
+it). Reports charge/envelope share ratios per distance bin and per s_diel bin,
+for env_b and env^0.5, plus envelope- and charge-weighted mean distances.
+
+## 3426002  neutral_feasible_amp   code 4b61668   5m07s
+Neutral verdict: NO capacity obstruction. All three bases hit cross = ref and
+self = ref exactly with point error inside the cap; only the amplitude window
+separates them:  A rms 0.316 (cap 0.320) |q| 1.205 -> misses the +-20% window
+by 0.5%;  A+s_diel rms 0.218 (cap 0.274) |q| 1.214 -> misses by 1.4%;
+A+env^0.5 rms 0.168 (cap 0.214) |q| 1.147 -> PASS.
+Confirms the user's correction: the earlier "S_ref above the family's
+attainable range" for basis A was a limit of the nu-parametrisation, not of
+the subspace. Predicted rms/ref 0.3155 offline, measured 0.316.
+Also: the other candidates in each basis have |q| INSIDE the window
+(0.824-1.067) but point errors 0.83-0.98, far over cap -- amplitude and point
+error trade off along the feasible manifold, and this sampling (24 random
+null-space directions, keep 4 by lowest point error) only ever selected for
+point error. So basis A's FAIL is a statement about the sampling and about a
+threshold I chose, not about capacity.
+Contrast with charged: min attainable self is 2.28-7.79 x the reference --
+factors, not percent. The neutral/charged asymmetry is real, not a threshold
+artifact.
