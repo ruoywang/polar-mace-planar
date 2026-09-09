@@ -690,3 +690,22 @@ the plateau LEVEL only and is now labelled as such; the far-field envelope
 share is accounted for in full by the second dielectric interface. Those
 numbers also close that account from the other side: 1.06% in the plateau
 plus about 45.8% beyond z = 37.5 A leaves nothing unexplained.
+
+## Provenance and a caveat on the jitter figure (2026-09-09)
+Two methodological points from the workstation session.
+
+Job provenance. The LS6 job scripts already printed the mace HEAD, so the
+"yours is not pinned" premise was only half right -- but the half that stands
+matters twice over: they printed no pb-repo HEAD, and the script that actually
+runs is a COPY in a scratch directory, so a HEAD line is a proxy and not a
+guarantee that the executed file matches the committed one. Both job scripts
+now print the mace HEAD, the pb HEAD, the sha256 of the file being executed,
+and an explicit IDENTICAL/DIFFERS comparison against the committed copy, so
+the log certifies itself. Checked at patch time: both copies IDENTICAL.
+
+The jitter figure. 2.2e-09 must be quoted as "at least 2.2e-09 observed", not
+as the jitter floor: it is one field from two runs on one machine and one
+card. Enough to rule out determinism and to make a sub-1e-7 tolerance
+imprudent; not a characterised bound. Treating it as one would repeat, in a
+new form, the very mistake it corrects. Characterising it needs repeats across
+runs and both cards, which the workstation can do cheaply if wanted.

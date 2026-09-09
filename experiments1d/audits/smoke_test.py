@@ -296,6 +296,13 @@ TOL = 1.0e-6
 # deviation moved between two runs (1.72e-09 then 2.75e-10) with no code
 # change: both are that same e_bl field.
 #
+# HOW TO QUOTE THAT NUMBER: as "at least 2.2e-09 observed", NOT as the jitter
+# floor. It is one field from two runs on one machine and one card. That is
+# enough to rule out determinism and enough to make 1e-7 imprudent; it is not
+# a characterised bound, and using it as one would repeat in a new form the
+# mistake it corrects. Characterising it needs repeats across runs and both
+# cards.
+#
 # What the convergence rule cares about -- the exit reason and the iteration
 # count -- IS exactly reproducible, across runs and across machines, and
 # stays gated.
