@@ -51,8 +51,10 @@ run to run on identical code and identical input. Two runs here gave
 1.56622252e-12 for sid 601. Against the 1e-8 denominator floor in
 `smoke_test.py` those are relative differences of 3.3e-5 and 9.6e-5, both above
 the 1e-6 tolerance, so comparing that field will report SMOKE FAIL regardless
-of whether the port is correct. Every energy term, by contrast, was bit-identical
-across the two runs.
+of whether the port is correct. (An earlier revision of this paragraph added
+"every energy term, by contrast, was bit-identical across the two runs". That
+was inferred from the 8-decimal console printout and it is wrong -- see the
+correction section below.)
 
 ## Update: gate evaluated (mace HEAD 060ef30, pb 9b3b9ba)
 
@@ -83,3 +85,57 @@ figure overflows to -5.2e31% on the charged bound channel (correct value
 98.9%), and the `s_diel > 0.99` summary line divides by an empty set and
 prints nan because the model's switch saturates at 0.9447 and never reaches
 0.99 at all.
+
+
+## Correction: the gated fields are NOT bit-identical run to run
+
+This file and the commit that added it claimed the energy terms were
+bit-identical between two runs on this machine. That came from reading the
+8-decimal console output, not the full-precision JSON, and it is wrong.
+Comparing the JSON from two runs here, every float except `q_tot` and the
+integer-valued solver-provenance fields differs:
+
+| field | run-to-run relative difference |
+|---|---|
+| `e_bl` (sid 1) | 2.2e-09 |
+| `rho_layer_z_absint` (sid 1) | 1.3e-10 |
+| `delta_plane_max` (sid 1) | 1.1e-10 |
+| `comp_1d` (sid 1) | 8.5e-11 |
+| `e_s3d` (sid 1) | 4.6e-11 |
+| `e_xsol` (sid 1) | 1.4e-11 |
+| everything else | 1e-12 or below |
+
+This does not weaken the gate: 2.2e-09 is 2.7 orders inside the 1e-6 tolerance,
+and the worst deviation from the A100 reference across all 52 gated numbers was
+1.72e-09 in one run and 2.75e-10 in another, both dominated by that same `e_bl`
+field. But the tolerance must not be tightened below about 1e-7 on an assumption
+of determinism, and a SMOKE FAIL at the 1e-8 level would be this jitter rather
+than a real divergence.
+
+## Update: fixes verified (mace HEAD 40866f6)
+
+All three defects reported from this machine are fixed and re-measured here.
+Every substantive table number is unchanged; the only differences against the
+060ef30 logs are the three defective lines themselves plus 1e-15-level jitter in
+the bulk gradient bins.
+
+- shift scan overflow: now prints "recovering 98.9% of the -0.5253 eV deficit
+  with shift ALONE" and names the signed deficit it divided by.
+- negligible-reference guard: the neutral ionic channel is now SKIPPED, naming
+  the +0.000556 eV coupling and 0.0041 e of reference charge that triggered it.
+- the empty-set nan is gone, replaced by the switch-ceiling block.
+
+`smoke_40866f6.log` — SMOKE PASS, worst relative difference 2.75e-10 over 52
+gated numbers. The stale big-FFT key is out of the compared set, so the
+misleading "0.1x slower here" line no longer appears.
+
+One wording problem remains in `envelope_void_audit.py`'s new output. Its
+summary line asserts "A switch that does not saturate has a non-vanishing
+normalized gradient wherever it is still creeping", and the two lines printed
+directly beneath it refute that reading: in its own plateau region the model
+carries 1.06% of its gradient weight against DFT's 1.15% — less, not more. The
+far-field envelope weight is the second dielectric interface at the far face of
+the solvent slab (z = 37.5-42 A, 45.80% model against 44.12% DFT, matching the
+T4 "beyond 5 A" columns of 45.79% and 44.11% to the last printed digit), not
+bulk creep. The plateau level, 0.9447 against 1.0000 across the solvent region
+on both frames, is a separate and real finding.
