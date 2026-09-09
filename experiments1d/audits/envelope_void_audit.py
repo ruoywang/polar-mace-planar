@@ -18,14 +18,25 @@ almost none, the model's charge is 3 to 10 times the reference and is almost
 purely 1-D background. That is the representation defect the user predicted
 on 2026-09-09: the 1-D background is broadcast over the whole plane including
 inside the solute, and where the envelope is zero the residual CANNOT cancel
-it, however well the coefficients are fitted. The envelope-void shells sum to
-about +0.53 eV of the 1.832 eV gap, close to the independently measured
-plane-average deficit of 0.525 eV.
+it, however well the coefficients are fitted.
 
-The point of this script is to put a number on that without imposing a
-threshold: bin by env_b itself and give the cumulative gap as a function of
-how little envelope weight a region has. The result is a floor on what no
-refit of the 3-D coefficients can recover.
+RESULT, and it corrected the estimate that motivated the script. Summing the
+shells above where bg/del was large gave "about +0.53 eV", suspiciously close
+to the 0.525 eV plane-average deficit. That estimate is WITHDRAWN: binning by
+env_b properly shows the cumulative gap is non-monotonic and changes sign
+across thresholds (+0.278, +0.239, +0.004, -0.159 eV at env_b < 1e-4, 1e-3,
+1e-2, 3e-2), so the closeness was an artefact of an ad-hoc shell cut. The
+defensible floor is the 1e-4 threshold, where the residual holds 1e-4 e
+against 1.318 e of background: +0.278 eV, 15.2% of the 1.832 eV bound gap.
+No other threshold may be quoted as a floor without naming it.
+
+The reframing matters more than the correction. The strongest-envelope bin
+(env_b 0.3-1.0) carries +1.896 eV, 103% of the whole bound gap, on 4.06% of
+the volume holding 78.67% of the envelope weight, with the model already at
+91% of the reference charge there. So the dominant part of the gap sits where
+the residual IS free to act, which makes it a fitting, basis or objective
+question rather than a representation impossibility. The representation
+defect is real and it is 15%, not the majority.
 
 Two anomalies from the same run are also measured here, because both are
 cheap on fields already loaded and neither can be a basis-capacity effect:
@@ -33,20 +44,37 @@ cheap on fields already loaded and neither can be a basis-capacity effect:
 A. env_b puts 45.8% (charged) and 46.4% (neutral) of its weight beyond 5 A
    from any atom, and the native |grad s_diel| agrees at 44.1% / 44.0%, so it
    is genuine weight and not the weighted mean being dragged by the 59% of
-   the cell out there. But |grad s_diel| should be near zero wherever s_diel
-   is saturated, so either s_diel is NOT saturated in the far field or that
-   region contains an interface. Resolved here by profiling s_diel and
-   |grad s_diel| along z for model and DFT.
+   the cell out there. RESOLVED, and the answer is a defect: the model's
+   switch never saturates. It plateaus at about 0.9447 in the bulk on every
+   bin from 19.5 to 36 A, both frames, while the DFT switch reaches exactly
+   1.0000 -- a 5.5% systematic bulk dielectric deficit, structural and
+   frame-independent. A switch still creeping instead of saturated has a
+   small non-vanishing gradient across half the cell, which is where the
+   far-field envelope weight comes from. Note that a genuinely FLAT plateau
+   would have zero gradient however far below unity it sat, so the mechanism
+   is the creep, not the offset. Upstream hypothesis, not established: the
+   predicted electron density does not decay to zero in the solvent region
+   (cavity_compare measured model n_e ~1e-4 e/A^3 in the open region against
+   DFT ~0), and with a switch that is a function of log(n/n_c) a residual
+   1e-4 against n_c = 0.015 lands short of saturation exactly like this. The
+   same table shows the model missing the soft outer tail: over z 10.5-15.0 A
+   the DFT gradient carries 5.07% of its total against the model's 0.81%, and
+   at 12.0-13.5 A the model is 4.44e-06 against DFT 2.43e-02.
 
 B. Inside the slab at z 6.0-7.5 A the DFT plane-averaged bound charge is zero
    to 3e-13 while the model puts -9.2e-06 (charged) / -8.8e-06 (neutral)
    e/A^3 there, and the mean potential in that bin is +15.3 / +16.5 V, so it
    becomes -0.074 / -0.067 eV of spurious coupling -- nearly identical in
    both frames, hence structural. The neighbouring bins carry the opposite
-   sign, so it is charge-neutral ringing converted into energy by the huge
-   interior potential. Band-limited Fourier upsampling of a profile with a
-   sharp interface is the obvious suspect, so the spectrum of rho_bound_z is
-   printed: Gibbs ringing shows up as power near the Nyquist frequency.
+   sign, so it is charge-neutral, converted into energy by the huge interior
+   potential. GIBBS RINGING FROM BAND-LIMITED UPSAMPLING IS REFUTED: the
+   spectrum this script prints shows the model carrying 280x (charged) and
+   340x (neutral) LESS power in the top quarter of the band than the DFT
+   reference, so the model profile is smoother up there, not ringing. Cause
+   open. Threshold-free restatement of the artefact, from the interior slice:
+   1.241e-02 e of plane-averaged charge over 97 of 300 planes where DFT has
+   3.346e-08 e, nearly charge-neutral, costing -0.0674 eV against a 2.090 V
+   mean interior potential, and -0.0550 eV on the neutral frame.
 
 Paths come from env vars with the LS6 values as defaults.
 """
@@ -265,12 +293,31 @@ for sid, dftdir, tag in FRAMES:
               f"{100.0*float(gm_m[sl].sum()*dVm)/max(gm_tot,1e-30):7.2f} "
               f"{100.0*float(g_dm[sl].sum()*dVm)/max(gd_tot,1e-30):7.2f} "
               f"{float(phi_m[sl].mean()):8.3f}", flush=True)
-    sat = s_diel_m > 0.99
-    print(f"  where s_diel^model > 0.99 ({100.0*float(sat.sum())/float(np.prod(shm)):.1f}% "
-          f"of volume): mean |grad s| {float(gm_m[sat].mean()):.3e} /A, "
-          f"carrying {100.0*float((gm_m*sat).sum()*dVm)/max(gm_tot,1e-30):.2f}% "
-          f"of the total. A saturated switch should carry almost none.",
-          flush=True)
+    # A fixed 0.99 threshold gave an EMPTY set and a nan on the workstation,
+    # and the reason is the finding: the model's switch never reaches 0.99. It
+    # plateaus at about 0.9447 in the bulk while DFT saturates at 1.0000, both
+    # frames. So report each switch's own ceiling and use a relative cut.
+    mx_m = float(s_diel_m.max()); mx_d = float(s_dm.max())
+    print(f"  switch ceiling: model max s_diel {mx_m:.4f}, DFT max {mx_d:.4f}"
+          f"  -> model plateau deficit {100.0*(mx_d-mx_m)/max(mx_d,1e-30):.2f}%"
+          f" of unity. A switch that does not saturate has a non-vanishing "
+          f"normalized gradient wherever it is still creeping.", flush=True)
+    for nm2, fld, mx, tot in (("model", s_diel_m, mx_m, gm_tot),
+                              ("DFT", s_dm, mx_d, gd_tot)):
+        g = gm_m if nm2 == "model" else g_dm
+        sat = fld > 0.99 * mx
+        if not bool(sat.any()):
+            print(f"  {nm2}: no point exceeds 0.99 x its own ceiling", flush=True)
+            continue
+        print(f"  {nm2}: where s_diel > 0.99 x its ceiling "
+              f"({100.0*float(sat.sum())/float(np.prod(shm)):.1f}% of volume): "
+              f"mean |grad s| {float(g[sat].mean()):.3e} /A, carrying "
+              f"{100.0*float((g*sat).sum()*dVm)/max(tot,1e-30):.2f}% of that "
+              f"field's total", flush=True)
+    nb = (dm > 5.0) if False else None
+    print(f"  bulk check: mean s_diel where the DFT switch is within 1e-4 of "
+          f"its ceiling -- model {float(s_diel_m[s_dm > mx_d - 1.0e-4].mean()):.4f} "
+          f"vs DFT {float(s_dm[s_dm > mx_d - 1.0e-4].mean()):.4f}", flush=True)
 
     # ---- 3. anomaly B: ringing in the 1-D bound profile ----
     print(f"\n[V3] spectrum of the model's rho_bound_z on its own grid "

@@ -4,7 +4,8 @@
   "total_GiB": 39.5,
   "dgemm_GFLOPs": 9757.0,
   "fft64_100x100x300_ms": 0.459,
-  "fft64_168x168x500_ms": 57.902
+  "fft64_168x168x500_ms_UNWARMED_2ad0d55": 57.902,
+  "_note": "the big-FFT figure was recorded before the warm-up fix at 3b289ba and still contains cuFFT plan creation, so it is renamed out of the compared key set; regenerate on LS6 at >=3b289ba. DGEMM and the small FFT are warmed and valid."
  },
  "frames": {
   "1": {

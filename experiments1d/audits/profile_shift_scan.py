@@ -175,9 +175,15 @@ for sid, dftdir, tag in FRAMES:
     for nm, dref, mprof in (("BOUND", rb_z, mb_z), ("IONIC", ri_z, mi_z)):
         e_ref = float((dref * phi_z).sum() * dz * area)
         e_0 = float((mprof * phi_z).sum() * dz * area)
-        if abs(e_ref) < 1.0e-6:
-            print(f"\n[{nm}] reference coupling {e_ref:+.6f} eV is negligible "
-                  f"-- ratios would be meaningless, skipping", flush=True)
+        q_ref = float(dref.abs().sum() * dz * area)
+        if abs(e_ref) < 1.0e-2 or q_ref < 1.0e-2:
+            print(f"\n[{nm}] SKIPPED: reference coupling {e_ref:+.6f} eV on "
+                  f"{q_ref:.4f} e of reference charge. Ratios on this are "
+                  f"meaningless -- the neutral ionic channel printed a full "
+                  f"scan and a 'ratio -0.155' against a +0.0006 eV reference "
+                  f"before this guard was tightened (the old test was "
+                  f"|coupling| < 1e-6, which such a channel passes).",
+                  flush=True)
             continue
         print(f"\n[{nm}] reference coupling {e_ref:+.4f} eV, model as-is "
               f"{e_0:+.4f} eV (ratio {e_0/e_ref:.3f}), deficit "
@@ -199,11 +205,18 @@ for sid, dftdir, tag in FRAMES:
         for r in rows[::6]:
             print(f"  {r[0]:10.3f} {r[1]:+10.4f} {r[2]:7.3f} {r[3]:10.4f} "
                   f"{r[4]:11.3f} {r[5]:7.3f}", flush=True)
+        # the deficit is SIGNED: max(deficit, 1e-30) turns a negative one
+        # into 1e-30 and the percentage overflows to ~1e31 (found on the
+        # workstation 2026-09-09, printed -5.2e31% where the answer is 98.9%)
+        _den = e_ref - e_0
+        _rec = ((best_shift[1] - e_0) / _den * 100.0
+                if abs(_den) > 1.0e-9 else float("nan"))
+        _rec_s = (f"{_rec:.1f}%" if _rec == _rec
+                  else "n/a (deficit below 1e-9 eV)")
         print(f"  BEST by coupling ratio: shift {best_shift[0]:+.3f} A gives "
               f"{best_shift[1]:+.4f} eV = {best_shift[2]:.3f} x reference "
-              f"(from {e_0/e_ref:.3f} unshifted), recovering "
-              f"{100.0*(best_shift[1]-e_0)/max(e_ref-e_0,1e-30):.1f}% of the "
-              f"deficit with shift ALONE", flush=True)
+              f"(from {e_0/e_ref:.3f} unshifted), recovering {_rec_s} of the "
+              f"{_den:+.4f} eV deficit with shift ALONE", flush=True)
         print(f"  BEST by profile residual: shift {best_resid[0]:+.3f} A, "
               f"scale {best_resid[3]:.4f}, residual {100*best_resid[5]:.1f}% "
               f"of |DFT| (unshifted residual "
