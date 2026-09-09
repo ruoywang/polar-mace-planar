@@ -59,7 +59,7 @@ NEU = "/scratch/08384/tg876840/tmp/2-NiN_single/5-44_neutral_withsolv"
 FRAMES = [(1, f"{GCE44}/cal_1", "NiN44 q=-1.00", 80000),
           (601, f"{NEU}/cal_1", "neutral", 80000),
           (201, f"{GCE88}/cal_1", "NiN88 q=-1.00", 45000)]
-BASES = [("A", [0, 1]), ("A+s_diel", [0, 1, 2]), ("A+env^0.5", [0, 1, 3])]
+# BASES is set per frame inside the loop (the ion channel is gated there)
 WTS = ["1", "|phi|", "phi^2", "near"]
 
 device = torch_tools.init_device("cuda")
@@ -151,8 +151,23 @@ for sid, dftdir, tag, NPTS in FRAMES:
     s_diel = torch.clamp(cavd[1], 0.0, 1.0)
     env_sq = env_b / torch.sqrt(env_b + EPS_SQ)
     env_sq = env_sq / torch.clamp(env_sq.max(), min=1e-30)
-    CH = [env_b, s_ion, s_diel, env_sq]
+    # FIX (user review 2026-09-09): the model's ion-channel coefficients are
+    # multiplied by q_tot (solvent3d.py: c[:,1]*q_gate), so on a neutral frame
+    # that channel is identically zero and must NOT be a free parameter here.
+    q_tot = float(a.info.get("total_charge", 0.0))
+    ion_live = abs(q_tot) > 1.0e-6
+    CH = [env_b] + ([s_ion] if ion_live else []) + [s_diel, env_sq]
+    CH_NAMES = ["env_b"] + (["s_ion"] if ion_live else []) + ["s_diel", "env^0.5"]
+    NCH = len(CH)
+    IDX_DIEL = CH_NAMES.index("s_diel")
+    IDX_SQ = CH_NAMES.index("env^0.5")
+    BASE_CH = [0] + ([1] if ion_live else [])
+    BASES = [("A", BASE_CH), ("A+s_diel", BASE_CH + [IDX_DIEL]),
+             ("A+env^0.5", BASE_CH + [IDX_SQ])]
     CHm = [torch.clamp(w.mean(dim=(0, 1)), min=1e-12) for w in CH]
+    print(f"  channels in play: {CH_NAMES}  (q_tot {q_tot:+.3f}, "
+          f"ion channel {'live' if ion_live else 'GATED OFF as in the model'})",
+          flush=True)
 
     lat, rb = read_grid(f"{dftdir}/RHOB")
     _, ri = read_grid(f"{dftdir}/RHOION")
@@ -186,8 +201,8 @@ for sid, dftdir, tag, NPTS in FRAMES:
     rms_deep_ref = math.sqrt(float((y[deep] ** 2).mean()))
 
     nat = len(a); K1 = nat * len(sigmas) * 9
-    A = torch.zeros(NPTS, 4 * K1, dtype=torch.float32, device=device)
-    gvec = torch.zeros(4 * K1, dtype=torch.float64, device=device)
+    A = torch.zeros(NPTS, NCH * K1, dtype=torch.float32, device=device)
+    gvec = torch.zeros(NCH * K1, dtype=torch.float64, device=device)
     beobj = model._pb1d_backend
     cvec = torch.zeros(nat, len(sigmas), 9, dtype=torch.float64, device=device)
     col = 0
@@ -237,7 +252,7 @@ for sid, dftdir, tag, NPTS in FRAMES:
             c_sol = torch.cholesky_solve(Awy.unsqueeze(1), L).squeeze(1)
             c_dir = torch.cholesky_solve(gvec[sel].unsqueeze(1), L).squeeze(1)
             for cc in (c_sol, c_dir):
-                full = torch.zeros(4 * K1, dtype=torch.float64, device=device)
+                full = torch.zeros(NCH * K1, dtype=torch.float64, device=device)
                 full[sel] = cc
                 vs.append(full)
             del Hw, Awy, L
@@ -273,7 +288,7 @@ for sid, dftdir, tag, NPTS in FRAMES:
                 todo = []
                 for bn, vs in fam.items():
                     for j, v in enumerate(vs):
-                        for ci in range(4):
+                        for ci in range(NCH):
                             val = float(v[ci * K1 + col])
                             if abs(val) > 1e-16:
                                 todo.append((bn, j, ci, val))
@@ -316,30 +331,45 @@ for sid, dftdir, tag, NPTS in FRAMES:
             Ki = torch.linalg.pinv(Kmat, rtol=1e-12)
             Kx = Ki @ x; Kb = Ki @ (2 * bb)
             lam = (float(x @ Kb) - X_ref) / float(x @ Kx)
-            al = Kb - lam * Kx
-            return al
+            return Kb - lam * Kx
 
         def self_of(al):
             return 0.5 * float(al @ (Ssym @ al))
 
+        # FIX (user review): nu<0 REWARDS self-energy and is needed whenever the
+        # point-optimal solution sits BELOW the reference self-energy. The valid
+        # range is nu > -1/lambda_max of the pencil (Ssym, 2M), where
+        # 2M + nu*Ssym stays positive definite.
+        Mr = 2 * M + 1e-12 * float(torch.diagonal(2 * M).mean()) * torch.eye(
+            m, dtype=torch.float64, device=device)
+        Lm = torch.linalg.cholesky(Mr)
+        Li = torch.linalg.inv(Lm)
+        lam_max = float(torch.linalg.eigvalsh(Li @ Ssym @ Li.T).max())
+        nu_min = -0.99 / lam_max if lam_max > 0 else -1e6
         feasible = min_self <= S_ref
-        chosen, nu_used = None, None
+        chosen, nu_used, note = None, None, ""
         if feasible:
-            lo, hi = 0.0, 1.0
+            # self(nu) decreases monotonically in nu; bracket S_ref
+            lo, hi = nu_min, 1.0
             for _ in range(80):
                 if self_of(solve_nu(hi)) <= S_ref:
                     break
                 hi *= 2.0
-            for _ in range(90):
-                mid = 0.5 * (lo + hi)
-                if self_of(solve_nu(mid)) > S_ref:
-                    lo = mid
-                else:
-                    hi = mid
-            nu_used = 0.5 * (lo + hi)
-            chosen = solve_nu(nu_used)
+            if self_of(solve_nu(lo)) < S_ref:
+                note = " (S_ref above the family's attainable range at nu_min)"
+                chosen = solve_nu(lo); nu_used = lo
+            else:
+                for _ in range(120):
+                    mid = 0.5 * (lo + hi)
+                    if self_of(solve_nu(mid)) > S_ref:
+                        lo = mid
+                    else:
+                        hi = mid
+                nu_used = 0.5 * (lo + hi)
+                chosen = solve_nu(nu_used)
         else:
-            chosen = Sinv @ x * (X_ref / xSx)     # the min-self point
+            chosen = Sinv @ x * (X_ref / xSx)
+            note = " (min-self point; S_ref unreachable from below)"
         f = torch.zeros(shape, dtype=torch.float64, device=device)
         for j in range(m):
             f += float(chosen[j]) * flds[(bname, j)]
@@ -350,20 +380,30 @@ for sid, dftdir, tag, NPTS in FRAMES:
         r2d = y2d - 2 * float(chosen @ bbd) + float(chosen @ (Md @ chosen))
         rms = math.sqrt(max(r2, 0.0) / NPTS) / rms_all_ref
         rmsd = math.sqrt(max(r2d, 0.0) / nd) / rms_deep_ref
+        # plain unweighted L2 solution = family vector 0, the natural yardstick
+        e0 = torch.zeros(m, dtype=torch.float64, device=device); e0[0] = 1.0
+        r2b = y2 - 2 * float(e0 @ bb) + float(e0 @ (M @ e0))
+        rms_base = math.sqrt(max(r2b, 0.0) / NPTS) / rms_all_ref
         ok = (abs(cr / X_ref - 1) < 0.05 and abs(se / S_ref - 1) < 0.15
-              and abs(am / Q_ref - 1) < 0.20)
+              and abs(am / Q_ref - 1) < 0.20 and rms <= 1.5 * rms_base)
         print(f"\n  basis {bname}: family {m} vectors, self-Gram eigenvalues "
               f"{float(ev.min()):.2e} … {float(ev.max()):.2e}")
         print(f"    min attainable self at cross = ref : {min_self:+.4f} "
               f"({min_self/S_ref:.3f} x ref)  -> "
               f"{'feasible' if feasible else 'INFEASIBLE in this family'}")
-        print(f"    chosen point: rms/ref {rms:.3f}  rms_deep/ref {rmsd:.3f}  "
+        print(f"    chosen point: rms/ref {rms:.3f} (plain fit {rms_base:.3f}, "
+              f"cap {1.5*rms_base:.3f})  rms_deep/ref {rmsd:.3f}  "
               f"cross/ref {cr/X_ref:.3f}  self/ref {se/S_ref:.3f}  "
-              f"|q|/ref {am/Q_ref:.3f}   nu {nu_used}")
+              f"|q|/ref {am/Q_ref:.3f}   nu {nu_used:+.4e}{note}")
         print(f"    VERDICT for basis {bname} on {tag}: "
               f"{'PASS (all four conditions)' if ok else 'FAIL'}", flush=True)
-        summary.append((tag, bname, min_self / S_ref, rms, rmsd, cr / X_ref,
-                        se / S_ref, am / Q_ref, ok))
+        summary.append((tag, bname, min_self / S_ref, rms, rms_base, rmsd,
+                        cr / X_ref, se / S_ref, am / Q_ref, ok))
+        np.savez(f"jss_{sid}_{bname.replace('+','p').replace('^','')}.npz",
+                 M=M.cpu().numpy(), b=bb.cpu().numpy(), S=Ssym.cpu().numpy(),
+                 x=x.cpu().numpy(), alpha=chosen.cpu().numpy(),
+                 coeffs=torch.stack(fam[bname]).cpu().numpy(),
+                 refs=np.array([X_ref, S_ref, Q_ref, rms_all_ref, rms_deep_ref]))
         del f
     del flds, fam, small, n_lat, phi, env_b, s_ion, s_diel, env_sq, CH
     import gc; gc.collect(); torch.cuda.empty_cache()
@@ -371,9 +411,12 @@ for sid, dftdir, tag, NPTS in FRAMES:
 print("\n=== summary (four conditions: cross within 5%, self within 15%, "
       "|q| within 20%, point rms not blown up) ===")
 print(f"{'frame':>15} {'basis':>11} {'minself/ref':>12} {'rms/ref':>8} "
-      f"{'deep':>7} {'cross':>7} {'self':>7} {'|q|':>7} {'verdict':>8}")
+      f"{'plain':>7} {'deep':>7} {'cross':>7} {'self':>7} {'|q|':>7} {'verdict':>8}")
 for r in summary:
     print(f"{r[0]:>15} {r[1]:>11} {r[2]:12.3f} {r[3]:8.3f} {r[4]:7.3f} "
-          f"{r[5]:7.3f} {r[6]:7.3f} {r[7]:7.3f} {'PASS' if r[8] else 'FAIL':>8}")
-print("DONE  (a PASS is constructive for that basis and frame; a FAIL speaks "
-      "for this 8-vector family only)")
+          f"{r[5]:7.3f} {r[6]:7.3f} {r[7]:7.3f} {r[8]:7.3f} "
+          f"{'PASS' if r[9] else 'FAIL':>8}")
+print("DONE  four conditions: cross within 5%, self within 15%, |q| within "
+      "20%, point rms <= 1.5x the plain fit. A PASS is constructive for that "
+      "basis and frame; a FAIL speaks for this 8-vector family only. On "
+      "neutral frames the ion channel is gated off, exactly as in the model.")
