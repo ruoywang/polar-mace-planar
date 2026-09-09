@@ -161,3 +161,50 @@ value, and why that one benchmark line is absent from the smoke output rather
 than wrong.
 
 Nothing in this directory is superseded by the cancellations.
+
+## Dispatched job: density tail test (mace HEAD 2a2edb2)
+
+`density_2a2edb2.log`. Provenance is in the log's first line: mace 2a2edb2,
+pb 9b3b9ba, sha256 of the executed file
+a72d8b74cb502abfb61ae17f9a1ce06610a59bf2cff9690fd9721e769a2f73ff, verified
+IDENTICAL to the committed `experiments1d/audits/density_tail_test.py` at
+2a2edb2. Single run, no cross-check — the LS6 copy was cancelled.
+
+Result in one line: the tail swap closes **0.0% of the plateau gap in both
+directions**, on both frames.
+
+Two defects found, reported before any interpretation:
+
+1. The signed-denominator overflow that was fixed in `profile_shift_scan.py` at
+   40866f6 is present again here, in part C's `r2`:
+   `max(float(s_used[M_m].mean()) - float(s_d[M_d].mean()), 1e-30)` evaluates
+   `max(-0.0556, 1e-30)` and returns `1e-30`. The printed
+   "-189773485814725950308352.0% (native grid)" and the neutral frame's
+   "-571753788758400039911424.0%" are that division. Recovering the numerator
+   from the printed value gives -1.898e-09 and -5.718e-09, so with the correct
+   signed denominator both are **+0.0%** (3.4e-08 and 1.0e-07 of the gap).
+   `r1` is unaffected because its denominator is positive.
+
+2. Part B cannot answer the question it is posed. Its legend says "same n_e ->
+   same s_diel in both columns means the switch is identical", but its own
+   standard-deviation column reads 0.39 to 0.49 on a quantity bounded in [0,1],
+   which by the legend's second sentence means the pipeline is not a pointwise
+   function of n_e. If the map is non-local, two fields with different spatial
+   structure will give different binned means under an IDENTICAL map, so the
+   difference between the columns does not distinguish "different map" from
+   "same map, different structure". The sd finding stands and voids the
+   mean-comparison finding.
+
+What the run does establish, without pronouncing on the recipe or the
+parameters: part A's recomputed cavity is bit-identical to the one the model
+actually used (max, mean and 99th-percentile difference all exactly 0.000e+00,
+against a call-to-call floor also exactly 0.000e+00), so the model side is
+self-consistent and the difference is not in how the model builds its cavity
+from its own n_e. Inside the mask both densities sit 3 or more orders below
+NC_K = 0.015 at every percentile up to the 99th (model 5.689e-04, DFT
+1.219e-04; maxima 4.174e-03 and 4.563e-04), the swap moves the plateau by
+under 6e-09, and the plateaus still differ by 0.0556. So the plateau difference
+is not carried by n_e inside the mask. Where it is carried is open; the
+parameter line shows non-locality keys in use (I_NLOC_SOL, LNLDIEL, LNLION)
+and part B's spread is consistent with a non-local pipeline, which is the next
+thing to examine rather than a conclusion.

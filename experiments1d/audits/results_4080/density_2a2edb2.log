@@ -1,0 +1,79 @@
+PROVENANCE mace=2a2edb2 pb=9b3b9ba sha256(density_tail_test.py)=a72d8b74cb502abfb61ae17f9a1ce06610a59bf2cff9690fd9721e769a2f73ff (IDENTICAL to committed 2a2edb2)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+
+=================== NiN44 q=-1.00 ===================
+  switch parameters in use: NC_K=0.015, SIGMA_K=0.6, TAU=0.009  (all keys: ['A_K', 'C_MOLAR', 'D_ION', 'D_STERN', 'EB_K', 'EPSILON_INF', 'I_NLOC_SOL', 'LAMBDA_D_K', 'LION', 'LNLDIEL', 'LNLION', 'LNLTEST', 'LVAC', 'NC_K']...)
+
+[A] recomputed the cavity from the model's own captured n_e through the full pipeline, same grid and params
+  call-to-call noise floor on IDENTICAL input, same run: max |s_a - s_b| 0.000e+00
+  pointwise |s_recomputed - s_used|: max 0.000e+00, mean 0.000e+00, 99th pct 0.000e+00
+  ceilings: recomputed 0.9447, as used 0.9447
+  path difference is INDISTINGUISHABLE from the call-to-call floor (0.000e+00 against 0.000e+00). The path matches as far as one run can tell, which proves the computation path only and is NOT evidence for any hypothesis.
+
+  DFT cavity ceiling 1.0000; suspect mask = within 1e-4 of it, 46.3% of the native cell (46.3% after mapping to the model grid)
+  plateau inside the mask: model 0.9444 +- 0.0021, DFT 1.0000 +- 0.0000
+
+[B] s_diel binned by n_e, each field on its OWN grid. Mean and spread; spread also says whether the map is pointwise at all.
+         n_e bin (e/A^3) |  model <s>       sd    vol% |   DFT <s>       sd    vol%
+    0.0e+00-1.0e-06     |     0.7196   0.3931   44.33 |    0.7408   0.4290   47.99
+    1.0e-06-1.0e-05     |     0.6705   0.4212   14.08 |    0.6829   0.4575   14.56
+    1.0e-05-3.0e-05     |     0.5784   0.4543    4.64 |    0.6037   0.4853    3.86
+    3.0e-05-1.0e-04     |     0.5248   0.4668    2.79 |    0.5812   0.4929    2.06
+    1.0e-04-3.0e-04     |     0.4596   0.4695    1.86 |    0.5675   0.4954    1.67
+    3.0e-04-1.0e-03     |     0.4349   0.4600    2.38 |    0.5688   0.4826    1.97
+    1.0e-03-3.0e-03     |     0.3591   0.4140    2.73 |    0.2977   0.4022    2.62
+    3.0e-03-1.0e-02     |     0.1317   0.2288    4.01 |    0.0536   0.1605    4.79
+    1.0e-02-1.5e-02     |     0.0047   0.0225    3.15 |    0.0072   0.0334    1.87
+    1.5e-02-3.0e-02     |     0.0010   0.0069    4.97 |    0.0015   0.0099    3.35
+    3.0e-02-inf         |     0.0000   0.0006   15.07 |    0.0000   0.0006   15.25
+  (same n_e -> same s_diel in both columns means the switch is identical and any plateau difference is the density's. A large sd inside a bin means the pipeline is NOT a pointwise function of n_e, and then no 'plug in a density' argument is valid either way.)
+
+[C] tail swap through the FULL pipeline, both directions
+  model grid, DFT tail inside the mask : plateau 0.9444 (was 0.9444, target 1.0000), ceiling 0.9447
+  native grid, model tail inside the mask: plateau 1.0000 (was 1.0000, target 0.9444), ceiling 1.0000
+  fraction of the gap closed by swapping the tail alone: 0.0% (model grid), -189773485814725950308352.0% (native grid)
+  (both directions are reported because interpolation smooths whichever density is carried across. Only if BOTH move most of the way does the tail explain the plateau; the numbers above are the measurement, not an attribution.)
+
+[D] n_e inside the suspect mask, percentiles [1, 5, 25, 50, 75, 95, 99, 100]
+  model : 0.000e+00  0.000e+00  0.000e+00  7.203e-08  2.506e-06  5.080e-05  5.689e-04  4.174e-03
+  DFT   : 0.000e+00  0.000e+00  0.000e+00  1.612e-08  1.536e-06  2.208e-05  1.219e-04  4.563e-04
+  switch threshold NC_K = 0.015; model mean 2.109e-05, DFT mean 5.206e-06 e/A^3
+
+=================== neutral ===================
+  switch parameters in use: NC_K=0.015, SIGMA_K=0.6, TAU=0.009  (all keys: ['A_K', 'C_MOLAR', 'D_ION', 'D_STERN', 'EB_K', 'EPSILON_INF', 'I_NLOC_SOL', 'LAMBDA_D_K', 'LION', 'LNLDIEL', 'LNLION', 'LNLTEST', 'LVAC', 'NC_K']...)
+
+[A] recomputed the cavity from the model's own captured n_e through the full pipeline, same grid and params
+  call-to-call noise floor on IDENTICAL input, same run: max |s_a - s_b| 0.000e+00
+  pointwise |s_recomputed - s_used|: max 0.000e+00, mean 0.000e+00, 99th pct 0.000e+00
+  ceilings: recomputed 0.9447, as used 0.9447
+  path difference is INDISTINGUISHABLE from the call-to-call floor (0.000e+00 against 0.000e+00). The path matches as far as one run can tell, which proves the computation path only and is NOT evidence for any hypothesis.
+
+  DFT cavity ceiling 1.0000; suspect mask = within 1e-4 of it, 46.3% of the native cell (46.4% after mapping to the model grid)
+  plateau inside the mask: model 0.9444 +- 0.0034, DFT 1.0000 +- 0.0000
+
+[B] s_diel binned by n_e, each field on its OWN grid. Mean and spread; spread also says whether the map is pointwise at all.
+         n_e bin (e/A^3) |  model <s>       sd    vol% |   DFT <s>       sd    vol%
+    0.0e+00-1.0e-06     |     0.7285   0.3866   46.64 |    0.7423   0.4283   48.31
+    1.0e-06-1.0e-05     |     0.6640   0.4240   13.76 |    0.6832   0.4574   14.59
+    1.0e-05-3.0e-05     |     0.5547   0.4587    4.36 |    0.5995   0.4862    3.80
+    3.0e-05-1.0e-04     |     0.4577   0.4687    2.46 |    0.5753   0.4938    2.04
+    1.0e-04-3.0e-04     |     0.3350   0.4465    1.51 |    0.5582   0.4965    1.64
+    3.0e-04-1.0e-03     |     0.3324   0.4349    1.97 |    0.5547   0.4814    1.93
+    1.0e-03-3.0e-03     |     0.2830   0.3860    2.32 |    0.2772   0.3891    2.58
+    3.0e-03-1.0e-02     |     0.1084   0.2094    3.70 |    0.0500   0.1536    4.73
+    1.0e-02-1.5e-02     |     0.0043   0.0209    3.07 |    0.0073   0.0342    1.86
+    1.5e-02-3.0e-02     |     0.0009   0.0065    5.13 |    0.0016   0.0104    3.33
+    3.0e-02-inf         |     0.0000   0.0007   15.10 |    0.0000   0.0007   15.20
+  (same n_e -> same s_diel in both columns means the switch is identical and any plateau difference is the density's. A large sd inside a bin means the pipeline is NOT a pointwise function of n_e, and then no 'plug in a density' argument is valid either way.)
+
+[C] tail swap through the FULL pipeline, both directions
+  model grid, DFT tail inside the mask : plateau 0.9444 (was 0.9444, target 1.0000), ceiling 0.9447
+  native grid, model tail inside the mask: plateau 1.0000 (was 1.0000, target 0.9444), ceiling 1.0000
+  fraction of the gap closed by swapping the tail alone: 0.0% (model grid), -571753788758400039911424.0% (native grid)
+  (both directions are reported because interpolation smooths whichever density is carried across. Only if BOTH move most of the way does the tail explain the plateau; the numbers above are the measurement, not an attribution.)
+
+[D] n_e inside the suspect mask, percentiles [1, 5, 25, 50, 75, 95, 99, 100]
+  model : 0.000e+00  0.000e+00  0.000e+00  7.827e-09  1.710e-06  2.843e-05  4.374e-04  5.509e-03
+  DFT   : 0.000e+00  0.000e+00  0.000e+00  1.678e-08  1.442e-06  1.916e-05  9.930e-05  3.813e-04
+  switch threshold NC_K = 0.015; model mean 1.669e-05, DFT mean 4.419e-06 e/A^3
+DONE
