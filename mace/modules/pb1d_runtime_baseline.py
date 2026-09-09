@@ -20,8 +20,15 @@ from typing import Dict, Tuple
 
 import numpy as np
 import torch
+import torch.utils.checkpoint
 from ase.data import atomic_numbers as _ase_atomic_numbers
 
+
+
+def _structure_factor_block(H: torch.Tensor, frac_blk: torch.Tensor) -> torch.Tensor:
+    """sum_a exp(-2i pi H . r_a) over one chunk of atoms (complex128, nk)."""
+    phase = H @ frac_blk.T
+    return torch.exp(-2j * math.pi * phase).sum(dim=1)
 
 class RuntimeBaselineTables:
     def __init__(self, path: str):
@@ -189,18 +196,27 @@ class RuntimeBaselineTables:
             s_el = torch.zeros(nk, dtype=torch.complex128, device=device)
             # atom chunk: 16 fits the login node's 8 GB vmem; GPUs take 64
             # (transient phase block 1.5e6 x 64 complex128 ~ 1.5 GiB).
-            # MACE_PB1D_BASELINE_CHUNK overrides it: under MACE_PB1D_DFORCE the
-            # positions are live, so every chunk's phase/exp block is retained
-            # for backward (~7 GiB total at 207 atoms on the 100x100x300 grid)
-            # and only the transient peak is tunable. Measured 2026-09-08 on a
-            # 24 GB RTX 4090, where chunk=64 OOMs at the first PB epoch.
+            # MACE_PB1D_BASELINE_CHUNK overrides it.
             chunk = 64 if device.type == "cuda" else 16
             _env_chunk = os.environ.get("MACE_PB1D_BASELINE_CHUNK")
             if _env_chunk:
                 chunk = max(1, int(_env_chunk))
+            # Under MACE_PB1D_DFORCE the positions are live, so without this
+            # every chunk's phase (nk x chunk f64) and exp (complex128) block
+            # stays alive for backward: 7.0 GiB at 207 atoms on the
+            # 100x100x300 grid, which OOMs a 24 GB card at the first PB epoch
+            # (measured 2026-09-08, RTX 4090). Recomputing each chunk in the
+            # backward pass keeps only its nk-sized contribution (24 MiB).
+            # Same ops, so values and gradients are unchanged.
+            grad_live = torch.is_grad_enabled() and sel.requires_grad
             for c0 in range(0, sel.shape[0], chunk):
-                phase = H @ sel[c0:c0 + chunk].T
-                s_el += torch.exp(-2j * math.pi * phase).sum(dim=1)
+                blk = sel[c0:c0 + chunk]
+                if grad_live:
+                    s_el = s_el + torch.utils.checkpoint.checkpoint(
+                        _structure_factor_block, H, blk, use_reentrant=False
+                    )
+                else:
+                    s_el = s_el + _structure_factor_block(H, blk)
             f_neutral_g += t["fn"][e_i] * s_el
             f_phi_g += t["fp"][e_i] * s_el
         nx, ny, nz = self.shape
