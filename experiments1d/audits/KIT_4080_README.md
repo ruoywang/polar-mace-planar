@@ -1,4 +1,6 @@
-# 4080 小测试包（residual-3D 溶剂电荷诊断）
+# 工作站小测试包（residual-3D 溶剂电荷诊断）
+
+> **硬件更正（2026-09-09 由那台机器实测）**：实际是两张 **RTX 4090，各 24564 MiB**，驱动 570.153.02。本文件早先写的 4080 / 16 GB 是错的。结论不变：4090 同属 Ada，fp64 仍是 fp32 的 1/64；24 GB 也救不了 sid 201（单个 36612² fp64 Gram 就 10.7 GB，拟合同时要多个）。目录名沿用 `mini_kit_4080` 只为连续性。
 
 一句话：**单帧诊断类测试可以在 4080 上做，而且比在 LS6 排队快；带 NiN88 的拟合、全基底检验和任何训练不行。** 决定因素不是显存也不是算力总量，而是**双精度**——PB 求解按设计必须 float64，而 4080 的 fp64 是 fp32 的 1/64，A100 是 1/2。
 
@@ -15,7 +17,7 @@
 | `model_terms_audit.py` / `bl_check.py` / `verify_perplane.py` / `env_coverage.py` / `residual_localize.py` | 可以 | 单帧前向 + 网格统计 |
 | `neutral_feasible_amp.py` 中性可行点幅度 | 可以，慢几倍 | 合成过程要对 207 原子 × 3 sigma × 9 lm 反复做 fp64 FFT |
 | `joint_subspace_solve.py` 仅 sid 1 / 601 | 勉强 | A100 上三帧三基底跑了 111 分钟；这里只有两帧，但 fp64 稠密线代慢得最多 |
-| `joint_*` 含 NiN88（sid 201） | **不行** | A100 40 GB 上就 OOM 过一次（36612² fp64 Gram 单矩阵 10.7 GB），16 GB 无解 |
+| `joint_*` 含 NiN88（sid 201） | **不行** | A100 40 GB 上就 OOM 过一次（36612² fp64 Gram 单矩阵 10.7 GB，且拟合同时要多个），24 GB 也无解 |
 | 倒空间全基底最小自能检验 | **不行** | 内存和 fp64 稠密线代双重不够 |
 | 任何训练 / 续训 | **不行** | 需要 40 GB 级显存；两张 4080 之间没有 NVLink，脚本也是单卡 |
 
@@ -74,7 +76,9 @@ pip install ase==3.22.1 e3nn==0.4.4 opt-einsum==3.3.0 opt-einsum-fx==0.1.4 \
             torch-ema==0.3 torchmetrics==1.8.2 scipy==1.13.1 pyyaml
 ```
 
-torch 2.2.1 + cu121 的官方 wheel 含 sm_89，4080 直接支持，不用自己编译。
+torch 2.2.1 + cu121 的官方 wheel 含 sm_89，Ada 卡（4080/4090）直接支持，不用自己编译。
+
+**解释器陷阱**：那台机器上 `python3` 会落到 anaconda base（Python 3.12.13，虽然也有 torch 2.2.1+cu121，但依赖集不同）。版本精确匹配的是 conda 环境 `pmp39`（`/home/rw28343/softwares/anaconda3/envs/pmp39/bin/python`，Python 3.9.25）。必须显式激活或用绝对路径调用；`smoke_test.py` 第二行会打印 `sys.executable` 存证。
 
 ---
 
