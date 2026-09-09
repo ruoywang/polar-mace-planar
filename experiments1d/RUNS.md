@@ -709,3 +709,34 @@ card. Enough to rule out determinism and to make a sub-1e-7 tolerance
 imprudent; not a characterised bound. Treating it as one would repeat, in a
 new form, the very mistake it corrects. Characterising it needs repeats across
 runs and both cards, which the workstation can do cheaply if wanted.
+
+## NONGATED decade spreads, workstation gated run at 40866f6 (last numbers in)
+  sid 1    pb_rms_last        1.417724204e-12 vs A100 2.687221277e-13  0.72 decades
+           pb_fix_res         6.191158697e-12 vs      3.044675623e-12  0.31
+           pb_newton_rms_last same as rms                              0.72
+  sid 601  pb_rms_last        1.204409717e-12 vs      1.135462900e-12  0.03
+           pb_fix_res         2.917670550e-10 vs      2.894502416e-10  0.00
+           pb_newton_rms_last same as rms                              0.03
+DGEMM in that run 1173 GFLOP/s. The 0.72 decades on sid 1 is the widest
+spread either side has seen on that field, against 0.15 in the earlier gated
+run, which strengthens the "at least 2.2e-09 observed, NOT a characterised
+bound" wording rather than weakening it. No gated number and no conclusion
+changes. Full per-z tables from plane_profile_audit are in the pushed logs on
+kit-results-4080 at 388e7dc, not only in summary form.
+
+## Close-out 2026-09-09: 3426543 / 3426544 / 3426545 cancelled, not run
+Cancelled on the user's prompting, and the reasoning is that the premise for
+keeping them had already been met. They were kept as independent-hardware
+cross-checks at a time when no cross-machine validation of the diagnostic
+chain existed. Job 3426230 then reproduced the workstation's
+envelope_alignment output digit for digit on both frames, which validates the
+chain these three scripts share -- DFT file parsing, cavity construction,
+spectral gradients, interpolation, binning. A second and third script through
+that same validated chain has low marginal value: the expected output is
+"identical", at a cost of another hour of queue.
+Specifically: 3426543 (void audit) and 3426544 (shift scan) would have been
+repeats, and the workstation's own rerun at 40866f6 already showed V1 and V3
+identical to the digit against its earlier run. 3426545 would have produced
+only a warmed A100 big-FFT benchmark value -- a hardware number, not physics,
+already excluded from the gate and documented as absent in the reference JSON.
+Nothing in the record depends on any of the three.
