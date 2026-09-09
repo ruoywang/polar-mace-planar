@@ -1,0 +1,138 @@
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+
+=================== NiN44 q=-1.00 ===================
+  [check] residual plane means: bound 9.05e-16, ionic 2.64e-15 e/A^3 (per-plane projection -> both must be ~0)
+  [check] int|bg_b| 2.0275, int|delta_b| 1.6726, int|bg_b+delta_b| 3.2378 e -- the third is the only one that means anything; the first two must never be added
+
+[T1] BOUND  (model bg_b+delta_b  vs  DFT RHOB)
+    dist (A)   vol% |  DFT net  DFT |q|  DFT cross |  mdl net  mdl |q|  mdl cross |  int|bg|  int|del|
+         0-1   8.12 |   -0.029    0.029     +0.032 |   +0.131    0.176     +0.817 |    0.169     0.016
+       1-1.5   9.72 |   -0.302    0.407     +0.834 |   -0.131    0.517     +0.267 |    0.238     0.374
+       1.5-2   7.24 |   +0.894    1.202     -4.164 |   +0.571    1.011     -2.802 |    0.239     0.892
+       2-2.5   3.65 |   +0.379    0.429     -1.730 |   +0.269    0.378     -1.222 |    0.194     0.333
+       2.5-3   2.61 |   +0.033    0.033     -0.139 |   +0.072    0.100     -0.288 |    0.125     0.052
+       3-3.5   2.51 |   +0.006    0.006     -0.024 |   +0.046    0.059     -0.191 |    0.064     0.005
+       3.5-5   7.23 |   -0.051    0.055     +0.141 |   -0.153    0.189     +0.436 |    0.189     0.000
+       5-inf  58.93 |   -0.931    0.932     +1.764 |   -0.806    0.809     +1.529 |    0.809     0.000
+       TOTAL 100.00 |   -0.000    3.094     -3.286 |   +0.000    3.238     -1.454 |    2.028     1.673
+
+[T1] IONIC  (model bg_i+delta_i  vs  DFT RHOION)
+    dist (A)   vol% |  DFT net  DFT |q|  DFT cross |  mdl net  mdl |q|  mdl cross |  int|bg|  int|del|
+         0-1   8.12 |   -0.000    0.000     -0.000 |   -0.000    0.000     -0.000 |    0.000     0.000
+       1-1.5   9.72 |   -0.000    0.000     +0.000 |   -0.000    0.000     +0.000 |    0.000     0.000
+       1.5-2   7.24 |   -0.000    0.000     +0.000 |   +0.000    0.000     -0.000 |    0.000     0.000
+       2-2.5   3.65 |   -0.000    0.000     +0.000 |   +0.000    0.000     -0.000 |    0.000     0.000
+       2.5-3   2.61 |   +0.000    0.000     -0.000 |   +0.001    0.001     -0.004 |    0.001     0.000
+       3-3.5   2.51 |   +0.000    0.000     -0.000 |   +0.007    0.007     -0.022 |    0.007     0.000
+       3.5-5   7.23 |   +0.054    0.054     -0.152 |   +0.146    0.146     -0.434 |    0.174     0.037
+       5-inf  58.93 |   +0.946    0.952     -1.794 |   +0.846    0.846     -1.630 |    0.818     0.071
+       TOTAL 100.00 |   +1.000    1.006     -1.946 |   +1.000    1.000     -2.091 |    1.000     0.108
+
+[T2] BOUND charge split. The 1-D pipeline owns the plane averages; the 3-D residual owns the lateral part and must not be charged with the 1-D error.
+  plane-average part:  DFT int|.| 2.0193 e  cross -1.0428 eV   |   model int|.| 2.0275 e  cross -0.5175 eV
+  lateral part:        DFT int|.| 2.6584 e  cross -2.2434 eV   |   model int|.| 1.6726 e  cross -0.9366 eV
+
+    dist (A) | DFT pm |q|  DFT pm cr mdl pm |q|  mdl pm cr | DFT lat |q|  DFT lat cr mdl lat |q|  mdl lat cr
+         0-1 |      0.128     +0.592      0.169     +0.796 |       0.157      -0.560       0.016      +0.022
+       1-1.5 |      0.209     -0.691      0.238     -0.779 |       0.566      +1.525       0.374      +1.046
+       1.5-2 |      0.256     -1.014      0.239     -0.958 |       1.142      -3.150       0.892      -1.844
+       2-2.5 |      0.220     -0.921      0.194     -0.815 |       0.433      -0.809       0.333      -0.407
+       2.5-3 |      0.139     -0.580      0.125     -0.511 |       0.117      +0.440       0.052      +0.223
+       3-3.5 |      0.065     -0.254      0.064     -0.213 |       0.061      +0.230       0.005      +0.022
+       3.5-5 |      0.126     +0.226      0.189     +0.434 |       0.101      -0.084       0.000      +0.001
+       5-inf |      0.875     +1.600      0.809     +1.529 |       0.082      +0.164       0.000      +0.000
+
+[T3] cross-energy gap (model total minus DFT total, model potential): +1.6875 eV total. Continuous cavity value and gradient magnitude where that gap sits.
+    dist (A)  gap (eV)    gap% |   <s^m>   <s^D>   rms ds |  <|gs|^m>  <|gs|^D>   ratio  rms dgs
+         0-1    +0.786    46.6 |  0.0000  0.0001   0.0029 |    0.0001    0.0012   0.102   0.0267
+       1-1.5    -0.567   -33.6 |  0.0020  0.0062   0.0406 |    0.0160    0.0290   0.553   0.1309
+       1.5-2    +1.362    80.7 |  0.0543  0.0778   0.0917 |    0.1723    0.2157   0.799   0.2816
+       2-2.5    +0.508    30.1 |  0.3187  0.3990   0.1576 |    0.2593    0.2591   1.001   0.3773
+       2.5-3    -0.152    -9.0 |  0.5080  0.5540   0.0875 |    0.0479    0.0065   7.331   0.1250
+       3-3.5    -0.189   -11.2 |  0.5088  0.5396   0.0420 |    0.0040    0.0000 242.787   0.0117
+       3.5-5    +0.012     0.7 |  0.4992  0.5285   0.0402 |    0.0001    0.0000 305.649   0.0004
+       5-inf    -0.071    -4.2 |  0.6977  0.7374   0.0468 |    0.0356    0.0377   0.945   0.0128
+  in the DFT transition shell 0.01<s<0.9: s_diel correlation +0.8874, model/DFT mean ratio 0.850
+  in the DFT transition shell 0.01<s<0.9: |grad s_diel| correlation +0.7254, model/DFT mean ratio 0.759
+  (interpolation caveat: the DFT cavity is smoothed onto the 100x100x300 model grid here, which lowers |grad s|; the native distribution is in T4 below)
+
+[T4] POSITION DIAGNOSTIC ONLY -- no pass/fail. Each charge type against its own switch. The envelope is not a prediction of the charge, so these shares have no reason to match.
+    dist (A)   RHOB%  env_b%  env^.5%  |gs|nat% |  RHOION%  s_ion%
+         0-1    0.77    0.02     0.08      0.15 |     0.00    0.00
+       1-1.5   12.50    3.40     3.93      5.12 |     0.00    0.00
+       1.5-2   38.44   27.21    20.55     30.07 |     0.00    0.00
+       2-2.5   15.20   20.62    18.69     20.17 |     0.00    0.00
+       2.5-3    1.15    2.72     5.74      0.37 |     0.00    0.00
+       3-3.5    0.21    0.22     1.46      0.00 |     0.00    0.00
+       3.5-5    1.61    0.02     0.32      0.00 |     4.76    2.67
+       5-inf   30.12   45.79    49.23     44.11 |    95.24   97.33
+  weighted mean distance: RHOB 3.67 A, env_b 6.50 A, env^0.5 6.89 A, |grad s| native 6.29 A | RHOION 7.90 A, s_ion 12.21 A
+
+=================== neutral ===================
+  [check] residual plane means: bound 4.07e-16, ionic 0.00e+00 e/A^3 (per-plane projection -> both must be ~0)
+  [check] int|bg_b| 0.3769, int|delta_b| 1.6709, int|bg_b+delta_b| 1.8660 e -- the third is the only one that means anything; the first two must never be added
+
+[T1] BOUND  (model bg_b+delta_b  vs  DFT RHOB)
+    dist (A)   vol% |  DFT net  DFT |q|  DFT cross |  mdl net  mdl |q|  mdl cross |  int|bg|  int|del|
+         0-1   8.12 |   -0.037    0.037     -0.022 |   -0.056    0.070     -0.414 |    0.057     0.015
+       1-1.5   9.72 |   -0.410    0.497     +0.531 |   -0.364    0.418     +0.494 |    0.079     0.366
+       1.5-2   7.24 |   +0.288    1.132     -1.056 |   +0.369    0.938     -1.230 |    0.079     0.908
+       2-2.5   3.65 |   +0.134    0.268     -0.377 |   +0.077    0.322     -0.232 |    0.064     0.318
+       2.5-3   2.61 |   +0.022    0.023     -0.057 |   -0.026    0.063     +0.085 |    0.044     0.057
+       3-3.5   2.51 |   +0.003    0.003     -0.008 |   +0.005    0.023     -0.013 |    0.023     0.006
+       3.5-5   7.23 |   +0.003    0.005     -0.007 |   -0.005    0.015     +0.011 |    0.015     0.000
+       5-inf  58.93 |   -0.002    0.030     +0.006 |   -0.000    0.017     +0.000 |    0.017     0.000
+       TOTAL 100.00 |   +0.000    1.995     -0.989 |   -0.000    1.866     -1.300 |    0.377     1.671
+
+[T1] IONIC  (model bg_i+delta_i  vs  DFT RHOION)
+    dist (A)   vol% |  DFT net  DFT |q|  DFT cross |  mdl net  mdl |q|  mdl cross |  int|bg|  int|del|
+         0-1   8.12 |   +0.000    0.000     +0.000 |   -0.000    0.000     -0.000 |    0.000     0.000
+       1-1.5   9.72 |   +0.000    0.000     +0.000 |   -0.000    0.000     +0.000 |    0.000     0.000
+       1.5-2   7.24 |   +0.000    0.000     -0.000 |   -0.000    0.000     +0.000 |    0.000     0.000
+       2-2.5   3.65 |   -0.000    0.000     +0.000 |   +0.000    0.000     -0.000 |    0.000     0.000
+       2.5-3   2.61 |   -0.000    0.000     +0.000 |   +0.000    0.000     -0.000 |    0.000     0.000
+       3-3.5   2.51 |   -0.000    0.000     +0.000 |   +0.000    0.000     -0.000 |    0.000     0.000
+       3.5-5   7.23 |   -0.003    0.004     +0.005 |   +0.000    0.000     -0.000 |    0.000     0.000
+       5-inf  58.93 |   +0.002    0.063     -0.006 |   -0.000    0.004     -0.000 |    0.004     0.000
+       TOTAL 100.00 |   -0.000    0.067     -0.001 |   +0.000    0.004     -0.000 |    0.004     0.000
+
+[T2] BOUND charge split. The 1-D pipeline owns the plane averages; the 3-D residual owns the lateral part and must not be charged with the 1-D error.
+  plane-average part:  DFT int|.| 0.3879 e  cross -0.5251 eV   |   model int|.| 0.3769 e  cross -0.5358 eV
+  lateral part:        DFT int|.| 2.1712 e  cross -0.4638 eV   |   model int|.| 1.6709 e  cross -0.7644 eV
+
+    dist (A) | DFT pm |q|  DFT pm cr mdl pm |q|  mdl pm cr | DFT lat |q|  DFT lat cr mdl lat |q|  mdl lat cr
+         0-1 |      0.059     -0.379      0.057     -0.410 |       0.094      +0.358       0.015      -0.004
+       1-1.5 |      0.084     +0.073      0.079     +0.057 |       0.554      +0.458       0.366      +0.437
+       1.5-2 |      0.085     +0.041      0.079     -0.004 |       1.143      -1.097       0.908      -1.226
+       2-2.5 |      0.067     -0.066      0.064     -0.081 |       0.266      -0.311       0.318      -0.150
+       2.5-3 |      0.050     -0.097      0.044     -0.077 |       0.044      +0.040       0.057      +0.162
+       3-3.5 |      0.027     -0.066      0.023     -0.029 |       0.025      +0.058       0.006      +0.016
+       3.5-5 |      0.013     -0.032      0.015     +0.010 |       0.016      +0.026       0.000      +0.001
+       5-inf |      0.003     +0.001      0.017     +0.000 |       0.030      +0.004       0.000      +0.000
+
+[T3] cross-energy gap (model total minus DFT total, model potential): -0.3107 eV total. Continuous cavity value and gradient magnitude where that gap sits.
+    dist (A)  gap (eV)    gap% |   <s^m>   <s^D>   rms ds |  <|gs|^m>  <|gs|^D>   ratio  rms dgs
+         0-1    -0.393  -126.4 |  0.0000  0.0001   0.0040 |    0.0001    0.0016   0.075   0.0339
+       1-1.5    -0.038   -12.2 |  0.0020  0.0071   0.0472 |    0.0165    0.0321   0.514   0.1490
+       1.5-2    -0.175   -56.2 |  0.0551  0.0843   0.1067 |    0.1699    0.2232   0.761   0.3169
+       2-2.5    +0.145    46.7 |  0.3152  0.4060   0.1790 |    0.2458    0.2380   1.033   0.4026
+       2.5-3    +0.142    45.6 |  0.5063  0.5541   0.0963 |    0.0492    0.0056   8.763   0.1423
+       3-3.5    -0.005    -1.6 |  0.5087  0.5396   0.0422 |    0.0042    0.0000 299.114   0.0183
+       3.5-5    +0.012     3.9 |  0.4992  0.5285   0.0402 |    0.0001    0.0000 323.856   0.0005
+       5-inf    +0.001     0.2 |  0.6977  0.7374   0.0468 |    0.0356    0.0377   0.945   0.0128
+  in the DFT transition shell 0.01<s<0.9: s_diel correlation +0.8614, model/DFT mean ratio 0.825
+  in the DFT transition shell 0.01<s<0.9: |grad s_diel| correlation +0.6573, model/DFT mean ratio 0.734
+  (interpolation caveat: the DFT cavity is smoothed onto the 100x100x300 model grid here, which lowers |grad s|; the native distribution is in T4 below)
+
+[T4] POSITION DIAGNOSTIC ONLY -- no pass/fail. Each charge type against its own switch. The envelope is not a prediction of the charge, so these shares have no reason to match.
+    dist (A)   RHOB%  env_b%  env^.5%  |gs|nat% |  RHOION%  s_ion%
+         0-1    1.55    0.02     0.08      0.20 |     0.00    0.00
+       1-1.5   23.43    3.54     4.06      5.67 |     0.00    0.00
+       1.5-2   57.25   27.17    20.26     31.25 |     0.00    0.00
+       2-2.5   14.64   19.80    18.19     18.53 |     0.00    0.00
+       2.5-3    1.20    2.83     5.74      0.32 |     0.00    0.00
+       3-3.5    0.18    0.23     1.44      0.00 |     0.00    0.00
+       3.5-5    0.22    0.02     0.31      0.00 |     3.16    2.86
+       5-inf    1.53   46.38    49.94     44.04 |    96.84   97.14
+  weighted mean distance: RHOB 1.80 A, env_b 6.56 A, env^0.5 6.96 A, |grad s| native 6.27 A | RHOION 11.09 A, s_ion 12.19 A
+DONE

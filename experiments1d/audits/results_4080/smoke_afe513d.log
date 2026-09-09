@@ -1,0 +1,35 @@
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+device: NVIDIA GeForce RTX 4090  23.5 GiB  torch 2.2.1+cu121 cuda 12.1
+interpreter: /home/rw28343/softwares/anaconda3/envs/pmp39/bin/python
+cwd: /home/rw28343/jobs/1-3DPB/claude/kitrun/run  ckpt dir: checkpoints  data dir: data
+double precision: DGEMM 1175 GFLOP/s | FFT 100x100x300 0.88 ms | FFT 168x168x500 5.70 ms
+
+== sid 1 (q=-1.00) ==  1.10 s, peak 3.03 GiB
+            energy -1.30606226e+03
+           comp_1d -1.55384397e+00
+             e_cav +3.89594476e+00
+              e_bl +3.96949357e-01
+             e_s3d -3.23176680e-01
+            e_xsol -9.34994930e-01
+            e_self +6.11818249e-01
+      delta_absint +6.25573430e+02
+   delta_plane_max +2.64402111e-15
+       pb_rms_last +6.89045931e-13
+  solver exit: fixed-point tol after 7 steps (min 5, cap 60), residual 1.382e-13 against 1.000e-07
+               Newton tol with 8 total outer iterations (cap 12 per call), rms 6.890e-13 against tol 1.000e-03
+
+== sid 601 (q=+0.00) ==  0.87 s, peak 3.34 GiB
+            energy -1.30559678e+03
+           comp_1d +1.16124005e-01
+             e_cav +3.84621696e+00
+              e_bl -6.38649115e-01
+             e_s3d -1.58241054e-01
+            e_xsol -7.64381835e-01
+            e_self +6.06140781e-01
+      delta_absint +5.87060144e+02
+   delta_plane_max +4.06703019e-16
+       pb_rms_last +1.56622252e-12
+  solver exit: fixed-point tol after 7 steps (min 5, cap 60), residual 2.881e-10 against 3.068e-07
+               Newton tol with 7 total outer iterations (cap 12 per call), rms 1.566e-12 against tol 1.000e-03
+
+no reference_values.json to compare against
