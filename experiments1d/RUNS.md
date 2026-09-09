@@ -550,3 +550,99 @@ threshold I chose, not about capacity.
 Contrast with charged: min attainable self is 2.28-7.79 x the reference --
 factors, not percent. The neutral/charged asymmetry is real, not a threshold
 artifact.
+
+## Workstation cross-run (two RTX 4090, 24 GB), 2026-09-09
+Second machine, auxiliary; LS6 stays primary (user ruling). Numbers below were
+produced there on a clean worktree at 028702a, interpreter conda pmp39
+(Python 3.9.25, torch 2.2.1+cu121), and cross-checked here by arithmetic:
+the T2 split reconstructs T1 exactly and bound+ionic reconstructs T3 to 1e-4.
+
+Non-additivity of the absolute integral, quantified: int|bg| 2.028 +
+int|delta| 1.673 = 3.700 against the true int|bg+delta| = 3.238 e, i.e. the
+naive sum overstates by 0.463 e = 14.3% (charged; 0.18 e neutral). That is
+the size of the error in the withdrawn claim.
+
+BOUND channel, charged: model carries 4.7% MORE absolute charge than DFT
+(3.238 vs 3.094 e) and delivers 44.2% of the attraction (-1.454 vs -3.286
+eV). Correctly founded this time.
+
+Split of the 1.832 eV missing bound attraction, two independent ways:
+  by channel (T2): plane-average 0.525 eV (28.7%), lateral 1.307 eV (71.3%).
+    Plane-average magnitude ratio is 1.004 while its ENERGY ratio is 0.496 --
+    right amount of charge, half the coupling. Reading the split on magnitude
+    alone says "purely lateral" and is wrong. The standing constraint is that
+    the 3-D fit owns the lateral part only, so this 0.525 eV must be split off
+    before any basis-capacity work.
+  by shell (T1): 0-1 A +0.785 (42.8%), 1-1.5 A -0.567, 1.5-2 A +1.362 (74.3%),
+    2-2.5 A +0.508, 2.5-3 A -0.149, 3-3.5 A -0.167, 3.5-5 A +0.295,
+    5-inf -0.235. Heavy cancellation; the two dominant positives are the
+    0-1 A and 1.5-2 A shells.
+
+The representation defect the user predicted 2026-09-09 is now measured.
+Sorting the charged bound shells by envelope weight: where the residual has
+weight (bg/del 0.3-0.6, shells 1-2.5 A) the magnitude lands within 27% of the
+reference; where it has almost none (bg/del 10.6 at 0-1 A, |del| = 0.000 at
+3.5-5 A and beyond) the model's charge is 3 to 10 times the reference and is
+almost purely 1-D background. At 0-1 A the model puts 0.176 e where DFT has
+0.029 e (6.1x), of which 0.169 e is background against 0.016 e of residual,
+and it costs +0.817 eV of coupling against DFT's +0.032. Envelope-void shells
+sum to about +0.53 eV, close to the 0.525 eV plane-average deficit measured
+independently.
+
+Frame asymmetry explained by the same defect with opposite sign: at 0-1 A the
+charged frame's background is net +0.131 e against a +15 V interior potential
+(spurious repulsion, +0.785 eV of gap) while the neutral frame's is net
+-0.056 e (spurious attraction, -0.392 eV) -- and the neutral bound gap is
+only -0.309 eV in total, so that one shell exceeds the whole gap. Neutral
+plane-average energy ratio is 1.020, lateral 1.648.
+
+Displacement, not just scaling (plane_profile_audit): charged bound profile
+shifted -0.423 A toward the slab, correlation 0.875, best single scale 0.870
+leaving 48.5% residual -- so misplaced, not merely scaled. Charged ionic is
+close to merely scaled (shift -0.461 A, corr 0.977, scale 0.969, residual
+21.2%). Neutral bound shift +0.437 A, corr 0.706, residual 70.8%. Neutral
+ionic row is noise (4e-3 e) and is not a finding. In z the 0.525 eV sits in
+four 1.5 A bins at 15-21 A (+0.569 eV, cumulative peak +0.666) with -0.141 eV
+returned beyond 21 A.
+
+Cavity is NOT clean, and the binary threshold was blind to it: in the DFT
+transition shell 0.01<s<0.9 the s_diel correlation is 0.887 with mean ratio
+0.850, and |grad s_diel| correlation 0.725 with ratio 0.759 (neutral 0.861 /
+0.825 and 0.657 / 0.734). The threshold test had said 0.44% mismatch by
+volume. Interpolating the DFT cavity onto the coarser model grid lowers its
+gradient, i.e. biases the ratio UP, so the deficit is not a smoothing
+artefact.
+
+IONIC, charged: net exact, |q| 1.000 vs 1.006, but over-attracts 7.5%
+(-2.091 vs -1.946 eV) with charge pulled inward -- 3.5-5 A holds 0.146 e
+against DFT's 0.054.
+
+env^0.5 retraction: it does NOT pull envelope weight inward. Shares move OUT
+of the 1.5-2 A shell (20.6% vs env_b's 27.2%) into 2.5-3 A and beyond 5 A, so
+it is a broadening. Whatever makes A+env^0.5 the only basis to pass on the
+neutral frame, it is not inward migration.
+
+Two open anomalies, neither attributable to basis capacity:
+ A. env_b puts 45.8% (charged) / 46.4% (neutral) of its weight beyond 5 A
+    from any atom, and the native |grad s_diel| agrees at 44.1% / 44.0%, so
+    it is genuine weight, not the weighted mean being dragged by the 59% of
+    the cell out there. A saturated switch should carry almost none there.
+ B. At z 6.0-7.5 A inside the slab the DFT plane average is zero to 3e-13
+    while the model puts -9.2e-06 / -8.8e-06 e/A^3, and the +15.3 / +16.5 V
+    interior potential turns that into -0.074 / -0.067 eV of spurious
+    coupling -- nearly identical in both frames, hence structural. The
+    neighbouring bins carry the opposite sign, so it is charge-neutral
+    ringing.
+Both are measured by envelope_void_audit (this commit).
+
+Gate defect found by running the smoke test twice on identical input:
+pb_rms_last does not reproduce (3.56e-13 then 6.89e-13; 6.07e-13 then
+1.57e-12), 3.3e-5 and 9.6e-5 relative against the 1e-8 floor, so it would
+fail the 1e-6 gate however correct the port is, while every energy term was
+bit-identical. Cancellation-limited quantities are now reported by order of
+magnitude, not gated.
+
+Convergence provenance now exported and clean on both frames: fixed-point
+exits on tolerance after 7 steps (minimum 5, cap 60), Newton on tolerance
+with 7-8 total outer iterations (cap 12 per call). The 80-round-idling
+concern is closed for this path with evidence rather than by assertion.
