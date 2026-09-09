@@ -19,6 +19,7 @@ on the A100. Anything outside 1e-6 relative means the port is not equivalent
 and no result from this machine should be trusted.
 """
 import json
+import math
 import os
 import sys
 import time
@@ -265,13 +266,31 @@ for k in ("fft64_100x100x300_ms", "fft64_168x168x500_ms"):
         print(f"  {k}: this {bench[k]:.2f} ms vs A100 {rb[k]:.2f} ms "
               f"({bench[k]/max(rb[k],1e-9):.1f}x slower here)")
 TOL = 1.0e-6
+# Cancellation-limited quantities are NOT gate-able. A converged residual of
+# ~1e-13 against fields of order 1 is a difference of nearly-equal numbers, so
+# it moves run to run on identical code and identical input while every energy
+# term stays bit-identical (measured on the workstation: pb_rms_last 3.56e-13
+# then 6.89e-13 for sid 1, 6.07e-13 then 1.57e-12 for sid 601 -- relative
+# differences of 3.3e-5 and 9.6e-5 against the 1e-8 denominator floor, which
+# would fail the 1e-6 gate no matter how correct the port is). They are
+# reported by order of magnitude instead. What the convergence rule actually
+# cares about -- the exit reason and the iteration count -- IS reproducible
+# and stays gated.
+NONGATED = {"pb_rms_last", "pb_fix_res", "pb_newton_rms_last"}
 worst, nbad = 0.0, 0
+info = []
 print(f"\n  {'frame':>6} {'term':>16} {'this machine':>18} {'A100':>18} "
       f"{'rel diff':>10}")
 for sid, rec in got["frames"].items():
     rr = ref["frames"].get(sid, {})
     for k, v in rec.items():
         if k in ("wall_s", "peak_GiB") or k not in rr:
+            continue
+        if k in NONGATED:
+            den = max(abs(rr[k]), 1.0e-30)
+            info.append((sid, k, v, rr[k],
+                         abs(math.log10(max(abs(v), 1e-300) / den))
+                         if rr[k] else float("nan")))
             continue
         if isinstance(v, str):
             if v != rr[k]:
@@ -288,7 +307,14 @@ for sid, rec in got["frames"].items():
             nbad += 1
             print(f"  {sid:>6} {k:>16} {v:+18.9e} {rr[k]:+18.9e} "
                   f"{rel:10.2e}  <-- OVER TOLERANCE")
+if info:
+    print(f"\n  not gated (cancellation-limited; order of magnitude only):")
+    for sid, k, v, rv, dec in info:
+        flag = "" if (dec == dec and dec < 1.0) else "   <-- more than a decade"
+        print(f"  {sid:>6} {k:>16} {v:+18.9e} {rv:+18.9e} "
+              f"{dec:8.2f} decades{flag}")
 print(f"\nworst relative difference {worst:.2e} over "
-      f"{sum(len(v) for v in got['frames'].values())} numbers, "
+      f"{sum(len(v) for v in got['frames'].values())} numbers "
+      f"(excluding {len(info)} cancellation-limited ones), "
       f"{nbad} over the {TOL:g} tolerance")
 print("SMOKE PASS" if nbad == 0 else "SMOKE FAIL -- do not trust results here")
