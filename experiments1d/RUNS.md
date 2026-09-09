@@ -420,3 +420,13 @@ commit。新实验一律登记,旧实验按已知信息回填(未知处如实标
   with eval_offset_ab.py -> identical to cohbl.o3422505 (RMSE 11.65;
   cohort bias NiN44 +20.00 / neusol -6.91 / vac -7.14 / NiN88 -5.32).
 - Reference for ep33: E 11.75 / F 32.75 / pot 0.1227 / fermi 0.0912 / Phi1D 0.1086.
+- RESULT (EXIT 0, 34 ep in 2 h 29 min; warmup 3 min 21 s/ep, PB epochs
+  ~12 min/ep vs LS6 4 min -> fp64 throughput-bound on 4090, GPUs 100%):
+  ep33 valid E 10.58 / F 32.06 / pot 0.1759 / fermi 0.1226 / Phi1D 0.1174 /
+  s3d_b 0.001203 (LS6: 11.75 / 32.75 / 0.1227 / 0.0912 / 0.1086 / 0.001169).
+  Cohort bias NiN44 +18.23 / neusol -6.51 / vac -6.20 / NiN88 -4.46
+  (LS6 +20.00 / -6.91 / -7.14 / -5.32); pair diff -0.31 (LS6 +0.23).
+  Test E per cohort 20.4 / 6.6 / 6.1 / 4.4 (LS6 22.3 / 7.1 / 7.0 / 5.3).
+  User ruling: this ep33 is the local baseline; LS6 numbers are direction
+  reference only. pot/fermi ep32->33 rebound (0.1337->0.1759) attributed to
+  effective-batch 3->2 trajectory jitter.
