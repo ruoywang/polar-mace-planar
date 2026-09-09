@@ -315,6 +315,7 @@ class Solver1D:
             "phi_sol": phi_sol,
             "n_outer": pre["n_outer"],
             "rms_last": self._last_rms,
+            "solver_exit": pre.get("solver_exit"),
         }
 
     def _solve_unrolled(self, cvhar_z: torch.Tensor, s_ion: torch.Tensor, a1: torch.Tensor,
@@ -389,6 +390,28 @@ class Solver1D:
                     break
                 if float(torch.abs(res)) <= 1.0e-7 * max(1.0, float(torch.abs(dip_in))):
                     break
+        # A residual value alone cannot distinguish "converged on the
+        # criterion" from "hit the iteration cap and reported the last
+        # residual". Both loops therefore export their exit reason, their
+        # iteration count and the cap they were tested against.
+        _res_abs = float(torch.abs(res))
+        _fix_tol = 1.0e-7 * max(1.0, float(torch.abs(dip_in)))
+        _rms = float(getattr(self, "_last_rms", float("nan")))
+        solver_exit = {
+            "fix_steps": int(_step),
+            "fix_steps_min": int(fixsol_steps),
+            "fix_steps_cap": int(fixsol_max_steps if fixsol_converge
+                                 else fixsol_steps),
+            "fix_res": _res_abs,
+            "fix_tol": _fix_tol,
+            "fix_exit": "tol" if _res_abs <= _fix_tol else "CAP",
+            "newton_total": int(total_outer),
+            "newton_cap": int(max_outer),
+            "newton_rms_last": _rms,
+            "newton_tol": float(tol),
+            "newton_exit": ("tol" if _rms == _rms and _rms < float(tol)
+                            else "CAP"),
+        }
         return {
             "phi": phi,
             "n_b": n_b,
@@ -396,6 +419,7 @@ class Solver1D:
             "phi_sol": phi_sol,
             "n_outer": torch.tensor(total_outer),
             "rms_last": float(getattr(self, "_last_rms", float("nan"))),
+            "solver_exit": solver_exit,
             # mixer/moment state for the IFT tail
             "dip_tmp": dip_tmp,
             "res_old": res_old,

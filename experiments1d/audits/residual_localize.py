@@ -13,14 +13,20 @@ the total missing cross energy, and the mean of |phi|, env_b, s_ion, s_diel
 there — i.e. exactly what an added channel would have to reach.
 cwd = gate_bl.
 """
+# Paths come from env vars with the LS6 values as defaults, so this
+# runs unchanged on Lonestar6 and on a machine that holds the same
+# payload elsewhere: KIT_PB_REPO, KIT_MACE_REPO, KIT_DFT,
+# KIT_PB_CONFIG. Previously hardcoded, which made every audit
+# script non-portable (found by the workstation session 2026-09-09).
 import math
+import os
 import sys
 
 import numpy as np
 import torch
 
-sys.path.insert(0, "/work/08384/tg876840/ls6/repos/cep-dip-python-pb")
-sys.path.insert(0, "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy")
+sys.path.insert(0, os.environ.get("KIT_PB_REPO", "/work/08384/tg876840/ls6/repos/cep-dip-python-pb"))
+sys.path.insert(0, os.environ.get("KIT_MACE_REPO", "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 
 from ase.io import read
 
@@ -32,9 +38,9 @@ from mace.modules.solvent3d import (
     normalized_gradient_envelope, poisson_phi_periodic, _interp3_periodic)
 
 RIDGE = 1.0e-7
-GCE44 = "/scratch/08384/tg876840/tmp/2-NiN_single/1-44_GCE"
-GCE88 = "/scratch/08384/tg876840/tmp/2-NiN_single/2-88_GCE"
-NEU = "/scratch/08384/tg876840/tmp/2-NiN_single/5-44_neutral_withsolv"
+GCE44 = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/1-44_GCE"
+GCE88 = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/2-88_GCE"
+NEU = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/5-44_neutral_withsolv"
 FRAMES = [(1, f"{GCE44}/cal_1", "NiN44 q=-1.00", 80000),
           (201, f"{GCE88}/cal_1", "NiN88 q=-1.00", 60000),
           (601, f"{NEU}/cal_1", "neutral", 80000)]

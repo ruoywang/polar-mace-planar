@@ -768,6 +768,13 @@ class PB1DBackend:
             "layer_mean_t": layer_mean_t,
             "mu_bound_t": mu_bound_t,
             "rms_last": float(out["rms_last"]),
+            # convergence PROVENANCE, not just the residual: iteration counts,
+            # the caps they were tested against, and each loop's exit reason.
+            # A small residual is consistent with converging on the criterion
+            # AND with hitting the cap, so the residual alone is not evidence.
+            "n_outer": int(out["n_outer"]) if out.get("n_outer") is not None
+            else None,
+            "solver_exit": out.get("solver_exit"),
             "prior_solve": prior_s,
             "delta_p": delta_p,
             "solv3d": solv3d,

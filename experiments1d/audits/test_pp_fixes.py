@@ -5,11 +5,17 @@
    annihilated on the energy grid; the loss must see zero at OFF-PLANE
    points too (old direct-GTO-minus-interpolated-r path does not).
 CPU, synthetic fields, seconds. cwd anywhere."""
+# Paths come from env vars with the LS6 values as defaults, so this
+# runs unchanged on Lonestar6 and on a machine that holds the same
+# payload elsewhere: KIT_PB_REPO, KIT_MACE_REPO, KIT_DFT,
+# KIT_PB_CONFIG. Previously hardcoded, which made every audit
+# script non-portable (found by the workstation session 2026-09-09).
+import os
 import sys
 
 import torch
 
-sys.path.insert(0, "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy")
+sys.path.insert(0, os.environ.get("KIT_MACE_REPO", "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 from mace.modules.solvent3d import (
     _grad_mag_periodic,
     _interp3_periodic,

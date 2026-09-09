@@ -15,15 +15,21 @@ E_loc = f_loc * grad(-w_b conv phi), w_b = normalized Gaussian a_k = 0.125 A,
 f_loc solves the SIC fixed point (g_rot). Parameters parsed from the cal's
 own log prints. Usage: asolv_dft_check.py <cal_dir> [...]  (cwd anywhere)
 """
+# Paths come from env vars with the LS6 values as defaults, so this
+# runs unchanged on Lonestar6 and on a machine that holds the same
+# payload elsewhere: KIT_PB_REPO, KIT_MACE_REPO, KIT_DFT,
+# KIT_PB_CONFIG. Previously hardcoded, which made every audit
+# script non-portable (found by the workstation session 2026-09-09).
 import math
 import re
+import os
 import sys
 
 import numpy as np
 import torch
 
-sys.path.insert(0, "/work/08384/tg876840/ls6/repos/cep-dip-python-pb")
-sys.path.insert(0, "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy")
+sys.path.insert(0, os.environ.get("KIT_PB_REPO", "/work/08384/tg876840/ls6/repos/cep-dip-python-pb"))
+sys.path.insert(0, os.environ.get("KIT_MACE_REPO", "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 
 from pure_python import torch_pb as tp
 import mace.modules.pb1d_backend as PB
@@ -36,8 +42,8 @@ A_K = 0.125
 NELECT0 = {"NiN44": 660.0}  # neutral valence electron count (44-water cell)
 
 backend = PB.PB1DBackend(
-    config_path="/scratch/08384/tg876840/tmp/c-MACEsol/3-residual_3D/prod500/cal1_train.json",
-    repo_path="/work/08384/tg876840/ls6/repos/cep-dip-python-pb",
+    config_path=os.environ.get("KIT_PB_CONFIG", "cal1_train.json"),
+    repo_path=os.environ.get("KIT_PB_REPO", "/work/08384/tg876840/ls6/repos/cep-dip-python-pb"),
     baseline_cache=None,
     fixsol_steps=2,
 )

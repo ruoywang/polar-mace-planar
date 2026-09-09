@@ -5,12 +5,18 @@ BOTH calls (observable path, energy path), the implied base correction
 2pi/V*mu_exp^2, electro_energy, and every solvent term. sid 1 + 601,
 pp2 ep52 weights. cwd = gate_pp2_ext.
 """
+# Paths come from env vars with the LS6 values as defaults, so this
+# runs unchanged on Lonestar6 and on a machine that holds the same
+# payload elsewhere: KIT_PB_REPO, KIT_MACE_REPO, KIT_DFT,
+# KIT_PB_CONFIG. Previously hardcoded, which made every audit
+# script non-portable (found by the workstation session 2026-09-09).
+import os
 import sys
 
 import torch
 
-sys.path.insert(0, "/work/08384/tg876840/ls6/repos/cep-dip-python-pb")
-sys.path.insert(0, "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy")
+sys.path.insert(0, os.environ.get("KIT_PB_REPO", "/work/08384/tg876840/ls6/repos/cep-dip-python-pb"))
+sys.path.insert(0, os.environ.get("KIT_MACE_REPO", "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 
 from ase.io import read
 

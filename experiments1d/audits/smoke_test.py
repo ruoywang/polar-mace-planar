@@ -140,6 +140,8 @@ def wrap_solve(self, *a, **k):
         cap["obs"] = out["s3d_obs"]
     cap["rho_layer_z"] = out["rho_layer_z"].detach().clone()
     cap["rms_last"] = float(out["rms_last"])
+    cap["n_outer"] = out.get("n_outer")
+    cap["solver_exit"] = out.get("solver_exit")
     return out
 PB.PB1DBackend.solve_graph = wrap_solve
 
@@ -193,9 +195,24 @@ for sid, a in want.items():
         "comp_1d": float(cap["comp"].sum()) if "comp" in cap else float("nan"),
         "rho_layer_z_absint": float(cap["rho_layer_z"].abs().sum()),
         "pb_rms_last": cap.get("rms_last", float("nan")),
+        # convergence provenance: a residual alone cannot distinguish
+        # "met the criterion" from "hit the cap and reported the last
+        # residual" (standing rule after a criterion that idled 80 rounds
+        # while the answers still looked right)
+        "pb_n_outer": (float(cap["n_outer"]) if cap.get("n_outer") is not None
+                       else float("nan")),
         "wall_s": round(wall, 3),
         "peak_GiB": round(torch.cuda.max_memory_allocated() / 2 ** 30, 3),
     }
+    ex = cap.get("solver_exit") or {}
+    for k in ("fix_steps", "fix_steps_min", "fix_steps_cap", "fix_res",
+              "fix_tol", "newton_total", "newton_cap", "newton_rms_last",
+              "newton_tol"):
+        if k in ex:
+            rec[f"pb_{k}"] = float(ex[k])
+    for k in ("fix_exit", "newton_exit"):
+        if k in ex:
+            rec[f"pb_{k}"] = str(ex[k])
     if "baseline_coupling_energy_g" in pred:
         rec["e_bl"] = float(pred["baseline_coupling_energy_g"].sum())
     if d is not None:
@@ -210,6 +227,22 @@ for sid, a in want.items():
               "e_self", "delta_absint", "delta_plane_max", "pb_rms_last"):
         if k in rec:
             print(f"  {k:>16} {rec[k]:+.8e}")
+    if "pb_fix_exit" in rec:
+        print(f"  solver exit: fixed-point {rec['pb_fix_exit']} after "
+              f"{rec.get('pb_fix_steps', float('nan')):.0f} steps "
+              f"(min {rec.get('pb_fix_steps_min', float('nan')):.0f}, cap "
+              f"{rec.get('pb_fix_steps_cap', float('nan')):.0f}), residual "
+              f"{rec.get('pb_fix_res', float('nan')):.3e} against "
+              f"{rec.get('pb_fix_tol', float('nan')):.3e}")
+        print(f"               Newton {rec['pb_newton_exit']} with "
+              f"{rec.get('pb_newton_total', float('nan')):.0f} total outer "
+              f"iterations (cap {rec.get('pb_newton_cap', float('nan')):.0f} "
+              f"per call), rms {rec.get('pb_newton_rms_last', float('nan')):.3e} "
+              f"against tol {rec.get('pb_newton_tol', float('nan')):.3e}")
+        if rec["pb_fix_exit"] != "tol" or rec["pb_newton_exit"] != "tol":
+            print(f"  WARNING: at least one loop exited on its CAP, not on "
+                  f"its criterion -- the small residual is not evidence of "
+                  f"convergence")
 
 json.dump(got, open("smoke_results.json", "w"), indent=1)
 if WRITE_REF:
@@ -239,6 +272,12 @@ for sid, rec in got["frames"].items():
     rr = ref["frames"].get(sid, {})
     for k, v in rec.items():
         if k in ("wall_s", "peak_GiB") or k not in rr:
+            continue
+        if isinstance(v, str):
+            if v != rr[k]:
+                nbad += 1
+                print(f"  {sid:>6} {k:>16} {v:>18} {str(rr[k]):>18} "
+                      f"{'DIFFERENT':>10}  <-- exit reason differs")
             continue
         if not isinstance(v, float):
             continue
