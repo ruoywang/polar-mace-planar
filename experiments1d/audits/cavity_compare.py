@@ -246,6 +246,51 @@ for sid, dftdir, tag in FRAMES:
               f"{cx:+9.3f} {100*cx/cross_d:8.2f} "
               f"{float(phi_sol_d[m].abs().mean()):8.3f}", flush=True)
 
+    # ---------- Q1-dist: localization on the NATIVE grid ----------
+    # the earlier "90% of the lateral charge within 1.5 A of a solute atom"
+    # was binned on the model grid after interpolation. Same bins, native
+    # grid, no interpolation, and raw vs lateral kept apart.
+    try:
+        DB = [0.0, 1.5, 2.5, 3.5, 5.0, 1.0e9]
+        fpos = (torch.as_tensor(a.get_positions(), device=device,
+                                dtype=torch.float64)
+                @ torch.linalg.inv(celld))
+        gi = torch.arange(shd[0], device=device, dtype=torch.float64) / shd[0]
+        gj = torch.arange(shd[1], device=device, dtype=torch.float64) / shd[1]
+        gk = torch.arange(shd[2], device=device, dtype=torch.float64) / shd[2]
+        dmin = torch.empty(shd, dtype=torch.float64, device=device)
+        step = max(1, int(4.0e7 / (shd[0] * shd[1] * max(len(fpos), 1))))
+        for k0 in range(0, shd[2], step):
+            fg = torch.stack(torch.meshgrid(gi, gj, gk[k0:k0 + step],
+                                            indexing="ij"), dim=-1)
+            df = fg[..., None, :] - fpos[None, None, None, :, :]
+            df = df - torch.round(df)
+            dmin[:, :, k0:k0 + step] = torch.linalg.norm(
+                df @ celld, dim=-1).min(dim=-1).values
+            del fg, df
+        print(f"\n[Q1-dist] native grid, distance to the nearest solute atom",
+              flush=True)
+        print(f"  {'dist (A)':>12} {'volume%':>8} {'raw |q|%':>9} "
+              f"{'raw net':>8} {'raw cross':>10} {'lat |q|%':>9} "
+              f"{'lat cross':>10} {'<s_diel>':>9}")
+        raw_tot = float(n_solv_d.abs().sum() * dVd)
+        for k in range(len(DB) - 1):
+            m = (dmin >= DB[k]) & (dmin < DB[k + 1])
+            if not bool(m.any()):
+                continue
+            hi = "inf" if DB[k + 1] > 1e8 else f"{DB[k+1]:.1f}"
+            print(f"  {DB[k]:5.1f}-{hi:<6} "
+                  f"{100.0*float(m.sum())/float(np.prod(shd)):8.2f} "
+                  f"{100.0*float((n_solv_d.abs()*m).sum()*dVd)/max(raw_tot,1e-30):9.2f} "
+                  f"{float((n_solv_d*m).sum()*dVd):+8.3f} "
+                  f"{float((n_solv_d*phi_sol_d*m).sum()*dVd):+10.3f} "
+                  f"{100.0*float((n_lat_d.abs()*m).sum()*dVd)/max(amp_d,1e-30):9.2f} "
+                  f"{float((n_lat_d*phi_sol_d*m).sum()*dVd):+10.3f} "
+                  f"{float(s_diel_d[m].mean()):9.4f}", flush=True)
+        del dmin
+    except Exception as exc:            # additive diagnostic: never fatal
+        print(f"  [Q1-dist] skipped: {type(exc).__name__}: {exc}", flush=True)
+
     # ---------- model grid: do the two cavities agree? ----------
     s_diel_d_m = torch.clamp(to_shape(s_diel_d, shm), 0.0, 1.0)
     ne_d_m = to_shape(ne_d, shm)
