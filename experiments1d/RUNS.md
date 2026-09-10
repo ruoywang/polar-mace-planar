@@ -1270,3 +1270,64 @@ differs -- that is the generation path to look at. One frame. And the residual
 1.0% profile error and 0.0170 eV gap are what remains after the switch is
 fixed, so the switch accounts for roughly 88-91% of this frame's ionic-channel
 error and not all of it.
+
+## WHOLE-SYSTEM CHECK AFTER THE s_ion FIX (workstation, code a137d48)
+Ran on the 4090 in about 15 seconds, no kill (peak RSS 1.9 GB, peak GPU 4445
+MiB of 24564, host MemAvailable never below 241.9 GB). Executed file sha256
+b5b39227... verified identical to the commit. Log on kit-results-4080 at
+9adffd4; arrays in ion_switch_resolve_arrays.npz. LS6 job 3427287 was kept as
+a fallback and cancelled unrun. New standing preference from the user: quick
+tests go to the workstation first.
+Convention check PASS: l0_inv reconstruction of phi - phi_sol leaves 6.916e-12
+eV after removing the G=0 constant. All three gates PASS, including the
+baseline re-solve reproducing the model's own rho_ion bitwise.
+
+Cross-machine agreement for free: the [RESULT] table reproduces LS6 job
+3427122 on every figure -- +0.375 -> -0.000 A, 0.1417 -> 0.0170 eV/e,
+0.18687 -> 0.01764 e, total charge restored to +1.0000.
+
+  case                    net (e)   chg L1   chg max     cross     self    total   d total
+  DFT reference           +1.0000  0.00000  0.00e+00   -3.0243  +1.5237  -1.5006   +0.0000
+  baseline, model s_ion   +1.0000  0.63739  2.38e-03   -2.6289  +1.4718  -1.1571   +0.3435
+  DFT s_ion, re-solved    +1.0000  0.63760  2.38e-03   -2.6272  +1.4700  -1.1572   +0.3434
+
+THE IONIC GAIN DOES NOT REACH THE WHOLE SYSTEM.
+1. Charge sum: L1 0.63739 -> 0.63760, WORSE by 0.00021 e, and the max
+   deviation does not move at all, while the ionic channel's own L1 improved
+   10.6-fold.
+2. Total energy: gap 0.3435 -> 0.3434, a change of 0.0001 eV, 0.03%.
+3. Potential profile: all three measures worse by 0.8-1.8% (L1 2.7322 ->
+   2.7548, max 0.2915 -> 0.2967, rms 0.11093 -> 0.11286).
+
+A CORRECTION to the workstation's reading, verified by arithmetic: it wrote
+"cross improves by 0.0017 and self worsens by 0.0018, so they cancel". BOTH
+terms get worse -- |cross gap| 0.3954 -> 0.3971 and |self gap| 0.0519 ->
+0.0537. The total is nearly unchanged because the SIGNED errors move in
+opposite directions (+0.0017 and -0.0018), not because a gain is cancelled by
+a loss. The distinction matters: this is not "the ionic gain was absorbed", it
+is "both terms retreated slightly and the total happened to offset".
+
+THE MUTUAL BOUND-ION TERM is the largest movement in the block and it goes
+the wrong way: reference -1.3112, baseline -1.2824 (0.0288 off), substituted
+-1.4111 (0.0999 off, and on the other side) -- 3.5x further from the
+reference, overshooting. Computing the self-energy as the sum of the two
+separate self-energies would not show this term at all, which is exactly why
+the user required the summed field.
+
+AN INFERENCE REFUSED, correctly, by the workstation and recorded here: the
+sum's L1 rose 0.00021 e while the ionic channel's fell 0.16923 e, and it is
+tempting to conclude the bound channel degraded by about 0.169 e to absorb it.
+That does not follow -- L1 of a sum is not the sum of L1s -- so the bound
+channel's own change cannot be recovered from these two numbers. Same shape as
+int|a+b| against int|a|+int|b| and as reading a magnitude ratio as an energy
+claim, both of which this project has already been caught by.
+
+VERDICT by the user's decision tree: the ionic branch is PAUSED. The ionic
+channel improves 10.6-fold in isolation, the aggregate gain is 0.03% of the
+energy gap, and the charge sum, the mutual term and all three potential
+measures move slightly the wrong way. Focus returns to the bound charge and
+its lateral distribution.
+OPERATIVE CAVEAT: the substituted group's bound charge comes from its OWN
+re-solve, so these tables show the NET of the ionic improvement and the bound
+channel's response to it, and that net is zero in energy. Separating the two
+needs the bound channel scored on its own, which this run does not do.
