@@ -1439,10 +1439,21 @@ summed magnitude 102.8x. So the model reaches the RIGHT bound-charge magnitude
 (int|.| 2.0302 e against the reference 2.0193 e) as a small residue of two
 much larger terms, and that residue is calibrated to the model's own
 potential: supply a different one and the magnitude goes 4.3x too large. Since
-nb_off is a FIXED array with no phi dependence, nothing compensates. Equivalent
-statement: a1 E is close to -p_off up to a constant, so the model's total
-polarization is nearly flat in z and the bound charge lives in its small
-departures from flatness.
+nb_off is a FIXED array with no phi dependence, nothing compensates.
+
+The equivalent statement needs care, and the workstation was right to push on
+my first phrasing of it. "a1 E is close to -p_off up to a constant, so the
+model's total polarization is nearly flat in z" is true but buries the
+content: n_b is essentially -dP/dz, so n_b being small makes P nearly flat
+almost by construction, and stated that way the finding sounds trivial. The
+non-trivial part is that the two CONTRIBUTIONS to dP/dz are each about fifty
+times their own sum -- sum|B@phi/V| 7.3768 and sum|nb_off/V| 7.2847 against
+0.14266 -- so a1 E and p_off each vary strongly in z and their variations
+cancel to 2%. That is what makes separating a1 from p_off worth doing.
+
+And flat is not small: P is nearly constant in z, but its actual VALUE is set
+by that constant, which is a separate unknown from its flatness and is exactly
+what any integral formulation of P has to pin down.
 
 TWO CORRECTIONS I MADE TO THE WORKSTATION'S FIRST READING, both then confirmed
 by measurement. It read the table as a broken cancellation and argued a 1%
@@ -1503,3 +1514,28 @@ against int|.| 2.0193 e. Against the ionic channel's 1.4% residual and
 0.18687 e, the bound channel carries 4.3x the 1-D charge error and 3.8x the
 coupling gap. The 1-D error lives in the bound channel, and it is SHAPE, not
 position. Plane-averaged 1-D throughout; no lateral 3-D error is in any of it.
+
+NEXT CHEAPEST CANDIDATE, written down but NOT executed and awaiting the
+user's decision: compare the polarization itself rather than its second
+derivative.
+
+  P_model(z) = a1 * E + p_off
+  P_DFT(z)   = -integral_0^z <RHOB>_xy dz'   constant fixed by P -> 0 in vacuum
+
+Integration has gain 1/k where B has the band-pass gain measured above,
+peaking at 4.67 and dying to 2.37e-15, so this removes the operator that made
+the last comparison unreadable -- a genuine improvement in the observable, not
+a different view of the same one. It also separates a1 from p_off directly,
+which is the point.
+
+Two guards the workstation added to the design, both free and both about the
+constant, which is the weak part of the formulation:
+  P -> 0 must hold at BOTH ends. The s_diel profile has no dielectric below
+  about z = 15 A and above about z = 42 A, so fixing the constant at one end
+  makes the value at the other end a CHECK rather than an assumption. It
+  should come out consistent, since RHOB's net is +0.0000 on this frame, but
+  if it does not then the constant is not well defined and nothing downstream
+  is readable.
+  a1 E and p_off must each be reported alongside their sum, since separating
+  them is the whole purpose and only the sum is currently known to be well
+  behaved.
