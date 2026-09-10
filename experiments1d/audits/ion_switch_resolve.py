@@ -232,6 +232,57 @@ exA = outA.get("solver_exit"); exB = outB.get("solver_exit")
 # the no-re-solve switch-only cell, for the comparison this run is about
 rNo = ion_density_values(-outA["phi"], sion_dft, params, volume) / volume
 
+# ---- the three whole-system comparisons -------------------------------
+_, rb_raw = read_grid(f"{DFTDIR}/RHOB")
+rb_ref = fresample((-(rb_raw.to(device)) / Vd).mean(dim=(0, 1)), nz_s)
+del rb_raw
+_, phi_raw = read_grid(f"{DFTDIR}/PHI")
+phi_dft = fresample((-(phi_raw.to(device))).mean(dim=(0, 1)), nz_s)
+del phi_raw
+l0i = solver.l0_inv
+
+
+def phi_of(rho):
+    """Potential of a 1-D charge profile through the solver's own l0_inv, so
+    the self-energy of a SUM carries the mutual term."""
+    return torch.fft.irfft(torch.fft.rfft(rho * volume) * l0i, n=nz_s)
+
+
+def selfE(rho):
+    return 0.5 * float((rho * phi_of(rho)).sum() * dz * area)
+
+
+# convention check: l0_inv applied to the solver's own charges must give
+# phi - phi_sol up to the dropped G=0 constant
+_chk = phi_of((outA["n_b"] + outA["n_ion"]) / volume + kw["q_sol"] / volume)
+_tgt = outA["phi"] - outA["phi_sol"]
+_c = float((_tgt - _chk).mean())
+print(f"\n  [convention] l0_inv reconstruction of phi - phi_sol: max residual "
+      f"after removing the G=0 constant "
+      f"{float((_tgt - _chk - _c).abs().max()):.3e} eV (constant {_c:+.4f}) "
+      f"-- small means the charge-to-potential operator and its sign are as "
+      f"used here", flush=True)
+
+
+def whole(rb, ri, phi_tot, lbl):
+    rt = rb + ri
+    rt_ref = rb_ref + rho_ref
+    cross = float((rt * phi_score).sum() * dz * area)
+    se = selfE(rt)
+    se_parts = selfE(rb) + selfE(ri)
+    cr_ref = float((rt_ref * phi_score).sum() * dz * area)
+    se_ref = selfE(rt_ref)
+    dphi = phi_tot - phi_dft
+    return dict(lbl=lbl,
+                l1=float((rt - rt_ref).abs().sum() * dz * area),
+                mx=float((rt - rt_ref).abs().max()),
+                net=float(rt.sum() * dz * area),
+                cross=cross, self=se, tot=cross + se,
+                mutual=se - se_parts,
+                d_tot=(cross + se) - (cr_ref + se_ref),
+                pl1=float(dphi.abs().sum() * dz), pmx=float(dphi.abs().max()),
+                prms=float(dphi.pow(2).mean().sqrt()))
+
 print(f"\n  GATES")
 g1 = float((rA - fresample(cap["rho_ion_z"], nz_s)).abs().max())
 print(f"   [{'PASS' if g1 < 1e-12 else 'FAIL'}] baseline re-solve reproduces "
@@ -275,4 +326,50 @@ if allok:
           f"path; the position drifting back is what would give direct\n"
           f"   evidence for the self-consistent feedback and the boundary "
           f"handling instead.)", flush=True)
+
+    rt_ref = rb_ref + rho_ref
+    wref = dict(lbl="DFT reference",
+                l1=0.0, mx=0.0, net=float(rt_ref.sum() * dz * area),
+                cross=float((rt_ref * phi_score).sum() * dz * area),
+                self=selfE(rt_ref),
+                tot=float((rt_ref * phi_score).sum() * dz * area) + selfE(rt_ref),
+                mutual=selfE(rt_ref) - selfE(rb_ref) - selfE(rho_ref),
+                d_tot=0.0, pl1=0.0, pmx=0.0, prms=0.0)
+    wA = whole(fresample(cap["rho_bound_z"], nz_s), rA, -outA["phi"],
+               "baseline, model s_ion")
+    wB = whole(fresample(-(outB["n_b"] / volume), nz_s) if False
+               else -(outB["n_b"] / volume), rB, -outB["phi"],
+               "DFT s_ion, re-solved")
+    print(f"\n[WHOLE SYSTEM] bound + ionic together, one grid, one reference")
+    print(f"  {'case':>24} {'net (e)':>9} {'chg L1':>9} {'chg max':>9} "
+          f"{'cross':>9} {'self':>8} {'total':>9} {'d total':>9}")
+    for w in (wref, wA, wB):
+        print(f"  {w['lbl']:>24} {w['net']:+9.4f} {w['l1']:9.5f} "
+              f"{w['mx']:9.2e} {w['cross']:+9.4f} {w['self']:+8.4f} "
+              f"{w['tot']:+9.4f} {w['d_tot']:+9.4f}", flush=True)
+    print(f"  mutual bound-ion term in the self-energy (why the sum must be "
+          f"used, not the two separate self-energies):")
+    for w in (wref, wA, wB):
+        print(f"    {w['lbl']:>24} {w['mutual']:+.4f} eV", flush=True)
+    print(f"\n  {'case':>24} {'phi L1 (eV A)':>14} {'phi max (eV)':>13} "
+          f"{'phi rms (eV)':>13}")
+    for w in (wA, wB):
+        print(f"  {w['lbl']:>24} {w['pl1']:14.4f} {w['pmx']:13.4f} "
+              f"{w['prms']:13.5f}", flush=True)
+    np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
+                          "ion_switch_resolve_arrays.npz"),
+             z=np.arange(nz_s) * dz,
+             rho_bound_ref=rb_ref.cpu().numpy(),
+             rho_ion_ref=rho_ref.cpu().numpy(),
+             phi_dft=phi_dft.cpu().numpy(),
+             phi_score=phi_score.cpu().numpy(),
+             rho_bound_A=fresample(cap["rho_bound_z"], nz_s).cpu().numpy(),
+             rho_ion_A=rA.cpu().numpy(), phi_A=(-outA["phi"]).cpu().numpy(),
+             rho_bound_B=(-(outB["n_b"] / volume)).cpu().numpy(),
+             rho_ion_B=rB.cpu().numpy(), phi_B=(-outB["phi"]).cpu().numpy(),
+             s_ion_model=kw["s_ion"].cpu().numpy(),
+             s_ion_dft=sion_dft.cpu().numpy())
+    print(f"\n  arrays saved to ion_switch_resolve_arrays.npz "
+          f"(z, both charge channels and the total potential for all three "
+          f"cases, plus both ionic switches)", flush=True)
 print("DONE")
