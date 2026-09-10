@@ -525,3 +525,110 @@ The baseline bound profile has a 48.7% shape residual at a displacement of only
 channel's 1.4% residual and L1 0.18687 e, the bound channel carries 4.3x the 1-D
 charge error and 3.8x the coupling gap. The 1-D error is in the bound channel and
 it is shape, not position.
+
+## Dispatched job: bound_coeff_decompose (mace HEAD ead0a4a)
+
+`bcd_ead0a4a.log`. mace ead0a4a, pb 9b3b9ba, executed file sha256
+56ffb31ff1f70cc1660de16cddc39f567f8f32c57a72ddd5a8c74a914cd6af89, IDENTICAL to
+the commit. Ran in about 12 s. Peak RSS 1.20 GB, host MemAvailable never below
+242.8 GB, peak GPU 1377 MiB of 24564 — the 168x168x500 native grid cost almost
+nothing. No kill.
+
+### The reported gate FAILURE is spurious: a threshold below float64 resolution
+
+The log says `[FAIL] A_ref*<E_z> + prior_ref = plane_mean(P_z): max abs
+1.279e-17` and then `A GATE FAILED -- results below are printed but NOT to be
+attributed`. That verdict is wrong. From the saved arrays, `max|a1*E|` is
+1.928455e-01, and one float64 epsilon on that is **4.282e-17**. The measured
+residual, 1.279e-17, is BELOW a single epsilon on the terms being summed, so the
+identity is satisfied as exactly as double precision permits. Expecting ~1e-19
+is unachievable at these magnitudes. The threshold needs to be relative, not
+absolute; the identity itself holds and everything downstream is attributable.
+
+Every other gate passes: the 1-D operator on `plane_mean(P_z)` equals the plane
+average of the 3-D charge to 6.939e-18 against a profile max of 2.933e-03; the
+1-D driving field equals the plane average of the 3-D one to 9.770e-14 against
+3.054e+01; the two cells agree to 4.26e-16; `p_off = prior + delta_p` to exactly
+0; and the script's own 1-D chain reproduces the model's bound charge to
+4.992e-14.
+
+A note for whoever re-derives this from the npz: recomputing the identity from
+the saved 600-point `A_ref`, `E_dft` and `prior_ref` gives a residual of
+8.077e-06, not 1.279e-17. That is a resampling artefact, not a contradiction —
+`phi_dft_z` is saved at the native 500 and `E_dft` at 600, so the npz holds
+quantities mapped to a common grid rather than the native-grid values the
+identity was evaluated on. It cannot be verified to 1e-17 from the npz.
+
+### STEP 1 passes strongly
+
+3-D polarization from the DFT density and the DFT total potential, against DFT
+RHOB plane-averaged: reconstructed net +0.000000 e and int|.| 2.0229 e against
+the reference's +0.000000 and 2.0193, L1 0.00365 e = **0.18%** of the reference
+int|.|, correlation **+0.999991**. The published 3-D response, the cavity and
+the parameters reproduce the DFT bound charge. This also fixes the sign pair.
+
+### STEP 3a, 3b, 3c
+
+| quantity | ref rms | model rms | err rms | rel | corr |
+|---|---|---|---|---|---|
+| a1 (mean response) | 2.8973e-01 | 2.8167e-01 | 2.3947e-02 | 0.083 | +0.9935 |
+| prior (covariance background) | 2.4731e-02 | 3.8408e-02 | 1.3765e-02 | 0.557 | +0.9987 |
+| p_off = prior + delta_p | 2.4731e-02 | 3.7477e-02 | 1.2850e-02 | 0.520 | +0.9985 |
+
+a1 is 8.3% off, and 77.7% of that error in rms is the pure cavity part
+`resp_unit*(<s_diel>_model - <s_diel>_ref)`, the remainder the saturation
+heuristic that evaluates the response at a screened vacuum field estimate rather
+than the self-consistent one. The model's `prior` is 55.7% off and too LARGE,
+not too small.
+
+The learned correction points almost exactly the right way and is far too small:
+needed rms 1.3765e-02, supplied `delta_p` rms 9.6013e-04 — about **1/14** of
+what is needed — with projection +0.0668 onto the needed correction and
+correlation **+0.9553**. It reduces the residual from 1.3765e-02 to 1.2850e-02,
+a 6.6% reduction.
+
+**STEP 3c closes the grid-reach question, negatively.** Share of the reference
+coefficients' spectral energy above the model closure grid's cut: A_ref
+**0.00%**, prior_ref **0.00%**. The model's 300-in-z grid can represent the
+reference coefficients entirely, so grid reach is not the cavity/a1 error.
+
+### STEP 3d: the 2x2's intended reading is unavailable, for a measurable reason
+
+|  a1 | p_off | int&#124;.&#124; | gap | L1 | shift | resid |
+|---|---|---|---|---|---|---|
+| — | — | 2.0193 | +0.0000 | 0.00000 | -0.000 | 0.0% |
+| model | model | 8.5965 | +5.5832 | 7.56925 | +0.825 | 85.0% |
+| ref | model | 37.5740 | +39.0290 | 36.94743 | +1.250 | 93.4% |
+| model | ref | 34.9159 | -33.4487 | 33.69750 | +1.275 | 95.9% |
+| ref | ref | 2.0228 | -0.0029 | 0.00369 | -0.000 | 0.4% |
+
+The closure check passes: ref/ref returns to the reference at L1 0.00369 e and
+0.4% residual. But **neither single swap names a faulty piece — both make it
+3.5 to 3.9 times worse**: 36.94743 and 33.69750 against the baseline's 7.56925,
+while both together give 0.00369.
+
+The reason is measurable on the reference side alone. From the saved arrays,
+`a1*E` has rms 2.4447e-02 and `prior_ref` 2.4731e-02, and their sum
+`plane_mean(P_z)` has rms 1.6706e-03 — a **14.6-fold cancellation**. Since
+`a1*E + prior = plane_mean(a3*E)` holds by construction, the two coefficients
+are complementary halves of one decomposition, and pairing a reference half with
+a model half breaks the cancellation. That is a structural property of the
+construction, not evidence about either coefficient. This is the third designed
+single-factor intervention in this chain defeated by an identity that couples
+the pieces, after the staged potential swap and the density tail swap.
+
+### The cross-check has a sign error, and once corrected it confirms the relation
+
+Reported: rms of the difference 2.9576e-03 against a `W_B P` rms of 1.4789e-03,
+correlation **-0.999910**. The ratio is 2.9576/1.4789 = **1.99986**, i.e. exactly
+2, which together with a correlation of -1 is the signature of two arrays that
+are exact negatives of each other. So one side carries the wrong sign; corrected,
+the two agree to about 0.01%. As printed it reads as a large disagreement when it
+is in fact a confirmation of `n_b = -V * WB @ D @ P`.
+
+Incidentally this run reproduces the earlier plateau finding by an independent
+path: `sd_mean_ref` max is 0.9999851 against `sd_mean_model` max 0.9447081.
+
+Robust statement unchanged: the bound charge has close to the right total and a
+clearly wrong shape, and swapping the DFT total potential alone does not repair
+it. The generation of the total potential is NOT excluded.
