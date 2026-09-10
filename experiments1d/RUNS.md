@@ -2019,3 +2019,83 @@ do not already fix.
 
 NOT DONE, per the stop rule: step 3, and the confirmation on a second charged
 frame and a neutral frame, which the user scheduled after step 2 succeeded.
+
+## 2026-09-10  potential_rebuild.py -- can the potential be rebuilt at all?
+code d40b5ec. Three corrections from the user first, because they withdraw the
+previous entry's conclusion and two of its readings.
+
+CORRECTION 1 -- "both inputs exonerated, so the construction must be wrong" is
+WITHDRAWN. The full self-energy IMPROVED: its error went 0.0520 -> 0.0368 eV.
+What worsened is the MUTUAL term inside it. And the cross energy improved
+0.3953 -> 0.0223 eV. So the gain cannot be written off as error cancellation,
+and my "the energy closing while the field degrades is the compensating-error
+signature" was too broad -- it was true of the potential and not of the energy
+terms. The sufficient reason to pause was the POTENTIAL alone, and only that.
+The pause itself stands.
+
+CORRECTION 2 -- the inputs are NOT excluded, and the exoneration was wrong
+three ways:
+  a better charge L1 and a better dipole do not imply that every spatial
+  component which determines the potential is better, and a band rms does not
+  establish it either;
+  the dipole reported was the first moment of the SOLVENT charge, while the
+  feedback is dip_z = val_ion_dipole_z + dsol_z - q*center_z and therefore
+  contains the MODEL's SOLUTE dipole, which was never checked;
+  and holding cvhar_z fixed across the two cases says nothing about whether
+  cvhar_z is correct.
+
+CORRECTION 3 -- the 24.9% and 37.6% are shares of the CHANGE the modification
+caused, not shares of the DFT error, and were presented as if they located the
+defect. And the solver fixes the potential's constant by IONIC
+ELECTRONEUTRALITY: the residual's G=0 row is mean(n_b + n_ion) + q_sol = 0,
+and n_ion depends on phi's mean through n_work, so the constant MUST move when
+the shape moves. A G=0 change therefore implies no second bookkeeping error.
+The "two items, and the named one is smaller" conclusion is WITHDRAWN -- the
+0.0% measurement stands, the interpretation drawn from it does not.
+
+SCOPE, also the user's: the `total` column in the previous entry is the 1-D
+solvent electrostatic energy at a FIXED bare-solute potential. It contains
+neither the dipole correction nor the G=0 term under discussion, so "96%
+closed" must not be read as the full DFT energy being repaired.
+
+THE CONTROL. Hold ONE solvent charge -- the DFT bound plus ionic -- and rebuild
+the total potential twice, changing only the solute input:
+
+  DFT solute potential and dipole    can all-reference inputs rebuild the DFT
+                                     total potential at all?
+  model solute potential and dipole  how much error does the swap add?
+
+Each row computes its dipole correction from its OWN complete inputs, as the
+solver does. Mean-removed shapes are compared; the constant is checked
+separately against the electroneutrality condition rather than folded in.
+
+  all-DFT rebuilds, the model's does not -> the SOLUTE INPUT is the priority
+  all-DFT does not rebuild              -> potential ASSEMBLY, boundary and
+                                           grid conventions
+  both rebuild                          -> back to the residual charge error
+                                           and the self-consistent response
+
+THE DFT SOLUTE INPUT IS CONSTRUCTED INDEPENDENTLY, never back-derived from the
+potential it is used to test. The backend builds cvhar3 = phi_base -
+l0_inv(net_g) with net = neutral_v - n_e, i.e. l0_inv(cores - electrons).
+Substituting the DFT density in the same assembly makes the reference fields
+phi_base and neutral_v CANCEL out of the difference:
+
+  cvhar_DFT = cvhar_model + l0_inv(n_e_DFT - n_e_model)
+
+so only the two electron densities are needed and PHI never enters. The DFT
+solute dipole comes from the same solute_dipole_z the model calls, with the
+DFT profile, reported on both the closure grid and the native grid since that
+function's sawtooth window is grid-size dependent.
+
+GATED FIRST on the assembly reproducing the model's own converged potential
+from its own inputs and its own solvent charge, mean-removed -- one check that
+validates cvdip, l0_inv, indmin, c_unit, center_z, the dipole mixing and every
+sign at once.
+
+Two numbers expected to matter beyond the branch: the share of cvhar_DFT's
+spectral energy above the model closure grid's cut at mode 150, which the
+model's assembly cannot represent since cvhar is upsampled from 300 in z; and
+the model's SOLUTE dipole error, the term correction 2 says was never checked.
+
+Dispatched to the 4090. RESULT PENDING.
