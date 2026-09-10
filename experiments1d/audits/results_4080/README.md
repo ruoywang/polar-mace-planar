@@ -834,3 +834,73 @@ agreement improving as field agreement degrades is the signature of compensating
 errors, which is the thing this line of work exists to remove — so "the total gap
 closed" cannot be taken as the verdict on its own. I am not resolving it in
 either direction.
+
+## Re-run at d602de8: the band table decides it, and against step 2
+
+`poff_d602de8.log`. mace d602de8, pb 9b3b9ba, executed file sha256
+a32e957172821355bb1963e930309729af5f31ccbdabdb9c21778d8c7c489c62, IDENTICAL to
+the commit. Gate passes at 1.301e-18; both solves exit on tolerance. All STEP 1
+and STEP 2b numbers reproduce to the digit.
+
+### c_absmax, now printed: the amplitude is a learning outcome, not a limit
+
+**c_absmax 0.007093 — 2.8% of the hard bound c_max = 0.25.** dp_rms 9.6013e-04.
+The head needs 3.83x more amplitude; scaling every c_k by that factor reaches
+10.9% of the bound, comfortably inside. So the missing amplitude is not a
+representational limit. That bounds the amplitude question only — the
+gain-alone recovery of 49.7% says the shape is a separate and unanswered matter.
+
+### The band table fits NEITHER prepared branch
+
+|  modes | wavelength | charge err rms, baseline | P_off* | | potential err rms, baseline | P_off* | |
+|---|---|---|---|---|---|---|---|
+| 1-3 | >= 15.0 A | 2.176e-05 | 6.137e-06 | better 3.5x | 6.789e-02 | 1.611e-01 | **WORSE 2.4x** |
+| 4-10 | >= 4.5 A | 9.869e-05 | 6.330e-05 | better | 7.325e-02 | 8.699e-02 | WORSE |
+| 11-30 | >= 1.5 A | 1.913e-04 | 1.957e-04 | worse | 2.404e-02 | 3.262e-02 | WORSE |
+| 31-100 | >= 0.5 A | 1.444e-04 | 7.245e-05 | better | 8.053e-03 | 1.294e-02 | WORSE |
+| 101-300 | >= 0.1 A | 1.665e-05 | 9.885e-06 | better | 6.197e-04 | 7.410e-04 | WORSE |
+
+The two branches offered were "charge better at high k while the potential
+worsens at low k" and "both worsening at low k together". Neither holds. The
+charge error improves in **four of five bands including the lowest**, where it
+improves by 3.5x, and the potential error worsens in **all five**. So this is not
+the 1/k^2 weighting trade the branches were built around: the potential goes the
+wrong way even in the bands where the charge goes the right way.
+
+### The three potential components
+
+| | baseline | P_off* | change |
+|---|---|---|---|
+| rms | 0.11093 | 0.22339 eV | +101.4% |
+| mean | -0.04109 | -0.12304 eV | 3.0x |
+| mean-removed rms | 0.10304 | 0.18645 eV | +81.0% |
+| **longest-wavelength (45 A) amplitude** | **0.08041** | **0.20436 eV** | **+154.2%** |
+
+The constant offset cannot explain it — the mean-removed rms still rises 81%.
+And the largest relative degradation is the 45 A amplitude at +154.2%, which for
+a constant-potential model IS the cross-cell drop, the quantity the model exists
+to predict. By the criterion stated in advance — "if that is what doubled, the
+verdict is settled against step 2 regardless of the energy" — it did more than
+double, so the verdict is settled against step 2.
+
+### Verdict
+
+Step 2 fails on its own terms. Charge sum L1 improves 25.8%, bound L1 20.1%, and
+the total energy gap closes 96% from +0.3434 to -0.0145 eV; against that, the
+potential rms doubles, its mean-removed part rises 81%, the cross-cell drop
+component rises 154%, the bound-ion mutual term moves 4.4x further from the
+reference, and the ion L1 worsens 2.7%. Per the user's tree, the next place to
+look is the other inputs and the self-consistent coupling, not training, and
+step 3 does not run.
+
+One mechanism is consistent with the whole pattern and is NOT established here,
+offered only because the prepared branches do not fit and it is cheaply testable.
+The potential error is `l0_inv` applied to the TOTAL charge error, which includes
+a solute-side contribution that this intervention does not touch. If the model's
+solvent charge error had been partially cancelling that fixed solute-side error
+in the potential, then reducing the solvent charge error would remove the
+cancellation and worsen the potential — in every band at once, which is what is
+observed. That is a hypothesis about a compensation between the solvent and
+solute channels rather than between charge and potential at different k. Testing
+it needs `l0_inv` applied to each charge error separately and compared against
+the potential error directly, which this run does not do.

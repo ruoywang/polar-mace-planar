@@ -1,0 +1,85 @@
+PROVENANCE mace=d602de8 pb=9b3b9ba sha256(poff_exact_target.py)=a32e957172821355bb1963e930309729af5f31ccbdabdb9c21778d8c7c489c62 (IDENTICAL to committed d602de8)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  a1 HELD FIXED at the model's value; only the compensation changes. No grid change, no scaling of the correction.
+
+[STEP 1] the correct compensation with a1 held at the model's value
+  P_off*   = plane_mean(P_DFT) - a1_model * plane_mean(E_DFT)
+  delta_p* = P_off* - prior_model
+
+                          quantity          rms
+         P_off* (the exact target)   3.5170e-02
+                       prior_model   3.8408e-02
+     p_off_model = prior + delta_p   3.7477e-02
+         delta_p* (what is needed)   3.6777e-03
+     delta_p (what the head gives)   9.6013e-04
+
+  HOW MUCH THE TARGET MOVED by holding a1 fixed. The earlier round scored delta_p against prior_ref - prior_model, which is the correct p_off for the REFERENCE a1, so it charged delta_p for a1's error too.
+    old target rms 1.3765e-02, new target rms 3.6777e-03, ratio 0.267, correlation between them +0.9177
+
+  AMPLITUDE OR SHAPE -- re-decided against the correct target. The scale is applied to DELTA_P, not to the target: shrinking the target to fit the head is not a repair, and the fraction it appears to
+  remove is measured against the raw difference rather than against what is needed, which makes it read far better than it is.
+     delta_p rescaled to fit      gain  needed rms   left over  supplied     corr
+   delta_p* (correct target)     3.310  3.6777e-03  1.8503e-03     49.7%  +0.8580
+              the old target    13.721  1.3765e-02  3.9910e-03     71.0%  +0.9553
+  So a pure gain change on the head supplies 49.7% of delta_p*, and the head is short by a factor of 3.83. Both numbers follow from the correlation, since the residual after ANY optimal gain is sqrt(1 - corr^2) of the target.
+
+  HEAD SATURATION -- free here and decisive for step 3. delta_p = G_0.2 * [w_env * sum_k c_k B_k(u)], K = 8, c_k = 0.25*tanh(...), so c_max = 0.25 is a HARD bound.
+   c_absmax 0.007093, i.e. 2.8% of the bound; dp_rms 9.6013e-04
+   The head needs 3.83x more amplitude. Scaling every c_k by that factor would reach 10.9% of the bound, which is INSIDE it, so the amplitude is a learning outcome and not a representational limit.
+   (that scaling argument assumes the shape is held, which the gain-alone recovery above shows only partly holds -- it bounds the amplitude question, it does not answer the shape one)
+
+[STEP 2a] WIRING CHECK ONLY, at the fixed DFT field. P_off* was built at this field, so reproducing the reference here proves the algebra and nothing physical.
+    bound-charge L1 with P_off*: 0.00365 e, against 7.56925 e for the model's own p_off and an int|.| of 2.0193 e
+    (the residual is the 500->600 operator discretisation plus the 0.18% by which the 3-D reconstruction differs from stored RHOB, not a modelling error)
+
+[STEP 2b] SELF-CONSISTENT RE-SOLVE, everything else identical
+   [PASS] the baseline re-solve reproduces the model's own bound charge: max abs 1.301e-18 e/A^3
+
+                      case   net (e)   chg L1  bound L1   ion L1     cross      self     total   d total
+             DFT reference   +1.0000  0.00000   0.00000  0.00000   -3.0243   +1.5237   -1.5005   +0.0000
+     baseline, model p_off   +1.0000  0.63739   0.80003  0.18687   -2.6289   +1.4718   -1.1572   +0.3434
+   exact P_off*, re-solved   +1.0000  0.47303   0.63902  0.19199   -3.0020   +1.4869   -1.5151   -0.0145
+
+  mutual bound-ion term (self energy of the SUM minus the two separate self energies, so the interaction is included):
+               DFT reference   -1.3112 eV
+       baseline, model p_off   -1.2824 eV
+     exact P_off*, re-solved   -1.1851 eV
+  potential profile error against the DFT total potential, split so a constant offset cannot masquerade as a shape change:
+       baseline, model p_off L1 2.7322, max 0.2915, rms 0.11093; of which mean -0.04109 and mean-removed rms 0.10304; longest-wavelength (45 A) amplitude 0.08041 eV
+     exact P_off*, re-solved L1 5.6233, max 0.5109, rms 0.22339; of which mean -0.12304 and mean-removed rms 0.18645; longest-wavelength (45 A) amplitude 0.20436 eV
+
+  WHERE THE TWO DISAGREE, band by band. l0_inv goes as 1/k^2, so the potential is set by the lowest modes while charge L1 weights all modes alike -- this says whether the charge gain and the potential
+  loss are in the same place or in different places.
+       modes    wavelength |               charge err rms |            potential err rms
+                           |      baseline         P_off* |      baseline         P_off*
+         1-3     >= 15.0 A |     2.176e-05 6.137e-06 better |     6.789e-02 1.611e-01 WORSE
+        4-10      >= 4.5 A |     9.869e-05 6.330e-05 better |     7.325e-02 8.699e-02 WORSE
+       11-30      >= 1.5 A |     1.913e-04 1.957e-04 WORSE |     2.404e-02 3.262e-02 WORSE
+      31-100      >= 0.5 A |     1.444e-04 7.245e-05 better |     8.053e-03 1.294e-02 WORSE
+     101-300      >= 0.1 A |     1.665e-05 9.885e-06 better |     6.197e-04 7.410e-04 WORSE
+  (charge better at high k while the potential worsens at low k = the energy closure is compensating and the field is going the wrong way. Both worsening at low k together = one defect, not a trade.)
+  solver exit fix_exit: baseline tol, P_off* tol
+  solver exit newton_exit: baseline tol, P_off* tol
+
+  VERDICT on step 2, on the aggregate and not on the bound channel alone:
+       charge sum L1: 0.63739 -> 0.47303 e (BETTER, -25.8%)
+            bound L1: 0.80003 -> 0.63902 e (BETTER, -20.1%)
+              ion L1: 0.18687 -> 0.19199 e (worse, +2.7%)
+       potential rms: 0.11093 -> 0.22339 eV (worse, +101.4%)
+    potential mean-rm: 0.10304 -> 0.18645 eV (worse, +81.0%)
+      potential 45 A: 0.08041 -> 0.20436 eV (worse, +154.2%)
+           cross gap: +0.3953 -> +0.0223 eV (BETTER)
+            self gap: -0.0520 -> -0.0368 eV (BETTER)
+           total gap: +0.3434 -> -0.0145 eV (BETTER)
+              mutual: +0.0288 -> +0.1261 eV (worse)
+
+  MIXED IS NOT A PASS. The stop rule names aggregate charge, the POTENTIAL, cross energy and the full self-energy including the bound-ion mutual term. If the potential or the mutual term goes the
+  wrong way while the energy gap closes, that is the signature of compensating errors -- which is the thing this line of work exists to remove -- and the energy closure cannot stand as the verdict on its own,
+  any more than the ionic channel's 10.6-fold improvement could when the aggregate moved 0.03%.
+
+  If the aggregate does not improve here, STOP: the compensation is not the binding problem and the next place to look is the other inputs and the self-consistent coupling, not training. If it does improve,
+  step 3 asks whether the existing head can produce delta_p* within its own basis and its c_max = 0.25 clipping.
+
+  arrays saved to poff_exact_target_arrays.npz
+DONE
