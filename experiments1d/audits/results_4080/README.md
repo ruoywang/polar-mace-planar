@@ -1530,3 +1530,81 @@ implied.
 The val subset has a larger bias (-0.123) and RMSE (0.307) than the train subset
 (-0.043, 0.178) on these seven, but with n = 7 against n = 10 and a non-random
 selection that is not yet a split effect.
+
+## All 200 pairs (mace e07f7f7 + a one-line local patch)
+
+`charge_200pairs_e07f7f7p.log`. Executed file sha256
+bf78c1fa0ba0eacfdc2420259e08b686d76a6eedc108120ddf4cff9dabd33d7b against the
+committed e07f7f7's
+3877f0801f3b95e2075c4b0d01516eda65fbdeae75cb7604eec98dac13d2d786 — the
+difference is one added line, `import mace.modules.pb1d_backend as PB`, without
+which the script dies at line 186 with `NameError: name 'PB' is not defined`
+before any pair runs. The new backend hook brought the reference and not the
+import. Nothing numeric changed; the patch has since been discarded from the
+working tree and is recorded here and in the log header.
+
+**The leak fix works but does not eliminate the growth**: 160 MB per forward
+before, **11 MB per forward** after, a 14.5x reduction. Final RSS 5.94 GB from a
+1.48 GB start over 400 forwards, exactly as the 11 MB/forward line projected.
+
+**On the kills**: this run was stopped a third time in the background — at
+3.2 GB with 254.7 GB available and growth of 11 MB/forward — and then completed
+unchanged in the foreground. Across four kills on this machine the pattern is not
+memory: every background task that reached about 90 seconds was killed with "low
+memory" whatever its RSS, while foreground runs under `timeout 570` have
+completed every time, including this 400-forward one. Two of the four kills had
+no real growth behind them, one did, and this one did not.
+
+### Result: the trapezoid holds on 200 pairs
+
+| split | pairs | eps_D rmse | eps_D bias | resid rmse | resid bias | explained (RMS) |
+|---|---|---|---|---|---|---|
+| val | 20 | 5.621861 | +5.570253 | 0.321732 | -0.166124 | 94.3% |
+| train | 160 | 5.717653 | +5.676327 | 0.354029 | -0.164801 | 93.8% |
+| test | 20 | 6.054751 | +6.034449 | 0.262612 | -0.045151 | 95.7% |
+| **ALL** | 200 | 5.742802 | +5.701532 | **0.342807** | -0.152969 | **94.0%** |
+
+Slope of eps_Delta on -mu_bar x dN **+1.0251**, correlation +0.8951.
+
+**The endpoint controls are what make it an integral.** Residual RMSE crediting
+the charged-endpoint Fermi 2.0644 eV (bias +1.9674), the neutral endpoint
+2.3118 eV (bias -2.2734), the trapezoid **0.3428 eV** (bias -0.1530) — 6.0x and
+6.7x better. An endpoint working as well would have meant the missing quantity is
+not an integral over electron count.
+
+**Pair 1 sits at percentile 49 of the 200**, so the pair the relation was
+identified from is representative rather than the outlier a one-point fit
+invites.
+
+### What "94%" means, because the denominator decides it
+
+eps_Delta is nearly a constant offset — rmse 5.7428 with bias 5.7015, so its
+standard deviation is only 0.6872 eV. By measure, over all 200:
+
+| measure | value |
+|---|---|
+| RMS ratio, 1 - resid_rmse/eps_rmse | **94.0%** |
+| offset removed, 1 - \|resid_bias\|/\|eps_bias\| | **97.3%** |
+| variance about the mean | 80.1% |
+| standard-deviation reduction | **55.4%** |
+
+The relation does two things and only one of them is 94%. It identifies and
+removes a missing ~5.7 eV TERM — the offset falls from +5.70 to -0.15 eV, 97.3%
+of it — which is the structural claim and is strongly supported. Of the
+frame-to-frame VARIATION it removes about half, the spread going from 0.687 to
+0.307 eV. "94% explained" must not be read as the remaining error being 6% of
+what it was frame by frame.
+
+Correlation on the full 200 is +0.8951 against +0.968 on the biased 19-pair
+subset, so that subset was optimistic — in the direction flagged when it was
+reported.
+
+### Two residual features that are not noise at n = 200
+
+The slope is 1.0251, 2.5% above unity, and the residual bias is -0.153 eV rather
+than zero; with 200 points neither is sampling scatter. The residual range is
+-1.074 to +0.458, skewed negative. So the missing term is the chemical-potential
+integral to within a few per cent, with a systematic remainder beyond it.
+
+No split effect: val 94.3%, train 93.8%, test 95.7%. The val block is the user's
+table.
