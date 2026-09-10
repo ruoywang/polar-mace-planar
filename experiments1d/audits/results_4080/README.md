@@ -632,3 +632,80 @@ path: `sd_mean_ref` max is 0.9999851 against `sd_mean_model` max 0.9447081.
 Robust statement unchanged: the bound charge has close to the right total and a
 clearly wrong shape, and swapping the DFT total potential alone does not repair
 it. The generation of the total potential is NOT excluded.
+
+## Re-run at 0ac7b09: the amplitude/shape split
+
+`bcd_0ac7b09.log`. mace 0ac7b09, pb 9b3b9ba, executed file sha256
+eb4fa6453c596bb4ec75fa8a1ad999f87b4f6b9fbcabf2a1fa6a0d4d57707f84, IDENTICAL to
+the commit. All gates now PASS, including the covariance identity at 1.279e-17,
+reported as 0.30 float64 epsilon on the terms — the relative threshold fixes the
+spurious FAIL. Everything from the previous run reproduces to the digit.
+
+### The two coefficients fail in opposite ways
+
+| quantity | best scale | err rms | after rescale | removed |
+|---|---|---|---|---|
+| a1 (mean response) | 0.9692 | 2.3947e-02 | 2.2216e-02 | **7.2%** |
+| prior (covariance background) | 1.5510 | 1.3765e-02 | 1.9411e-03 | **85.9%** |
+| p_off = prior + delta_p | 1.5132 | 1.2850e-02 | 2.0037e-03 | 84.4% |
+
+This is the sharpest result of the run and it separates cleanly:
+
+- **a1's error is SHAPE.** The best gain is 0.9692, within 3% of unity, and
+  applying it removes only 7.2% of the error. No gain correction helps a1.
+  Consistent with 77.7% of a1's error being the pure cavity part.
+- **prior's error is almost pure GAIN.** The model's covariance background is
+  about 1.55x the reference and correcting that single number removes 85.9% of
+  the error. `p_off` inherits this at 84.4%.
+
+The learned correction is a gain problem too, and less cleanly: rescaling
+`delta_p` by 13.72x removes **71.0%** of what is needed, residual 3.9910e-03
+against 1.3765e-02. So the +0.9553 correlation was not purely a localisation
+artefact — but 71% is materially weaker than prior's own 85.9%, so the
+correction's shape is right in the main and not in detail.
+
+### The cavity plateau is set by resolution, not density
+
+`plane_mean(s_diel)` max: model **0.9447081** on its 300-in-z grid, reference
+**0.9999851** on the DFT native 500. Combined with the earlier density tail test
+— which found the model grid gives the SAME plateau for both densities in both
+directions, moving it by under 6e-09 — density is excluded and resolution is
+what is left. This is the first direct evidence for it, and it depends on that
+earlier test; on its own this line would not establish it.
+
+Two limits on how far that goes. The two grids differ in lateral resolution
+(100x100 against 168x168) as well as in z (300 against 500), and
+`plane_mean` averages laterally, so this does not separate a z-resolution effect
+from a lateral one. And "resolution" here means the grid the cavity is built on,
+including the density field it is a nonlinear function of, not the resolution of
+the plane average alone.
+
+This does not conflict with STEP 3c's 0.00%, though the two are easy to read as
+conflicting. STEP 3c says the reference coefficients contain no spectral content
+above the model grid's cut, i.e. the answer is representable on 300 in z. The
+plateau result says the value computed on that grid comes out different anyway,
+because `s_diel` is a nonlinear function of a grid-resolved density. Representable
+and correctly computed are not the same claim.
+
+### The corrected cross-check, and its size
+
+With the sign fixed: rms of the difference 1.9835e-05 against a `W_B P` rms of
+1.4789e-03, correlation +0.999910. That confirms `n_b = -V * WB @ D @ P`.
+One precision note, since the number was predicted as "about 0.01%": the
+agreement is **1.34%** in rms (1.9835e-05 / 1.4789e-03), not 0.01%. The 0.01%
+figure is the correlation deficit, 1 - 0.999910 = 9.0e-05, which is a different
+quantity — for nearly parallel arrays the relative rms difference goes as
+`sqrt(2 * (1 - corr))`, and `sqrt(2 * 9.0e-05)` = 1.34e-02, which is exactly
+what was measured. Both say "agrees", but they differ by a factor of 134 and only
+one of them is the relative error.
+
+### The 2x2, with the reading the rows do support
+
+Unchanged from the previous run to the digit. Neither single swap indicts its
+coefficient, for the construction reason already recorded. What the rows do give
+as magnitudes: the p_off error alone costs 36.94743 e in L1, the a1 error alone
+33.69750 e, both together 7.56925 e, so the two errors cancel about 4.7-fold.
+That cancellation is largely structural — the model's own closure satisfies
+`a1*E + prior = plane_mean(a3*E)` with its own fields and its bound-charge total
+is close to the reference, so the two errors are substantially forced to oppose —
+and it is recorded as a magnitude, not as a finding about independent errors.
