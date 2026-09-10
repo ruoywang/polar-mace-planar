@@ -1046,3 +1046,70 @@ TWO THINGS NOT TO MISREAD, both mine to flag:
   A, which is exactly the edge of the +-1.5 A scan window. That value is
   CENSORED, not measured, and must not be quoted as a shift. The
   by-residual column (-0.425 A) is interior and valid.
+
+## 2x2 OF CAVITY SOURCE AGAINST THE LEARNED CORRECTION (job 3426892, code c80e0bd)
+Script sha256 23ab439d31035cf4, IDENTICAL to the committed copy. 3m11s. All
+four gates PASS on both frames, now covering all four solves (G1 bitwise
+0.000e+00, G2 same tensor objects with max |d cvhar_z| 0.000e+00, G3 max
+|d dphi/dz| 0.000e+00 with mean cvhar_z +0.000000 in every group, G4 all four
+exit on their criteria).
+
+Added because the first pass kept the OLD learned correction while swapping
+the cavity (p_off = new prior + old delta_p). delta_p was trained against the
+model's own cavity, so that was a mismatched combination and the earlier
+conclusion "the cavity is not the source of the displacement" was too strong.
+
+Size of the removed term: delta_p rms 9.6013e-04 against prior rms 3.8408e-02
+on the charged frame, so 2.5% of the prior; 8.1472e-04 against 4.0056e-02,
+2.0%, on the neutral one.
+
+CHARGED BOUND, reference coupling -1.0955 eV
+  cell                        gap (eV)   profile   shift (A)
+  model cavity, delta_p ON     -0.5468     48.6%      +0.075
+  DFT cavity,   delta_p ON     -0.6625     65.6%      -0.425
+  model cavity, delta_p OFF    -0.8033     59.5%      +0.100
+  DFT cavity,   delta_p OFF    -0.8595     66.9%      -0.425
+CHARGED IONIC, reference -1.9362 eV: all four cells at +0.1441 / +0.1641 /
+  +0.1441 / +0.1642 eV, profile 1.4 / 1.2 / 1.4 / 1.2%, shift +0.400 / +0.450
+  / +0.400 / +0.450 A. The learned correction does not touch this channel.
+NEUTRAL BOUND, reference -0.5182 eV
+  model cavity, delta_p ON     +0.0160     66.1%      +0.150
+  DFT cavity,   delta_p ON     +0.2628     57.1%      +0.375
+  model cavity, delta_p OFF    +0.0051     55.5%      +0.100
+  DFT cavity,   delta_p OFF    +0.2610     59.4%      +0.350
+NEUTRAL IONIC: all four skipped by the negligible-channel guard.
+
+WHAT IT SETTLES, against the user's three readings.
+- The 2.5%-of-prior correction is NOT cosmetic on the charged bound channel:
+  removing it costs 0.257 eV of coupling (-0.5468 -> -0.8033) and 10.9 points
+  of profile error, taking the coupling from 0.501x to 0.267x of reference.
+- NO compensation relationship is unmasked. With the correction removed the
+  DFT cavity is still WORSE than the model cavity on both frames: charged by
+  -0.0562 eV and 7.4 profile points, neutral by +0.2559 eV. So the earlier
+  negative for the rebuilt cavity was not an artefact of the mismatched
+  correction.
+- The charged frame therefore lands on the user's THIRD reading: with the
+  correction removed both cavities are clearly wrong (0.267x and 0.215x of
+  reference, profile 59.5% and 66.9%), so the next place to look is the
+  solute potential or the 1-D closure approximation.
+- The neutral frame lands on the FIRST reading, and only for the shape:
+  removing the correction improves the profile error 66.1% -> 55.5%, 10.6
+  points, while the gap improves only +0.0160 -> +0.0051 eV, which is a small
+  absolute change on an already small gap. So on the neutral frame the
+  learned correction is actively degrading the shape.
+- The ionic displacement is explained by NEITHER: it sits at 0.400-0.450 A in
+  all four cells and the correction changes its gap by 1e-4 eV. That is
+  stronger than the previous run's statement and points the same way.
+
+So the same correction acts in opposite directions on the two frames --
+rescuing 0.257 eV on charged, costing 10.6 profile points on neutral -- which
+is the same charged-against-neutral and shape-against-energy opposition that
+has recurred throughout this investigation.
+
+STILL LIMITED: this says a cavity rebuilt from the DFT density, with this
+recipe and on this grid, does not help. It does not say the cavity is
+correct. Both cavities still plateau at 0.9447 and the interpolation-smoothing
+caveat stands. And the DFT-cavity "best-by-coupling" shift reads +1.500 A in
+both delta_p states, exactly the edge of the +-1.5 A scan window: censored,
+not measured, and not to be quoted as a shift. The by-residual column is
+interior and valid.

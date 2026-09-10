@@ -42,6 +42,25 @@ If any gate fails the script says so and does not offer a reading.
 Then only the three intended quantities: the ionic layer displacement by the
 shift-scan metric, the bound charge profile error, and the ABSOLUTE
 cross-energy gap in eV.
+
+EXTENSION (user review of the first pass): the first pass kept the OLD learned
+correction while swapping the cavity -- p_off = new cavity's prior + old
+delta_p. delta_p was trained against the model's OWN cavity, so it may already
+be compensating for that cavity or for approximation error, and pairing it
+with a rebuilt cavity is a mismatched combination. The first pass therefore
+could not separate "the cavity is not the source" from "the old correction
+does not transfer", and the conclusion drawn from it was too strong.
+
+So the same two solves are repeated with delta_p = 0, giving a 2x2 of cavity
+source against correction on/off, on identical inputs and identical gates.
+The readings the user set out:
+  removing the correction improves things        -> the old learned correction
+                                                    is what to check first;
+  with it removed the rebuilt cavity wins        -> cavity and old correction
+                                                    are compensating;
+  both still clearly wrong                       -> look next at the solute
+                                                    potential or the 1-D
+                                                    closure approximation.
 """
 import math
 import os
@@ -258,6 +277,24 @@ for sid, dftdir, tag in FRAMES:
     rbB = -(outB["n_b"] / volume); riB = -(outB["n_ion"] / volume)
     exB = outB.get("solver_exit")
 
+    # ---- the same two solves with the learned correction removed --------
+    # p_off = prior + delta_p, so prior alone is the captured p_off minus the
+    # captured delta_p. Nothing else changes.
+    prior_A = kw["p_off"] - cap["delta_p"]
+    kwA0 = dict(kw); kwA0["p_off"] = prior_A
+    kwB0 = dict(kwB); kwB0["p_off"] = fourier_upsample(cloB["prior"], f)
+    with torch.no_grad():
+        outA0 = _sv(solver, **kwA0)
+        outB0 = _sv(solver, **kwB0)
+    rbA0 = -(outA0["n_b"] / volume); riA0 = -(outA0["n_ion"] / volume)
+    rbB0 = -(outB0["n_b"] / volume); riB0 = -(outB0["n_ion"] / volume)
+    exA0 = outA0.get("solver_exit"); exB0 = outB0.get("solver_exit")
+    dp = cap["delta_p"]
+    print(f"  learned correction removed in the two extra groups: delta_p rms "
+          f"{float(dp.pow(2).mean().sqrt()):.4e}, max |delta_p| "
+          f"{float(dp.abs().max()):.4e}, against prior rms "
+          f"{float(prior_A.pow(2).mean().sqrt()):.4e}", flush=True)
+
     # ---- GATES ---------------------------------------------------------
     gates = []
     d1b = float((res1d(rbA, cap["rho_bound_z"].shape[0])
@@ -284,13 +321,15 @@ for sid, dftdir, tag in FRAMES:
                   dez == 0.0,
                   f"max |d dphi/dz| {dez:.3e} eV/A; mean cvhar_z "
                   f"{float(kw['cvhar_z'].mean()):+.6f} both"))
-    okA = (exA or {}).get("fix_exit") == "tol" and (exA or {}).get("newton_exit") == "tol"
-    okB = (exB or {}).get("fix_exit") == "tol" and (exB or {}).get("newton_exit") == "tol"
-    gates.append(("G4 both solves exit on their criteria", okA and okB,
-                  f"A fixed-point {(exA or {}).get('fix_exit')} / Newton "
-                  f"{(exA or {}).get('newton_exit')}; B "
-                  f"{(exB or {}).get('fix_exit')} / "
-                  f"{(exB or {}).get('newton_exit')}"))
+    def _ok(e):
+        return ((e or {}).get("fix_exit") == "tol"
+                and (e or {}).get("newton_exit") == "tol")
+    gates.append(("G4 all four solves exit on their criteria",
+                  _ok(exA) and _ok(exB) and _ok(exA0) and _ok(exB0),
+                  "  ".join(f"{n} {(e or {}).get('fix_exit')}/"
+                            f"{(e or {}).get('newton_exit')}"
+                            for n, e in (("A", exA), ("B", exB),
+                                         ("A0", exA0), ("B0", exB0)))))
     print(f"\n  GATES")
     allok = True
     for name, ok, detail in gates:
@@ -314,20 +353,40 @@ for sid, dftdir, tag in FRAMES:
     del rb, ri
     phi_s = -(kw["cvhar_z"] - kw["cvhar_z"].mean())
     if allok:
-        for nm, dref, pa, pb in (("BOUND", rb_ref, rbA, rbB),
-                                 ("IONIC", ri_ref, riA, riB)):
-            print(f"\n  [{nm}] shift-scan metric, one fixed potential")
-            sa = shift_scan(dref, pa, phi_s, dz_s, area, lz, "model cavity")
-            sb = shift_scan(dref, pb, phi_s, dz_s, area, lz, "DFT cavity  ")
-            if sa and sb:
-                print(f"    -> displacement {sa['shift_r']:+.3f} A -> "
-                      f"{sb['shift_r']:+.3f} A (by residual), "
-                      f"{sa['shift_e']:+.3f} -> {sb['shift_e']:+.3f} "
-                      f"(by coupling)")
-                print(f"    -> profile error {100*sa['resid']:.1f}% -> "
-                      f"{100*sb['resid']:.1f}% of |DFT|")
-                print(f"    -> ABSOLUTE coupling gap {sa['gap']:+.4f} eV -> "
-                      f"{sb['gap']:+.4f} eV", flush=True)
+        for nm, dref, cells in (
+                ("BOUND", rb_ref, (("model cavity, delta_p ON ", rbA),
+                                   ("DFT cavity,   delta_p ON ", rbB),
+                                   ("model cavity, delta_p OFF", rbA0),
+                                   ("DFT cavity,   delta_p OFF", rbB0))),
+                ("IONIC", ri_ref, (("model cavity, delta_p ON ", riA),
+                                   ("DFT cavity,   delta_p ON ", riB),
+                                   ("model cavity, delta_p OFF", riA0),
+                                   ("DFT cavity,   delta_p OFF", riB0)))):
+            print(f"\n  [{nm}] shift-scan metric, one fixed potential, "
+                  f"2x2 of cavity source against learned correction")
+            res = {}
+            for lbl, prof in cells:
+                res[lbl] = shift_scan(dref, prof, phi_s, dz_s, area, lz, lbl)
+            if all(v for v in res.values()):
+                print(f"\n    {'cell':>26} {'gap (eV)':>10} {'profile':>9} "
+                      f"{'shift (A)':>10}")
+                for lbl, _ in cells:
+                    v = res[lbl]
+                    print(f"    {lbl:>26} {v['gap']:+10.4f} "
+                          f"{100*v['resid']:8.1f}% {v['shift_r']:+10.3f}")
+                on_m = res["model cavity, delta_p ON "]
+                on_d = res["DFT cavity,   delta_p ON "]
+                off_m = res["model cavity, delta_p OFF"]
+                off_d = res["DFT cavity,   delta_p OFF"]
+                print(f"    removing the correction: model cavity gap "
+                      f"{on_m['gap']:+.4f} -> {off_m['gap']:+.4f} eV, DFT "
+                      f"cavity {on_d['gap']:+.4f} -> {off_d['gap']:+.4f} eV")
+                print(f"    with it removed, DFT minus model cavity: gap "
+                      f"{off_d['gap']-off_m['gap']:+.4f} eV, profile "
+                      f"{100*(off_d['resid']-off_m['resid']):+.1f} points, "
+                      f"shift {off_d['shift_r']-off_m['shift_r']:+.3f} A",
+                      flush=True)
     del ne_dft, rb_ref, ri_ref, phi_s, rbA, riA, rbB, riB
+    del rbA0, riA0, rbB0, riB0, prior_A
     import gc; gc.collect(); torch.cuda.empty_cache()
 print("DONE")
