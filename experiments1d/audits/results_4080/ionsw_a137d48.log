@@ -1,0 +1,42 @@
+PROVENANCE mace=a137d48 pb=9b3b9ba sha256(ion_switch_resolve.py)=b5b39227d3f8e558c2ce706b49dca4a87fd991f7f5e1494942328c8202e9d9cb (IDENTICAL to committed a137d48)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  one full model call; solve grid nz_s 600
+  DFT s_ion: native cavity, plane-averaged, band-limited 500 -> 600 -- the same construction as job 3427096, fed in unchanged
+  NOTE: only s_ion is replaced. a1 and p_off stay at the model's own cavity values, so this is a controlled single-factor intervention and NOT a physically consistent solvent model.
+
+  [convention] l0_inv reconstruction of phi - phi_sol: max residual after removing the G=0 constant 6.916e-12 eV (constant -1.0202) -- small means the charge-to-potential operator and its sign are as used here
+
+  GATES
+   [PASS] baseline re-solve reproduces the model's own rho_ion: max abs 0.000e+00 e/A^3
+   [PASS] every other input identical (same tensor objects, q_sol +1.000000)
+   [PASS] both solves exit on their criteria: A tol/tol, B tol/tol
+
+[RESULT] ionic channel, one fixed scoring potential
+                                case   net (e)     cross  eV per e    shift   resid        L1
+                       DFT reference   +1.0000   -1.9385   -1.9385   -0.000    0.0%   0.00000
+    baseline, model s_ion, re-solved   +1.0000   -2.0802   -2.0802   +0.375    1.4%   0.18687
+              DFT s_ion, NO re-solve   +0.8863   -1.7399   -1.9630   +0.025    1.3%   0.11403
+                DFT s_ion, RE-SOLVED   +1.0000   -1.9555   -1.9555   -0.000    1.0%   0.01764
+
+  total charge restored by the re-solve: +0.8863 -> +1.0000 e (reference +1.0000)
+  does the improvement hold? displacement +0.375 -> -0.000 A (no-re-solve gave +0.025); eV per e -2.0802 -> -1.9555 (reference -1.9385); profile error 1.4% -> 1.0%
+  (improvement holding points at the ionic switch's generation path; the position drifting back is what would give direct
+   evidence for the self-consistent feedback and the boundary handling instead.)
+
+[WHOLE SYSTEM] bound + ionic together, one grid, one reference
+                      case   net (e)    chg L1   chg max     cross     self     total   d total
+             DFT reference   +1.0000   0.00000  0.00e+00   -3.0243  +1.5237   -1.5005   +0.0000
+     baseline, model s_ion   +1.0000   0.63739  2.38e-03   -2.6289  +1.4718   -1.1572   +0.3434
+      DFT s_ion, re-solved   +1.0000   0.63760  2.38e-03   -2.6272  +1.4700   -1.1572   +0.3433
+  mutual bound-ion term in the self-energy (why the sum must be used, not the two separate self-energies):
+               DFT reference -1.3112 eV
+       baseline, model s_ion -1.2824 eV
+        DFT s_ion, re-solved -1.4111 eV
+
+                      case  phi L1 (eV A)  phi max (eV)  phi rms (eV)
+     baseline, model s_ion         2.7322        0.2915       0.11093
+      DFT s_ion, re-solved         2.7548        0.2967       0.11286
+
+  arrays saved to ion_switch_resolve_arrays.npz (z, both charge channels and the total potential for all three cases, plus both ionic switches)
+DONE

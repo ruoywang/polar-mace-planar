@@ -294,3 +294,52 @@ channel alone, and the ionic lateral term appears on both sides at the same size
 Nothing was modified to get past this — NPTS was not lowered, nothing was
 chunked, the script was not touched. Completing the run needs a decision about
 how to launch it that is the user's to make, not something to work around.
+
+## Dispatched job: ion_switch_resolve (mace HEAD a137d48)
+
+`ionsw_a137d48.log`. Provenance in the log's first line: mace a137d48, pb
+9b3b9ba, executed file sha256
+b5b39227d3f8e558c2ce706b49dca4a87fd991f7f5e1494942328c8202e9d9cb, verified
+IDENTICAL to the commit. Ran to completion in about 15 seconds; no kill this
+time. Peak process RSS 1.9 GB, host MemAvailable never below 241.9 GB, peak GPU
+4445 MiB of 24564. `ion_switch_resolve_arrays.npz` written, 65660 bytes.
+
+All three gates PASS and the convention check reconstructs phi - phi_sol to
+6.916e-12 eV after removing the G=0 constant.
+
+**The ionic-channel improvement does not carry to the whole system.** The
+substitution improves the ionic channel by a factor of 10.6 in L1 and removes
+the displacement entirely, and the whole-system total energy gap changes by
+0.0001 eV out of 0.3434 — 0.03% of it. Charge L1 for the sum and all three
+potential-error measures move slightly the WRONG way.
+
+| ionic channel, fixed scoring potential | net (e) | cross | eV per e | shift | resid | L1 |
+|---|---|---|---|---|---|---|
+| DFT reference | +1.0000 | -1.9385 | -1.9385 | -0.000 | 0.0% | 0.00000 |
+| baseline, model s_ion, re-solved | +1.0000 | -2.0802 | -2.0802 | +0.375 | 1.4% | 0.18687 |
+| DFT s_ion, NO re-solve | +0.8863 | -1.7399 | -1.9630 | +0.025 | 1.3% | 0.11403 |
+| DFT s_ion, RE-SOLVED | +1.0000 | -1.9555 | -1.9555 | -0.000 | 1.0% | 0.01764 |
+
+| whole system, bound + ionic | net (e) | chg L1 | chg max | cross | self | total | d total |
+|---|---|---|---|---|---|---|---|
+| DFT reference | +1.0000 | 0.00000 | 0.00e+00 | -3.0243 | +1.5237 | -1.5005 | +0.0000 |
+| baseline, model s_ion | +1.0000 | 0.63739 | 2.38e-03 | -2.6289 | +1.4718 | -1.1572 | +0.3434 |
+| DFT s_ion, re-solved | +1.0000 | 0.63760 | 2.38e-03 | -2.6272 | +1.4700 | -1.1572 | +0.3433 |
+
+Mutual bound-ion term in the self-energy: reference -1.3112 eV, baseline
+-1.2824, substituted -1.4111. The baseline sits 0.0288 eV from the reference
+and the substituted case 0.0999 eV from it on the other side, so on this term
+the substitution is about 3.5x further out than the baseline was.
+
+Potential profile: baseline phi L1 2.7322 eV A, max 0.2915 eV, rms 0.11093;
+substituted 2.7548, 0.2967, 0.11286. All three worse, by 0.8% to 1.8%.
+
+A caution on reading the charge column, because this project has twice been
+caught by exactly this. The sum's L1 rose by 0.00021 e while the ionic
+channel's own L1 fell by 0.16923 e. It is tempting to conclude the bound
+channel degraded by about 0.169 e, and that does NOT follow: L1 of a sum is not
+the sum of L1s, so the bound channel's own change cannot be read off these two
+numbers. What is measured is that the ionic channel improved 10.6-fold in
+isolation and the sum did not improve at all. Separating the bound channel's
+self-consistent response from the ionic improvement needs the bound channel
+scored on its own, which this run does not do.
