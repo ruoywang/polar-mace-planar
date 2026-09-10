@@ -854,3 +854,82 @@ parameters.
    not to substitute a mean density into a switch formula was more far-reaching
    than I understood -- the map is not local at all, so no "plug in a density"
    reasoning was valid in either direction from the start.
+
+## STEP 2 RESULT: the cavity-substitution 2x2, all four cells
+LS6 gpu-a100-dev, jobs 3426779 (MACE_CAVSRC=model) and 3426780 (dft), code
+890eb3e, script sha256 6975b5347f6caaf1 verified IDENTICAL to the committed
+copy in both logs. 8m19s and similar; peak GPU 10.96 and 11.01 GiB, which
+confirms the memory arithmetic and that a 24 GB card was never the limit.
+Self-check 0.000e+00 both ways on both frames.
+
+Cross-machine check, free of charge: the model-envelope cells reproduce the
+workstation's incomplete run exactly (charged original coefficients cross
+-0.9350 / 0.4171x, self +0.6118 / 0.8959x, |q| 1.7805 / 0.7010x), and the
+refit cells reproduce the original joint_subspace_solve numbers exactly
+(charged A minself 3.153, rms 0.965, self 3.153, |q| 1.694; neutral A 0.155,
+0.286, 0.847, 1.096). The copy is faithful, so "the same joint objective"
+holds.
+
+CHARGED, reference lateral cross -2.2417, self +0.6829, |q| 2.5398 e
+  envelope      | original coefficients          | refit, basis A
+  model cavity  | cross 0.4171x self 0.8959x     | minself 3.153x INFEASIBLE
+                | |q| 0.7010x                    | rms 0.965 (cap 0.294) FAIL
+  DFT-rebuilt   | cross 1.0455x self 2.7520x     | minself 1.606x INFEASIBLE
+                | |q| 1.1533x                    | rms 1.127 (cap 0.248) FAIL
+
+NEUTRAL, reference lateral cross -0.4649, self +0.6601, |q| 2.1822 e
+  model cavity  | cross 1.6441x self 0.9183x     | minself 0.155x feasible
+                | |q| 0.7657x                    | rms 0.286 self 0.847 FAIL
+  DFT-rebuilt   | cross 5.2788x self 3.3379x     | minself 0.150x feasible
+                | |q| 1.3859x                    | rms 0.187 self 1.000 PASS
+
+READING, with the user's two advance rulings applied.
+Direct substitution, charged: the cross energy goes from 0.4171x to 1.0455x
+of the reference by swapping the envelope alone with the coefficients
+untouched -- from 42% to 105% of the attraction. But it does NOT come alone:
+self-energy goes 0.8959x -> 2.7520x and |q| 0.7010x -> 1.1533x. An
+energy-only reading would call this a fix; the four-quantity requirement is
+what shows it is not. The charge produced is nearly three times too
+self-interacting.
+Direct substitution, neutral: much WORSE, cross 1.6441x -> 5.2788x, self
+0.9183x -> 3.3379x. So direct substitution with the trained coefficients is
+not an improvement in general; it is a redistribution that happens to suit
+one frame.
+Refit, charged: the obstruction HALVES but survives -- the minimum attainable
+self-energy at cross = reference drops 3.153x -> 1.606x. Both cells FAIL. By
+the user's ruling this does not prove full-basis capacity is insufficient; it
+speaks for basis A and this 8-vector family.
+Refit, neutral: FAIL -> PASS on all four conditions with the same method and
+the same basis. By the user's ruling this may NOT be attributed to "just the
+loss function".
+
+WHAT IS NOT MARGINAL and what is. The neutral PASS/FAIL flip itself grazes
+thresholds I chose: the model-cavity cell fails the self condition by 0.003
+(0.847 against a 0.15 window) and the DFT-cavity cell passes with |q| 1.195
+against a 1.20 limit and rms 0.187 against a 0.195 cap. The flip should not
+be quoted as a large effect. What IS substantial and threshold-free: the
+neutral fit quality improves throughout -- plain rms 0.213 -> 0.130,
+constrained rms 0.286 -> 0.187 -- and the self-energy lands exactly at the
+reference. On the charged frame the plain fit also improves (0.196 -> 0.165)
+while the constrained fit worsens (0.965 -> 1.127), and the minself halving
+is the largest single change.
+
+A CAVEAT THAT MATTERS FOR THE PAUSED PLATEAU QUESTION. The DFT-rebuilt cavity
+has s_diel ceiling 0.9447, IDENTICAL to the model's, because it is built from
+the interpolated DFT density on the model grid. So the substitution changed
+the cavity's spatial structure, not the plateau level, and the large charged
+cross-energy change came from structure alone. On this evidence the plateau
+level is not what governs the charge fitting. Flagged once, not chased: the
+user has paused that line. Also note this says the ceiling on the model grid
+is grid-determined rather than density-determined, which is a datum for that
+question whenever it resumes.
+Standing caveats: the DFT density carried onto the coarser model grid is
+smoothed, so this is not the native-grid DFT cavity; basis A and an 8-vector
+family only; and the 1-D cavity substitution is NOT in this experiment -- it
+needs a re-solve and is to be compared separately, and it is not written.
+
+Defect in my own instrumentation: the host-RAM sampler reported rss_GB 0.0
+throughout because it read $$ inside the subshell, which is the subshell's
+own PID rather than the python process. The MemAvailable column is valid
+(238 GB flat); the process RSS column measured nothing, which is the one
+thing I added it for.
