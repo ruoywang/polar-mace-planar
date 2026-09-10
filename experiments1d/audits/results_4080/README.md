@@ -1372,3 +1372,100 @@ variation lives elsewhere.
 My falling-fraction trend (30.8%, 27.0%, 23.8%) survives as a WITHIN-NiN44
 statement only. The two NiN88 points do not extend it — they are on the other
 side of zero.
+
+## Dispatched: charging_reconcile, steps 1-4 (mace HEAD fda2b25)
+
+`charge_fda2b25.log`. mace fda2b25, pb 9b3b9ba, executed file sha256
+9d5e94f1504ed8174503656d442239d4722b50439521c866ff34e90787057774, IDENTICAL to
+the commit. The guard worked: the census ran first, reported 0 of 20 complete val
+pairs with the neutral side missing for all twenty, and SKIPPED step 5 rather
+than crashing. Steps 1-4 are self-contained and complete.
+
+### STEP 4 is decisive, and the prediction held
+
+  readout block 0: features (207, 576), max |diff| 5.551e-17, relative 1.854e-16
+  readout block 1: features (207, 576), max |diff| 6.939e-17, relative 3.883e-16
+  d(inter_e) across the pair: +0.000000 eV
+
+The readout inputs are IDENTICAL at machine precision, so the energy head
+contributes the same amount to both states and **cancels exactly in Delta E**.
+Retraining that head cannot move the paired charging energy at all, whatever the
+target — the A/B refit is invalid as a route to this error.
+
+This is the predicted outcome and it answers the question the prediction
+sharpened: charge does NOT enter the descriptor. The two frames share geometry
+and species (max |dpos| 0.000e+00, max |dcell| 0.000e+00, species identical), so
+a positions-and-species descriptor gives identical features by construction, and
+that is what is measured.
+
+### STEP 1: the pair, and what the label is
+
+sid 1: label -1310.37680269 = OUTCAR sigma->0, NELECT 661.0000, E-fermi -3.8745 eV, q -1.00
+sid 601: label -1304.27622534 = OUTCAR sigma->0, NELECT 660.0000, E-fermi -7.3736 eV, q +0.00
+NELECT differs by exactly 1, so this is an electron-ADDITION energy, and the
+label carries no reservoir term: canonical, not grand canonical.
+
+| | charged | neutral | difference |
+|---|---|---|---|
+| model | -1306.062262 | -1305.596780 | **-0.465482** |
+| DFT | -1310.376803 | -1304.276225 | **-6.100577** |
+
+eps per frame +4.314540 and -1.320555 eV; eps_Delta **+5.635095 eV**, agreeing
+with the +5.6350 implied by the six-frame table to 0.0001 eV.
+
+**The model captures 7.6% of the DFT charging energy for this pair** — -0.465
+against -6.101 eV, a factor of 13.
+
+### STEP 2: the ten terms, closure PASS at 4.320e-12 eV
+
+| term | neutral | charged | difference |
+|---|---|---|---|
+| e0 (atomic, per-species) | -1307.266162 | -1307.266162 | +0.000000 |
+| energy head (inter_e) | +22.036824 | +22.036824 | +0.000000 |
+| electron energy (optional) | +0.000000 | +0.000000 | +0.000000 **(not enabled: exact zero)** |
+| solute electrostatic | -23.516097 | -20.622711 | **+2.893386** |
+| 1D solvent compensation | +0.116124 | -1.553844 | **-1.669968** |
+| slab dipole correction | -0.016796 | -2.626087 | **-2.609291** |
+| external field . dipole | +0.000000 | +0.000000 | +0.000000 **(not enabled: exact zero)** |
+| cavity energy | +3.846217 | +3.895945 | +0.049728 |
+| 3D solvent energy | -0.158241 | -0.323177 | -0.164936 |
+| baseline coupling E_bl | -0.638649 | +0.396949 | **+1.035598** |
+| SUM of the ten | -1305.596780 | -1306.062262 | -0.465482 |
+
+Quoting the tags rather than the bare zeros, as asked: the electron energy and
+the external field . dipole are zero **because they are not enabled**, not
+because they cancel. e0 and the energy head are zero **because they cancel
+exactly** — e0 as a per-species constant with identical species, inter_e by the
+identical features of step 4. Four exact zeros, two different reasons.
+
+So **the entire model Delta E of -0.465 eV comes from the six live
+solvent/electrostatic terms**, and the +5.635 eV error must live there too,
+since the other four cannot contribute to a difference at all.
+
+**A caution on reading which term is responsible.** The six live terms sum to
+-0.465 eV but their absolute values sum to 8.423 eV — an **18.1-fold
+cancellation**. So no term can be blamed by its size, and the missing 5.635 eV is
+about twice the largest single live term (solute electrostatic at 2.893). This is
+the same non-additivity that has caught this project repeatedly; the table
+locates the error in a group of six, not in one of them.
+
+### STEP 3: the DFT side, and two candidate correspondences
+
+Reported as candidates only, neither folded into any total:
+
+- **A_cav against the model's cavity energy**, the peer's candidate:
+  dA_cav -0.006904 against d(cavity) +0.049728, difference +0.056632. Small, but
+  **opposite in sign**.
+- **A_corr against the model's slab dipole correction**, mine, and it is the
+  closer of the two: dA_corr -2.636389 against d(slab dipole) -2.609291, agreeing
+  to **1.03%**. If that correspondence is real, that term is essentially right
+  and is not where the 5.635 eV sits. I am flagging it as a candidate for exactly
+  the reason the peer flagged A_cav — two dipole-correction-like quantities
+  agreeing to 1% is suggestive and is not an identification.
+
+One internal relation the table confirms: dA_corr -2.636389 equals
+dEcorr + dEcorr_band = +105.571730 - 108.208118 = -2.636388, to 1e-6. Those two
+are ~100 eV terms cancelling 40-fold, which is worth knowing before anyone quotes
+either alone.
+
+Also: `Dele_z` moves +3.653562 to -6.162598, a change of -9.816160.

@@ -1,0 +1,67 @@
+PROVENANCE mace=fda2b25 pb=9b3b9ba sha256(charging_reconcile.py)=9d5e94f1504ed8174503656d442239d4722b50439521c866ff34e90787057774 (IDENTICAL to committed fda2b25)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  DFT availability census: step 1 pair (1/601) present; complete val pairs 0 of 20
+    incomplete pairs: 20 -- missing charged side for none, missing neutral side for [28, 30, 43, 60, 61, 62, 69, 79, 83, 94, 128, 134, 148, 153, 159, 177, 180, 185, 186, 189]
+    -> STEP 5 WILL BE SKIPPED on this machine, and skipped is not 'done with fewer pairs': 0 complete pairs means the table cannot be formed at all. Steps 1-4 still run and are self-contained.
+=================== STEP 1: the sid1/sid601 pair ===================
+   geometry max |dpos| 0.000e+00 A, cell max |dcell| 0.000e+00 A, species identical True, splits train/train
+
+   LABEL DEFINITION, identified against the OUTCAR rather than assumed:
+     sid   1: label -1310.37680269 == OUTCAR ['sigma0']; TOTEN -1310.39247858, no-entropy -1310.34545092, sigma->0 -1310.37680269
+              NELECT 661.0000, E-fermi -3.8745 eV, total_charge -1.00
+     sid 601: label -1304.27622534 == OUTCAR ['sigma0']; TOTEN -1304.26175536, no-entropy -1304.30516530, sigma->0 -1304.27622534
+              NELECT 660.0000, E-fermi -7.3736 eV, total_charge +0.00
+     -> NELECT differs by +1.0000, so this is an electron-ADDITION energy, and the label is a plain VASP energy with NO reservoir term: canonical, not grand canonical.
+
+   RAW TOTALS AND THE DIFFERENCE
+                   charged (sid 1)  neutral (sid 601)     difference
+          model       -1306.062262       -1305.596780      -0.465482
+            DFT       -1310.376803       -1304.276225      -6.100577
+     eps per frame: charged +4.314540, neutral -1.320555 eV
+     eps_Delta = +5.635095 eV   (the earlier table implied +5.6350 from 20.843 and -6.379 meV/atom x 207; agreement 0.0001 eV)
+
+=================== STEP 2: every model term ===================
+                             term        neutral        charged     difference
+         e0 (atomic, per-species)   -1307.266162   -1307.266162      +0.000000
+            energy head (inter_e)     +22.036824     +22.036824      +0.000000
+       electron energy (optional)      +0.000000      +0.000000      +0.000000   (not enabled: exact zero)
+             solute electrostatic     -23.516097     -20.622711      +2.893386
+          1D solvent compensation      +0.116124      -1.553844      -1.669968
+           slab dipole correction      -0.016796      -2.626087      -2.609291
+          external field . dipole      +0.000000      +0.000000      +0.000000   (not enabled: exact zero)
+                    cavity energy      +3.846217      +3.895945      +0.049728
+                3D solvent energy      -0.158241      -0.323177      -0.164936
+           baseline coupling E_bl      -0.638649      +0.396949      +1.035598
+                   SUM of the ten   -1305.596780   -1306.062262      -0.465482
+                      model total   -1305.596780   -1306.062262      -0.465482
+   [PASS] closure: the ten terms sum to the model's own total, worst |diff| 4.320e-12 eV -- so the decomposition is complete and nothing is hidden in a remainder
+
+=================== STEP 3: the DFT side, by its own formula ===================
+         printed quantity        neutral        charged     difference
+         energy(sigma->0)   -1304.276225   -1310.376803      -6.100577
+        free energy TOTEN   -1304.261755   -1310.392479      -6.130723
+       energy w/o entropy   -1304.305165   -1310.345451      -6.040286
+                    A_cav      +3.904412      +3.897509      -0.006904
+                   A_corr      +2.891801      +0.255412      -2.636389
+                    Ecorr   +1257.892610   +1363.464339    +105.571730
+               Ecorr_band   -1255.000809   -1363.208927    -108.208118
+          Dele_z (dipole)      +3.653562      -6.162598      -9.816160
+                  E-fermi      -7.373600      -3.874500      +3.499100
+                   NELECT    +660.000000    +661.000000      +1.000000
+
+   NOT DONE HERE, deliberately: the DFT solvent free energy is not equated with the model's cross+self, and the energy head is not equated with any DFT electronic term. The one correspondence that is
+   defensible on its face is A_cav against the model's cavity energy, reported as a CANDIDATE and not folded into any total:
+     dA_cav -0.006904 eV against d(cavity energy) +0.049728 eV, difference +0.056632
+   Everything else on the DFT side stays in ONE named remainder: 'DFT terms whose additive role and model counterpart are both unverified'. Its size is not quotable as an error.
+
+=================== STEP 4: can the energy head move Delta E? ===================
+   readout block   0: features (207, 576), max |diff| 5.551e-17, relative 1.854e-16
+   readout block   1: features (207, 576), max |diff| 6.939e-17, relative 3.883e-16
+   d(inter_e) across the pair: +0.000000 eV
+   VERDICT: the readout inputs are IDENTICAL between the two states, so the energy head contributes the same amount to both and CANCELS EXACTLY in Delta E. Retraining that head alone therefore
+   cannot change the paired charging energy at all, whatever the target -- which invalidates the A/B refit as a route to this error and is why this check came first.
+
+=================== STEP 5: the validation pairs ===================
+   SKIPPED: 0 of 20 val pairs are complete on this machine. Not a reduced table -- no table. The step-1 pair is the only complete one here and it is already reported above.
+
+DONE (steps 1-4 only)
