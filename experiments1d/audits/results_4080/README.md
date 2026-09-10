@@ -1204,3 +1204,89 @@ on their own: 0.12710 eV rms in `cvhar` and +0.57862 e A in the dipole. Unlike
 `a1`/`p_off`, these are two separate inputs and not two halves of one identity,
 so a one-at-a-time swap IS a controlled intervention here and would separate
 them. Not run, not requested.
+
+## Dispatched: lateral_bound_swap, KIT_FRAMES=n44 (mace HEAD c8560dd)
+
+`latswap_c8560dd.log`. mace c8560dd, pb 9b3b9ba, executed file sha256
+e861ef4730e84cb1a19e90e4f936578b38747824d9a6b1de6b0dc71139148659, IDENTICAL to
+the commit. Peak RSS 2.33 GB, MemAvailable never below 242.2 GB, peak GPU
+4811 MiB — no kill, despite four 250 MB ASCII field reads.
+
+**SUBSET RUN: 4 of the 6 frames the user named.** The three NiN44 charged frames
+(q = -0.80, -1.00, -1.32) and the neutral one. Absent: the two NiN88 frames, so
+this table has **no cell-size variation**. LS6 runs all six as job 3427615; this
+is the independent cross-machine reproduction of the four.
+
+### All three gates PASS
+
+- the model's own 3-D term reproduced through the Coulomb function: worst
+  `|(cross+self) - solvent3d_energy_g|` **3.331e-16 eV**, so dE really is a
+  one-term change
+- the substituted lateral charge has zero plane means: worst
+  `max |plane mean|` 8.743e-19 e/A^3
+- the 1-D/3-D cross term stays zero after the swap: worst
+  `|int rho_1d*phi[delta_new]|` 9.711e-13 eV, so `comp` and `E_bl` are genuinely
+  unaffected
+
+### TRUNCATION DOES NOT MATTER HERE — the numbers are values, not lower bounds
+
+Power above the model grid's lateral Nyquist is **0.0%** on all four frames, and
+the cross energy computed on the model grid equals the one on the native grid to
+a ratio of **1.000** in every case (-2.3991, -2.1808, -2.3886, -0.4309). The
+condition set in advance was "if the two cross energies agree, truncation does
+not matter for the energy". They agree. So the improvements below are the actual
+values and **not** lower bounds. Stating that here rather than after the table,
+as instructed.
+
+### The result: final total energy error, meV/atom
+
+| frame | atoms | original | substituted | improvement | fraction recovered |
+|---|---|---|---|---|---|
+| NiN44 q=-0.80 | 207 | +12.987 | +8.991 | -3.996 | 30.8% |
+| NiN44 q=-1.00 | 207 | +20.843 | +15.209 | -5.634 | 27.0% |
+| NiN44 q=-1.32 | 207 | +27.309 | +20.817 | -6.492 | 23.8% |
+| neutral | 207 | -6.379 | -4.499 | +1.881 | 29.5% |
+| charged mean \|err\| | | 20.380 | 15.006 | -5.374 | **26.4%** |
+
+By the user's branches this is the **partial** case, so the instruction is to
+record exactly how much is recovered and how much is left: **26.4% of the charged
+error is recovered, 73.6% remains — 15.006 meV/atom of an original
+20.380 meV/atom.** A perfect lateral bound charge, injected with the 1-D channel,
+the ionic charge, the net charge, the z-profile and the z-dipole all held fixed,
+removes about a quarter of the total-energy error.
+
+The neutral frame, where the ionic channel is identically zero and so isolates
+the bound lateral effect, recovers 29.5% — consistent with the charged frames
+rather than different from them.
+
+The model's lateral charge does point the right way on every frame:
+correlation with the DFT lateral charge +0.8733, +0.8632, +0.8337, +0.8396. That
+is also the sign check, and it passes.
+
+### Two trends the table shows that the summary rows do not
+
+**The fraction recovered falls as the cell gets more charged:** 30.8%, 27.0%,
+23.8% for q = -0.80, -1.00, -1.32. So the more charged the frame, the less of its
+error a perfect lateral bound charge explains.
+
+**The residual keeps the charge dependence.** After substitution the error is
+still monotone in |q| — +8.991, +15.209, +20.817 meV/atom — and it grows slightly
+faster with charge than the original did (factor 2.32 across the sweep against
+2.10). So fixing the lateral bound charge perfectly does not remove the
+charge-driven part of the total-energy error; whatever carries the remaining
+three quarters is also charge-driven.
+
+### Supporting energies (eV)
+
+| frame | E_3d old | E_3d new | cross old | cross new | self old | self new | mutual old | mutual new |
+|---|---|---|---|---|---|---|---|---|
+| NiN44 q=-0.80 | -0.5297 | -1.3569 | -1.4686 | -2.3954 | +0.9388 | +1.0385 | -0.0088 | -0.0111 |
+| NiN44 q=-1.00 | -0.3232 | -1.4894 | -0.9350 | -2.1792 | +0.6118 | +0.6898 | -0.0016 | -0.0129 |
+| NiN44 q=-1.32 | -0.3448 | -1.6886 | -0.9654 | -2.3848 | +0.6206 | +0.6962 | -0.0077 | -0.0231 |
+| neutral | -0.1582 | +0.2311 | -0.7644 | -0.4309 | +0.6061 | +0.6619 | +0.0000 | +0.0000 |
+
+### Framing, as the user set it
+
+This does NOT show the network can learn the reference charge. It settles whether
+the line is worth the work, and the answer it gives is a quarter of the error on
+the charged frames with the charge dependence of the remainder intact.

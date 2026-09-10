@@ -1,0 +1,42 @@
+PROVENANCE mace=c8560dd pb=9b3b9ba sha256(lateral_bound_swap.py)=e861ef4730e84cb1a19e90e4f936578b38747824d9a6b1de6b0dc71139148659 (IDENTICAL to committed c8560dd); KIT_FRAMES=n44
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  KIT_FRAMES=n44: 4 of 6 frames -- NiN44 q=-0.80, NiN44 q=-1.00, NiN44 q=-1.32, neutral
+  SUBSET RUN -- the table below covers 4 frames, not the six the user named. Report it as a subset and say which variation is absent (n44 has no cell-size variation).
+     NiN44 q=-0.80: err   +12.987 ->    +8.991 meV/atom (dE -0.8272 eV over 207 atoms), truncated power 0.0%, corr(model, DFT lateral) +0.8733
+     NiN44 q=-1.00: err   +20.843 ->   +15.209 meV/atom (dE -1.1662 eV over 207 atoms), truncated power 0.0%, corr(model, DFT lateral) +0.8632
+     NiN44 q=-1.32: err   +27.309 ->   +20.817 meV/atom (dE -1.3438 eV over 207 atoms), truncated power 0.0%, corr(model, DFT lateral) +0.8337
+           neutral: err    -6.379 ->    -4.499 meV/atom (dE +0.3893 eV over 207 atoms), truncated power 0.0%, corr(model, DFT lateral) +0.8396
+
+[GATES]
+   [PASS] the model's own 3-D term is reproduced through THE Coulomb function: worst |(cross+self) - solvent3d_energy_g| 3.331e-16 eV -- so dE really is a one-term change
+   [PASS] the substituted lateral charge has zero plane means: worst max |plane mean| 8.743e-19 e/A^3 -- net charge, 1-D profile and z-dipole are untouched by construction
+   [PASS] the 1-D/3-D cross term stays zero after the swap: worst |int rho_1d*phi[delta_new]| 9.711e-13 eV -- so comp and E_bl are genuinely unaffected
+
+[RESULT] the only table: final total energy error, meV/atom
+             frame  atoms   original  substituted  improvement
+     NiN44 q=-0.80    207    +12.987       +8.991       -3.996
+     NiN44 q=-1.00    207    +20.843      +15.209       -5.634
+     NiN44 q=-1.32    207    +27.309      +20.817       -6.492
+           neutral    207     -6.379       -4.499       +1.881
+  charged mean |err|            20.380       15.006       -5.374
+
+[SUPPORTING] the energy pieces that produced it (eV)
+             frame  E_3d old  E_3d new  cross old  cross new  self old  self new  mutual old  mutual new
+     NiN44 q=-0.80   -0.5297   -1.3569    -1.4686    -2.3954   +0.9388   +1.0385     -0.0088     -0.0111
+     NiN44 q=-1.00   -0.3232   -1.4894    -0.9350    -2.1792   +0.6118   +0.6898     -0.0016     -0.0129
+     NiN44 q=-1.32   -0.3448   -1.6886    -0.9654    -2.3848   +0.6206   +0.6962     -0.0077     -0.0231
+           neutral   -0.1582   +0.2311    -0.7644    -0.4309   +0.6061   +0.6619     +0.0000     +0.0000
+
+[TRUNCATION] what the model's energy grid cannot carry, and whether it matters to the energy
+             frame      native grid     model grid  power above  cross model  cross native   ratio
+     NiN44 q=-0.80  (168, 168, 500) (100, 100, 300)         0.0%      -2.3991       -2.3991   1.000
+     NiN44 q=-1.00  (168, 168, 500) (100, 100, 300)         0.0%      -2.1808       -2.1808   1.000
+     NiN44 q=-1.32  (168, 168, 500) (100, 100, 300)         0.0%      -2.3886       -2.3886   1.000
+           neutral  (168, 168, 500) (100, 100, 300)         0.0%      -0.4309       -0.4309   1.000
+  If the two cross energies agree the truncation does not matter for the energy. If they do not, the improvement above is a LOWER BOUND on what a perfect lateral fix would give, and that is how it must be
+  reported -- the substitution can only inject what the model's grid can represent.
+
+  This does NOT show the network can learn the reference charge. It settles whether the line is worth the work.
+
+  summary saved to lateral_bound_swap.npz
+DONE
