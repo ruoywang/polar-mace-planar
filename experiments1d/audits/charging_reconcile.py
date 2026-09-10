@@ -67,8 +67,16 @@ from mace.tools import torch_geometric, torch_tools, utils
 DFT = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single")
 CKDIR = os.environ.get("KIT_CKPT_DIR", "checkpoints")
 DATADIR = os.environ.get("KIT_DATA_DIR", "data")
+# The user's main table is the 20 pairs that sit wholly inside val. KIT_PAIRS
+# overrides the list so a machine holding a different slice of the DFT payload
+# can still test the electron-energy hypothesis on the pairs it has -- but the
+# output states which SPLIT each pair belongs to, because a table built on
+# train pairs is evidence about a structural absence and is NOT the user's
+# validation table, and the two must not be confused in a report.
 PAIRS_VAL = [28, 30, 43, 60, 61, 62, 69, 79, 83, 94,
              128, 134, 148, 153, 159, 177, 180, 185, 186, 189]
+if os.environ.get("KIT_PAIRS"):
+    PAIRS_VAL = [int(x) for x in os.environ["KIT_PAIRS"].split(",") if x.strip()]
 
 
 def dftdir(sid):
@@ -370,6 +378,19 @@ if len(PAIRS_VAL) < len(_pairs_all):
 # with dN spread over 0.8 to 1.3 can, because a varying dN makes the relation
 # a one-parameter prediction rather than a single number. The columns below
 # test it and the residual RMSE says how much it explains.
+_sp = {}
+for k in PAIRS_VAL:
+    _sp[k] = (split_by_sid.get(k, "?"), split_by_sid.get(600 + k, "?"))
+_allval = all(v == ("val", "val") for v in _sp.values())
+print(f"   pair set: {PAIRS_VAL}")
+print(f"   splits:   " + ", ".join(f"{k}:{a}/{b}" for k, (a, b) in _sp.items()))
+if _allval:
+    print(f"   -> these are the user's 20 validation pairs.")
+else:
+    print(f"   -> NOT the user's validation table: some or all of these pairs "
+          f"are TRAINING pairs. Evidence about a structural absence still "
+          f"counts here, but this table must not be reported as the "
+          f"validation result.")
 print(f"   {'pair':>6} {'q':>7} {'dN':>6} {'DFT dE':>11} {'model dE':>11} "
       f"{'eps_D':>10} {'mu_bar.dN':>11} {'residual':>10}")
 rows = []
