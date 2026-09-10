@@ -1332,6 +1332,14 @@ it was one sign flip away from exposing the fault. Its signed change happened to
 be positive (-6.379 -> -4.499), so the label and the truth agreed by luck. All
 four of my rows agreed with the label; none of them tested it.
 
+Sharper still, and it makes my half larger than "a missed flag": the
+contradiction was visible in my own pushed table. The three NiN44 rows print
+gains as NEGATIVE numbers (-3.996, -5.634, -6.492) and the neutral row prints its
+gain as POSITIVE (+1.881), in the same column labelled "improvement". A column in
+which both signs mean "better" is self-contradicting on its face, and it was on
+the page I wrote. Computing the neutral fraction against |err| is what sidestepped
+the bug, and sidestepping it is what let me not look at the column beside it.
+
 ### The mechanism, and what it does and does not rest on
 
 dE per atom is negative on every charged frame: -3.996, -5.634, -6.492, -6.102,
