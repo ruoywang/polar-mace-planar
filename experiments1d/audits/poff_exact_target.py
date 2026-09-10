@@ -382,7 +382,9 @@ def resolve(poff, lbl):
     with torch.no_grad():
         o = solver.solve(**kw2)
     rb = -(o["n_b"] / volume); rio = -(o["n_ion"] / volume)
-    return dict(lbl=lbl, rb=rb, ri=rio, phi=-o["phi"], exit=o.get("solver_exit"))
+    return dict(lbl=lbl, rb=rb, ri=rio, phi=-o["phi"],
+                phi_sol=o["phi_sol"].detach().clone(),
+                exit=o.get("solver_exit"))
 
 
 base = resolve(p_off_m, "baseline, model p_off")
@@ -498,85 +500,95 @@ for nm, kk in (("cross gap", "cross"), ("self gap", "self"),
 # ======================================================================
 # WHY THE POTENTIAL WORSENS IN EVERY BAND WHILE THE CHARGE IMPROVES IN MOST
 #
-# Neither branch the band table was built to distinguish fits: the charge
-# improves in four of five bands INCLUDING the lowest, and the potential
-# worsens in all five. So this is not the 1/k^2 weighting trade, and something
-# else has to account for it.
+# The first attempt at this assumed phi_sol was an untouched solute-side
+# quantity, so that the potential error split into a fixed bracket plus
+# l0_inv(solvent charge error). Its own gate REFUTED that: the bracket came
+# out differing between the two cases by 1.972e-01 eV, half its own
+# magnitude, at both signs. The premise was false and the reason is now
+# identified in the code rather than guessed:
 #
-# The workstation's candidate, and it is decidable from what is already here.
-# The model's total potential is
+#   phi_sol = cvhar_z + cvdip           (pb1d_solver.py, both solve paths)
+#   cvdip   = cdipol_potential_1d(nz, lz, ef_z, indmin)
+#   ef_z    = c_unit * d_mix            <- the SOLVENT CHARGE's own dipole
 #
-#   phi = phi_sol_model + l0_inv(solvent charge + q_sol)
+# and cdipol_potential_1d returns (-e_comp*lz/nz) * ii * cutoff, a LINEAR RAMP
+# in the signed distance from the cell centre, tapered near the edge. So
+# cvhar_z is indeed fixed, but phi_sol is not: p_off changes the solvent
+# charge, which changes its dipole, which drives a ramp into phi_sol. That is
+# the dipole-feedback path, and it is the self-consistent coupling.
 #
-# so the error against the DFT total potential splits exactly into a part this
-# intervention MOVES and a part it cannot touch:
+# It also explains the pattern that fit neither branch. A ramp is the
+# longest-wavelength component of the potential -- which is where the largest
+# degradation appeared, the 45 A amplitude at +154.2% -- and a TAPERED ramp is
+# not a single Fourier mode, so it puts weight in every band at once. Hence
+# the potential worsening in all five bands while the charge improved in four.
 #
-#   phi - phi_DFT = [phi_sol_model - phi_sol_DFT + l0_inv(q_sol difference)]
-#                   + l0_inv(solvent charge error)
-#                     ^ the only term P_off* changes
+# So the decomposition is redone as an exact identity that can be gated:
 #
-# The bracket is FIXED across the two cases. If the solvent-charge term had
-# been partly cancelling it, reducing the solvent charge error removes the
-# cancellation and worsens the potential everywhere at once -- exactly the
-# observed pattern, and a compensation between the solvent and solute channels
-# rather than between charge and potential at different k. That is plausible
-# on its own terms because the model was TRAINED against the total potential,
-# so training had every reason to tune the solvent response to absorb a
-# solute-side error.
+#   phi_star - phi_base = (cvdip_star - cvdip_base)      <- dipole feedback
+#                       + l0_inv(charge_star - charge_base)  <- direct
+#                       + a constant                      <- the dropped G=0
 #
-# The decisive consequence, if it holds: |bracket| is a FLOOR on the potential
-# error that no improvement of the solvent charge can go below, and the
-# baseline's apparent accuracy would then depend on an error cancellation
-# rather than on being right.
-#
-# Two things make this a measurement rather than a story. The bracket must
-# come out IDENTICAL for both cases, since the solute side is untouched -- that
-# is a machine-precision gate on the whole decomposition. And the sign of
-# l0_inv is fixed by that same gate rather than assumed, since the wrong sign
-# makes the bracket case-dependent.
+# Nothing here uses a correlation as a discriminator. The previous version did,
+# and the workstation showed it was worthless: with bracket 0.15884, solvent
+# 0.07288 and total 0.11093, corr is forced to -0.788 by those three numbers
+# alone, since a total smaller than one of its parts REQUIRES a negative
+# correlation. The discriminator has to be something the magnitudes do not
+# already fix. Here it is the split of a measured change into two terms whose
+# sum is checked against it.
 # ======================================================================
 rt_b = base["rb"] + base["ri"]
 rt_s = star["rb"] + star["ri"]
 pe_b, pe_s = base["phi"] - phi_ref_, star["phi"] - phi_ref_
-best_s, best_e = None, None
-for sg in (+1.0, -1.0):
-    fb = pe_b - sg * phi_of(rt_b - rt_ref_)
-    fs = pe_s - sg * phi_of(rt_s - rt_ref_)
-    e = float((fb - fs).abs().max())
-    print(f"  [convention] l0_inv sign {sg:+.0f}: the fixed bracket differs "
-          f"between the two cases by max abs {e:.3e} eV")
-    if best_e is None or e < best_e:
-        best_s, best_e = sg, e
-fix_b = pe_b - best_s * phi_of(rt_b - rt_ref_)
-fix_s = pe_s - best_s * phi_of(rt_s - rt_ref_)
-sol_b = best_s * phi_of(rt_b - rt_ref_)
-sol_s = best_s * phi_of(rt_s - rt_ref_)
-gF = best_e / max(float(fix_b.abs().max()), 1e-30)
-print(f"\n[SOLVENT VERSUS SOLUTE COMPENSATION IN THE POTENTIAL]")
-print(f"   [{'PASS' if gF < 1e-9 else 'FAIL'}] the untouched bracket is "
-      f"identical for both cases at sign {best_s:+.0f}: max abs difference "
-      f"{best_e:.3e} eV, {gF:.2e} of its own max -- so the split is exact and "
-      f"the sign is measured, not assumed")
-print(f"   {'quantity':>40} {'rms (eV)':>10}")
-print(f"   {'fixed bracket (solute side, untouched)':>40} "
-      f"{float(fix_b.pow(2).mean().sqrt()):10.5f}")
-for lbl, sv, pv in (("baseline", sol_b, pe_b), ("P_off*", sol_s, pe_s)):
-    print(f"   {f'{lbl}: solvent-charge term':>40} "
-          f"{float(sv.pow(2).mean().sqrt()):10.5f}")
-    print(f"   {f'{lbl}: TOTAL potential error':>40} "
-          f"{float(pv.pow(2).mean().sqrt()):10.5f}   "
-          f"correlation(solvent term, bracket) {corr(sv, fix_b):+.4f}")
-fl = float(fix_b.pow(2).mean().sqrt())
-print(f"\n   READING. A NEGATIVE correlation means the solvent term was "
-      f"cancelling the fixed bracket, and then reducing the solvent charge "
-      f"error necessarily worsens the potential -- the degradation would be "
-      f"the\n   removal of a compensation, not damage done by P_off*. In that "
-      f"case {fl:.5f} eV is a FLOOR on the potential error that no solvent-side "
-      f"improvement can beat, the baseline's {float(pe_b.pow(2).mean().sqrt()):.5f} "
-      f"eV\n   sits below its own floor only by cancellation, and the thing to "
-      f"fix is the solute side -- phi_sol and the q_sol/G0 bookkeeping -- not "
-      f"the compensation. A correlation near zero or positive refutes this and "
-      f"puts\n   the degradation back on the intervention.", flush=True)
+cvd_b = base["phi_sol"] - kw["cvhar_z"]
+cvd_s = star["phi_sol"] - kw["cvhar_z"]
+# physical convention: the saved phi is -out["phi"], so both terms flip
+d_fb = -(cvd_s - cvd_b)
+d_dir = phi_of(rt_s - rt_b)
+d_meas = star["phi"] - base["phi"]
+resid_id = d_meas - d_fb - d_dir
+resid_id = resid_id - resid_id.mean()
+gI = float(resid_id.abs().max()) / max(float(d_meas.abs().max()), 1e-30)
+print(f"\n[WHY THE POTENTIAL WORSENED -- the dipole-feedback path]")
+print(f"   [{'PASS' if gI < 1e-6 else 'FAIL'}] the measured change in the "
+      f"total potential equals the dipole-feedback change plus the direct "
+      f"charge term, up to the dropped G=0 constant: max abs residual "
+      f"{float(resid_id.abs().max()):.3e} eV, {gI:.2e} of the change itself")
+if gI >= 1e-6:
+    print(f"       the identity does NOT close, so the two terms below are "
+          f"not a complete account and must not be read as one.")
+print(f"   {'term':>44} {'rms (eV)':>10} {'45 A amp':>10}")
+
+
+def m1(x):
+    sp_ = torch.fft.rfft(x) / nz_s
+    return float(2.0 * torch.sqrt(sp_[1].real ** 2 + sp_[1].imag ** 2))
+
+
+for lbl, v in (("total change in the potential", d_meas),
+               ("  from dipole feedback (cvdip ramp)", d_fb),
+               ("  from the charge directly (l0_inv)", d_dir)):
+    print(f"   {lbl:>44} {float(v.pow(2).mean().sqrt()):10.5f} {m1(v):10.5f}")
+print(f"\n   THE DRIVER of that feedback is the solvent charge's DIPOLE, so "
+      f"the question is whether P_off* improves the profile while degrading "
+      f"the dipole:")
+print(f"   {'case':>44} {'dipole (e A)':>13} {'error':>10}")
+d_ref = float((rt_ref_ * (torch.arange(nz_s, dtype=torch.float64,
+                                       device=device) * dz)).sum() * dz * area)
+for lbl, v in (("DFT reference", rt_ref_), ("baseline", rt_b),
+               ("exact P_off*", rt_s)):
+    dv = float((v * (torch.arange(nz_s, dtype=torch.float64, device=device)
+                     * dz)).sum() * dz * area)
+    print(f"   {lbl:>44} {dv:13.5f} {dv-d_ref:+10.5f}")
+print(f"\n   READING. If P_off* moves the dipole FURTHER from the reference "
+      f"while improving the profile's L1, then the potential degradation is "
+      f"not a mystery and not a compensation being removed: it is the\n   "
+      f"dipole-feedback ramp being driven by a quantity the intervention makes "
+      f"worse. That is the self-consistent coupling the user's tree names, "
+      f"identified rather than reached by elimination. L1 and the dipole are\n"
+      f"   different functionals of the same profile and nothing forces them "
+      f"to move together -- which is why the aggregate has to include the "
+      f"potential, as the stop rule says.", flush=True)
 
 print(f"\n  MIXED IS NOT A PASS. The stop rule names aggregate charge, the "
       f"POTENTIAL, cross energy and the full self-energy including the "
