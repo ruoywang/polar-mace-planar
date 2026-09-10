@@ -1290,3 +1290,77 @@ three quarters is also charge-driven.
 This does NOT show the network can learn the reference charge. It settles whether
 the line is worth the work, and the answer it gives is a quarter of the error on
 the charged frames with the charge dependence of the remainder intact.
+
+### CORRECTION to the section above: 26.4% was a subset artefact
+
+The LS6 six-frame run (job 3427615, code 67504e7) reverses the reading. The two
+NiN88 frames my machine could not run get WORSE under the swap, and they sit on
+the other side of zero:
+
+| frame | atoms | original | substituted | \|err\| old | \|err\| new | verdict | factor |
+|---|---|---|---|---|---|---|---|
+| NiN44 q=-0.80 | 207 | +12.987 | +8.991 | 12.987 | 8.991 | BETTER | 0.692 |
+| NiN44 q=-1.00 | 207 | +20.843 | +15.209 | 20.843 | 15.209 | BETTER | 0.730 |
+| NiN44 q=-1.32 | 207 | +27.309 | +20.817 | 27.309 | 20.817 | BETTER | 0.762 |
+| NiN88 q=-1.00 | 339 | -5.413 | -11.515 | 5.413 | 11.515 | **WORSE** | 2.127 |
+| NiN88 q=-1.31 | 339 | -2.778 | -6.514 | 2.778 | 6.514 | **WORSE** | 2.345 |
+| neutral | 207 | -6.379 | -4.499 | 6.379 | 4.499 | BETTER | 0.705 |
+| **all charged** | | | | **13.866** | **12.609** | BETTER | 0.909 |
+| NiN44 only | | | | 20.380 | 15.006 | BETTER | 0.736 |
+| NiN88 only | | | | 4.096 | 9.014 | WORSE | 2.201 |
+
+Verified independently: 13.866 -> 12.609 is a factor 0.9094, so the aggregate
+over all five charged frames recovers **9.1%, not 26.4%**. My four frames were
+the three with the sign that makes the swap help, plus the neutral.
+
+**The correct summary is per-cell, and no mean over the five is the finding.**
+9.1% is the net of a 26.4% improvement on three frames and a 120% degradation on
+two, and reading it as a modest uniform gain would be wrong in both directions.
+
+### A reporting fault in the code I ran, and my share of it
+
+The column labelled "improvement" in the log above is `err1 - err0`, a SIGNED
+change, which coincides with an improvement only when the error is positive.
+Fixed upstream at df8f25a with |err| before and after, the change in |err|, an
+explicit verdict and a per-cell split.
+
+My share: I computed the neutral frame's 29.5% against |err| rather than against
+the signed change, which is why that figure was right — but I did not flag that
+the column's convention was wrong in general. And the claim that my subset could
+not have caught it is too kind: the neutral frame DID have a negative error, and
+it was one sign flip away from exposing the fault. Its signed change happened to
+be positive (-6.379 -> -4.499), so the label and the truth agreed by luck. All
+four of my rows agreed with the label; none of them tested it.
+
+### The mechanism, and what it does and does not rest on
+
+dE per atom is negative on every charged frame: -3.996, -5.634, -6.492, -6.102,
+-3.736 meV/atom. NiN44 over-predicts, so a downward shift helps; NiN88
+under-predicts, so the same-signed shift hurts. **A shift of uniform SIGN cannot
+repair a bias whose sign differs between cells**, so the lateral bound charge
+error is not what makes the model's total-energy error vary from cell to cell.
+
+That conclusion rests on the sign being uniform, and only on that. It does not
+need the magnitudes to be similar, and they are not: the spread is 1.74x
+(3.736 to 6.492), and the |q| dependence has OPPOSITE sign in the two cells —
+rising within NiN44 (-3.996, -5.634, -6.492) and falling within NiN88 (-6.102,
+-3.736). So "a similar downward shift regardless of cell or charge" overstates
+it; "a downward shift on every charged frame" is what is measured and is all the
+argument needs.
+
+Also worth keeping: the model was originally about 5x BETTER on NiN88
+(mean |err| 4.096) than on NiN44 (20.380), and the substitution destroys that.
+
+### What is not weakened
+
+The swap is still a genuine like-for-like intervention, all three gates still
+pass on all six frames, truncation is still 0.0% with cross ratio 1.000
+everywhere, the model's lateral charge still points the right way on every frame
+including NiN88 (+0.8045, +0.8242), and the lateral channel really is 71.3% of
+the bound COUPLING gap. What the six frames show is that closing that coupling
+gap does not close the TOTAL ENERGY error, because the error's cell-to-cell
+variation lives elsewhere.
+
+My falling-fraction trend (30.8%, 27.0%, 23.8%) survives as a WITHIN-NiN44
+statement only. The two NiN88 points do not extend it — they are on the other
+side of zero.
