@@ -1227,3 +1227,46 @@ coupling -0.0146 eV, against the model's own +0.375 A and +0.1417 eV. That is
 is 0.18687 e off the reference, 19% of the 1.0 e total, against the averaging
 error's 0.58%. Averaging is not the main cause, now measured on like against
 like.
+
+## s_ion SUBSTITUTION WITH RE-SOLVE (job 3427122, code 7fe861f): IMPROVEMENT HOLDS
+The single control the user specified. Only s_ion is replaced -- with the DFT
+switch built exactly as in job 3427096 (native-grid cavity, plane-averaged,
+band-limited 500 -> 600), fed in unchanged -- every other input held at the
+baseline as the same tensor objects, and the solve re-run self-consistently.
+Three gates PASS: baseline re-solve reproduces the model's own rho_ion to
+0.000e+00; every other input identical with q_sol +1.000000; both solves exit
+on their criteria.
+
+  case                              net (e)    cross    eV/e    shift   resid      L1
+  DFT reference                     +1.0000  -1.9385  -1.9385  -0.000    0.0%  0.00000
+  baseline, model s_ion, re-solved  +1.0000  -2.0802  -2.0802  +0.375    1.4%  0.18687
+  DFT s_ion, NO re-solve            +0.8863  -1.7399  -1.9630  +0.025    1.3%  0.11403
+  DFT s_ion, RE-SOLVED              +1.0000  -1.9555  -1.9555  -0.000    1.0%  0.01764
+
+Total charge restored first, as required before reading anything: 0.8863 ->
+1.0000 e, matching the reference exactly.
+The improvement HOLDS and strengthens. Displacement +0.375 -> -0.000 A, better
+than the no-re-solve +0.025. Coupling per unit charge -2.0802 -> -1.9555
+against the reference -1.9385, so the error falls from 0.1417 to 0.0170 eV/e,
+88%; with the charge back at exactly 1 e the absolute gap is the same 0.0170
+eV. L1 0.18687 -> 0.01764 e, 91%. Profile residual 1.4% -> 1.0%.
+
+By the user's reading: investigate and fix along the ionic switch's GENERATION
+PATH. This is the first clear "fix this" pointer in the investigation.
+
+IT ALSO SETTLES THE EARLIER APPARENT CONTRADICTION, in the direction opposite
+to the attribution I had made and withdrawn. Jobs 3426875/3426892 showed the
+displacement NOT shrinking under a re-solve (0.400 -> 0.450 A), but they
+substituted s_ion AND a1 AND p_off with the DFT density first interpolated
+through the model grid. Replacing only s_ion, natively built, and re-solving
+takes the displacement to zero. So that null result came from the other two
+substitutions and/or the interpolation route, NOT from the re-solve. Now
+demonstrated rather than asserted.
+
+LIMITS, unchanged: a1 and p_off still carry the model's own cavity values, so
+this is a controlled single-factor intervention and NOT a physically
+consistent better solvent model. It does not explain WHY the model's s_ion
+differs -- that is the generation path to look at. One frame. And the residual
+1.0% profile error and 0.0170 eV gap are what remains after the switch is
+fixed, so the switch accounts for roughly 88-91% of this frame's ionic-channel
+error and not all of it.
