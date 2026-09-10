@@ -2261,9 +2261,19 @@ above the model grid's lateral Nyquist is 0.0% on all four frames, and the
 cross energy on the model grid equals the native-grid one at ratio 1.000 every
 time (-2.3991, -2.1808, -2.3886, -0.4309). The stated condition was that
 agreement means truncation does not matter for the energy; it agrees exactly.
-Coherent with the physics: RHOB is already Gaussian-smoothed at sigma_b, whose
-cutoff sits below the model grid's lateral Nyquist, so there is nothing up
-there to lose.
+
+A MECHANISM I OFFERED FOR THAT AND THEN MEASURED, which does NOT hold as
+stated. I claimed RHOB's Gaussian smoothing at sigma_b puts its cutoff below
+the model grid's lateral Nyquist so "there is nothing up there to lose". With
+sigma_b = A_K = 0.125 A (R_B is 0) and the model grid's lateral Nyquist at
+k = pi*100/14.802 = 21.22 /A, the Gaussian's amplitude there is 0.0296, i.e. a
+power suppression of about 1140x -- strong, but it SUPPRESSES rather than
+annihilates. (At the DFT native cut, k = 35.66 /A, it is 2.4e-09 in power.) So
+the parameter is consistent with the measured 0.0% and does not establish it:
+the result also depends on the polarization's own spectrum, which this run did
+not measure. "Nothing up there to lose" is withdrawn; what stands is the
+measurement, 0.0% above the cut with the two cross energies matching at ratio
+1.000.
 
 [RESULT] final total energy error, meV/atom
              frame  atoms   original  substituted  improvement  fraction
@@ -2296,3 +2306,33 @@ TWO TRENDS THE MEAN HIDES, and they carry more than the 26.4% does.
 26.4% with a falling trend and a charge-dependent residual is a different
 object from 26.4% flat across the sweep, and neither reading should be taken
 from the mean alone.
+
+THE SAME TREND SEEN IN THE DERIVATIVE, with two phrasings of mine corrected by
+the workstation before they were written down. The interval slopes, meV/atom
+per unit |q|:
+                    original  substituted  ratio
+  |q| 0.80 -> 1.00     39.28        31.09  0.7915
+  |q| 1.00 -> 1.32     20.21        17.52  0.8669
+The two ratios differ by 9.5%, and the numbers here are exact to ~1e-9, so
+that is real: the substitution scales the LOW-|q| slope down MORE than the
+high-|q| one, which is the falling fraction-recovered trend seen in the
+derivative rather than an independent fact. My "roughly the same factor" was
+therefore wrong and slightly contradicted the trend beside it. What survives
+is the part that matters: the charge dependence is NOT FLATTENED, since both
+ratios are far from zero -- the swap reduces the dependence's amplitude and
+leaves it in place.
+
+Second phrasing corrected: "strongly sublinear in |q|" is not supported. It
+rests on two intervals from three points, and the slope roughly HALVES between
+the two charged intervals (0.515 original, 0.564 substituted) -- that is a
+two-number observation, not a functional form, and the shape is left unnamed.
+
+AND THE NEUTRAL FRAME IS EXCLUDED FROM THAT SEQUENCE, deliberately and for a
+stated reason, because including it makes the slopes NON-MONOTONE (0 -> 0.80:
+24.21 original, 16.86 substituted; then 39.28/31.09; then 20.21/17.52 -- it
+rises then falls). The reason it is excluded: its ionic channel is identically
+zero AND its total-energy error has the OPPOSITE SIGN (-6.379 against
++12.987), so it is not the |q| = 0 point of the charged sweep, it is a
+different system. Stated explicitly because otherwise the first reader who
+plots all four points gets a non-monotone curve and concludes the sublinearity
+was invented.
