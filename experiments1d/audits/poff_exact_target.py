@@ -557,18 +557,48 @@ print(f"   [{'PASS' if gI < 1e-6 else 'FAIL'}] the measured change in the "
 if gI >= 1e-6:
     print(f"       the identity does NOT close, so the two terms below are "
           f"not a complete account and must not be read as one.")
-print(f"   {'term':>44} {'rms (eV)':>10} {'45 A amp':>10}")
-
-
 def m1(x):
     sp_ = torch.fft.rfft(x) / nz_s
     return float(2.0 * torch.sqrt(sp_[1].real ** 2 + sp_[1].imag ** 2))
 
 
-for lbl, v in (("total change in the potential", d_meas),
-               ("  from dipole feedback (cvdip ramp)", d_fb),
-               ("  from the charge directly (l0_inv)", d_dir)):
-    print(f"   {lbl:>44} {float(v.pow(2).mean().sqrt()):10.5f} {m1(v):10.5f}")
+# The G=0 constant must appear as its own row. l0_inv annihilates it, so the
+# direct term carries none of it, and without it a reader who adds the two
+# component rms values gets a total that would require corr = +1.25 -- the
+# triangle inequality caps their sum at 6.1% BELOW the printed total. The
+# constant is not a rounding detail: it is the LARGEST of the three parts.
+print(f"   {'term':>44} {'rms (eV)':>10} {'mean':>10} {'45 A amp':>10}")
+print(f"   {'total change in the potential':>44} "
+      f"{float(d_meas.pow(2).mean().sqrt()):10.5f} "
+      f"{float(d_meas.mean()):+10.5f} {m1(d_meas):10.5f}")
+print(f"   {'  of it, the G=0 constant':>44} "
+      f"{abs(float(d_meas.mean())):10.5f} {float(d_meas.mean()):+10.5f} "
+      f"{0.0:10.5f}")
+print(f"   {'  of it, the rest (mean removed)':>44} "
+      f"{float((d_meas-d_meas.mean()).pow(2).mean().sqrt()):10.5f} "
+      f"{0.0:+10.5f} {m1(d_meas):10.5f}")
+print(f"   {'      from dipole feedback (cvdip ramp)':>44} "
+      f"{float((d_fb-d_fb.mean()).pow(2).mean().sqrt()):10.5f} "
+      f"{float(d_fb.mean()):+10.5f} {m1(d_fb):10.5f}")
+print(f"   {'      from the charge directly (l0_inv)':>44} "
+      f"{float((d_dir-d_dir.mean()).pow(2).mean().sqrt()):10.5f} "
+      f"{float(d_dir.mean()):+10.5f} {m1(d_dir):10.5f}")
+_x = float((d_meas - d_meas.mean()).pow(2).mean().sqrt())
+_a = float((d_fb - d_fb.mean()).pow(2).mean().sqrt())
+_bq = float((d_dir - d_dir.mean()).pow(2).mean().sqrt())
+print(f"   ONLY the last three rows combine, and they do: implied correlation "
+      f"between the two mean-removed components "
+      f"{(_x*_x - _a*_a - _bq*_bq)/max(2*_a*_bq,1e-30):+.4f} -- they reinforce "
+      f"rather than oppose.")
+print(f"\n   IS THE CONSTANT PART OF THE SAME PATH? The cdipol ramp is "
+      f"ii*cutoff, and the taper breaks its antisymmetry, so mean(cvdip) can "
+      f"scale with the dipole and the constant would then belong to the "
+      f"dipole-feedback\n   path too. Otherwise it is a separate G=0 "
+      f"bookkeeping term. Measured: mean of the feedback change "
+      f"{float(d_fb.mean()):+.5f} eV against the total constant "
+      f"{float(d_meas.mean()):+.5f} eV, i.e. "
+      f"{100*float(d_fb.mean())/max(abs(float(d_meas.mean())),1e-30)*(1 if float(d_meas.mean())>0 else -1):.1f}% "
+      f"of it. Near 100% means one open item, not two.")
 print(f"\n   THE DRIVER of that feedback is the solvent charge's DIPOLE, so "
       f"the question is whether P_off* improves the profile while degrading "
       f"the dipole:")
@@ -580,14 +610,29 @@ for lbl, v in (("DFT reference", rt_ref_), ("baseline", rt_b),
     dv = float((v * (torch.arange(nz_s, dtype=torch.float64, device=device)
                      * dz)).sum() * dz * area)
     print(f"   {lbl:>44} {dv:13.5f} {dv-d_ref:+10.5f}")
-print(f"\n   READING. If P_off* moves the dipole FURTHER from the reference "
-      f"while improving the profile's L1, then the potential degradation is "
-      f"not a mystery and not a compensation being removed: it is the\n   "
-      f"dipole-feedback ramp being driven by a quantity the intervention makes "
-      f"worse. That is the self-consistent coupling the user's tree names, "
-      f"identified rather than reached by elimination. L1 and the dipole are\n"
-      f"   different functionals of the same profile and nothing forces them "
-      f"to move together -- which is why the aggregate has to include the "
+_de_b = float(((rt_b - rt_ref_) * (torch.arange(nz_s, dtype=torch.float64,
+               device=device) * dz)).sum() * dz * area)
+_de_s = float(((rt_s - rt_ref_) * (torch.arange(nz_s, dtype=torch.float64,
+               device=device) * dz)).sum() * dz * area)
+print(f"\n   READING, and note which way it comes out. The natural reading "
+      f"would be that P_off* drives the ramp with a WORSE dipole. If instead "
+      f"the dipole moves TOWARD the reference while the potential still\n   "
+      f"degrades, that reading is refuted and the conclusion is stronger: at a "
+      f"charge profile AND a dipole both closer to the reference, "
+      f"cvhar_z + cvdip + l0_inv(charge) moves FURTHER from the DFT total\n   "
+      f"potential -- so neither input is the problem and the construction of "
+      f"the potential itself is, which means the cdipol taper form, cvhar_z, "
+      f"and the G=0 handling. Measured dipole error "
+      f"{_de_b:+.5f} -> {_de_s:+.5f} e A "
+      f"({'CLOSER' if abs(_de_s) < abs(_de_b) else 'further'}, "
+      f"{abs(_de_b)/max(abs(_de_s),1e-30):.2f}x).")
+print(f"   No mechanism is offered for WHY, deliberately. In particular the "
+      f"story that the baseline's wrong dipole was compensating an error in "
+      f"the ramp form would fit, and it is the same shape as the\n   "
+      f"solute-side compensation story that just failed its own gate, so it "
+      f"needs its own gate before anyone states it. L1 and the dipole are "
+      f"different functionals of the same profile and nothing forces them\n"
+      f"   to move together -- which is why the aggregate has to include the "
       f"potential, as the stop rule says.", flush=True)
 
 print(f"\n  MIXED IS NOT A PASS. The stop rule names aggregate charge, the "
