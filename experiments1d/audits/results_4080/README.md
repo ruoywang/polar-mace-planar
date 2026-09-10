@@ -1469,3 +1469,64 @@ are ~100 eV terms cancelling 40-fold, which is worth knowing before anyone quote
 either alone.
 
 Also: `Dele_z` moves +3.653562 to -6.162598, a change of -9.816160.
+
+## 200-pair run at 5b1db5b: KILLED, and this time the kill was RIGHT
+
+`charge_5b1db5b.log`, `charge_5b1db5b_memwatch.log`. mace 5b1db5b, pb 9b3b9ba,
+executed file sha256
+6985f16ae6ff4187ec209a77cf90d94e22c741be597a5fc10ec73624a0793483, IDENTICAL.
+
+**This kill is not like the earlier two.** Those had RSS flat at 1.54 GB with
+MemAvailable rising, and the monitor was wrong. This one has RSS climbing
+monotonically:
+
+| time | RSS | MemAvailable |
+|---|---|---|
+| 18:09:02 | 1.98 GB | 254.4 GB |
+| 18:09:12 | 2.75 GB | 253.8 GB |
+| 18:09:33 | 4.26 GB | 252.6 GB |
+| 18:09:53 | 5.78 GB | 251.5 GB |
+| 18:10:13 | 7.29 GB | 250.4 GB |
+| 18:10:23 | 8.09 GB | 249.8 GB |
+
+Monotone growth of about 750 MB per 10 s sample with no plateau, over 19 pairs
+(38 forwards) — roughly **160 MB retained per forward**. GPU was flat at
+4.88 GB throughout, so it is host-side. Extrapolated to 400 forwards that is
+about 64 GB. The machine has 244 GB available so it might have finished, but the
+growth is real and unbounded within the loop, and I am NOT retrying it: a
+per-forward leak that would be reported as "another spurious kill" is exactly
+the wrong conclusion to draw twice.
+
+I am not diagnosing the cause. One candidate visible in code read earlier is
+`PB1DBackend._grid_for`, which caches `TorchGrid` objects in `self._grids` keyed
+by `(shape, cell.tobytes(), device, dtype)` — 400 frames with distinct cells
+would accumulate 400 entries that are never evicted. That is a candidate, not a
+finding, and the fix is the peer's to choose (evict per frame, or chunk the run).
+
+### 19 pairs completed before the kill, and they are real data
+
+dN spans 0.79 to 1.32. **Not a random subset** — pairs 1-12 in order plus the
+first 7 val pairs — so these statistics are indicative and must not be quoted as
+the 200-pair result.
+
+| set | n | bias | resid RMSE | vs eps RMSE | corr | slope through origin |
+|---|---|---|---|---|---|---|
+| all | 19 | -0.0777 | 0.2292 | 3.9% of 5.9184 | +0.9680 | **0.9879** |
+| val only | 7 | -0.1227 | 0.3067 | 5.5% of 5.5717 | +0.9739 | 0.9814 |
+| train only | 10 | -0.0426 | 0.1777 | 2.9% of 6.1222 | +0.9206 | 0.9925 |
+
+The trapezoid relation survives its first real test. A slope through the origin
+of 0.9879 over 19 pairs with dN varying by a factor of 1.7, correlation +0.968,
+and a residual RMSE 3.9% of the quantity being predicted, is a great deal
+stronger than the single-pair 0.20%.
+
+But it is also **not** the 0.20% agreement the single pair suggested: residuals
+range -0.3916 to +0.3955 eV and the RMSE is 0.229 eV, about 21x the -0.011 eV
+residual of pair 1. Pair 1 is the best-fitting point in the set, which is what a
+relation identified from one point tends to look like. The relation explains most
+of the missing energy; it does not explain all of it to the precision one pair
+implied.
+
+The val subset has a larger bias (-0.123) and RMSE (0.307) than the train subset
+(-0.043, 0.178) on these seven, but with n = 7 against n = 10 and a non-random
+selection that is not yet a split effect.

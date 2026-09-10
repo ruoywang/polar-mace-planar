@@ -1,0 +1,85 @@
+PROVENANCE mace=5b1db5b pb=9b3b9ba sha256(charging_reconcile.py)=6985f16ae6ff4187ec209a77cf90d94e22c741be597a5fc10ec73624a0793483 (IDENTICAL to committed 5b1db5b); all 200 pairs
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  step 1-3 payload: sid1/sid601 OUTCAR+log.out present
+=================== STEP 1: the sid1/sid601 pair ===================
+   geometry max |dpos| 0.000e+00 A, cell max |dcell| 0.000e+00 A, species identical True, splits train/train
+
+   LABEL DEFINITION, identified against the OUTCAR rather than assumed:
+     sid   1: label -1310.37680269 == OUTCAR ['sigma0']; TOTEN -1310.39247858, no-entropy -1310.34545092, sigma->0 -1310.37680269
+              NELECT 661.0000, E-fermi -3.8745 eV, total_charge -1.00
+     sid 601: label -1304.27622534 == OUTCAR ['sigma0']; TOTEN -1304.26175536, no-entropy -1304.30516530, sigma->0 -1304.27622534
+              NELECT 660.0000, E-fermi -7.3736 eV, total_charge +0.00
+     -> NELECT differs by +1.0000, so this is an electron-ADDITION energy, and the label is a plain VASP energy with NO reservoir term: canonical, not grand canonical.
+
+   RAW TOTALS AND THE DIFFERENCE
+                   charged (sid 1)  neutral (sid 601)     difference
+          model       -1306.062262       -1305.596780      -0.465482
+            DFT       -1310.376803       -1304.276225      -6.100577
+     eps per frame: charged +4.314540, neutral -1.320555 eV
+     eps_Delta = +5.635095 eV   (the earlier table implied +5.6350 from 20.843 and -6.379 meV/atom x 207; agreement 0.0001 eV)
+
+=================== STEP 2: every model term ===================
+                             term        neutral        charged     difference
+         e0 (atomic, per-species)   -1307.266162   -1307.266162      +0.000000
+            energy head (inter_e)     +22.036824     +22.036824      -0.000000
+       electron energy (optional)      +0.000000      +0.000000      +0.000000   (not enabled: exact zero)
+             solute electrostatic     -23.516097     -20.622711      +2.893386
+          1D solvent compensation      +0.116124      -1.553844      -1.669968
+           slab dipole correction      -0.016796      -2.626087      -2.609291
+          external field . dipole      +0.000000      +0.000000      +0.000000   (not enabled: exact zero)
+                    cavity energy      +3.846217      +3.895945      +0.049728
+                3D solvent energy      -0.158241      -0.323177      -0.164936
+           baseline coupling E_bl      -0.638649      +0.396949      +1.035598
+                   SUM of the ten   -1305.596780   -1306.062262      -0.465482
+                      model total   -1305.596780   -1306.062262      -0.465482
+   [PASS] closure: the ten terms sum to the model's own total, worst |diff| 4.320e-12 eV -- so the decomposition is complete and nothing is hidden in a remainder
+
+=================== STEP 3: the DFT side, by its own formula ===================
+         printed quantity        neutral        charged     difference
+         energy(sigma->0)   -1304.276225   -1310.376803      -6.100577
+        free energy TOTEN   -1304.261755   -1310.392479      -6.130723
+       energy w/o entropy   -1304.305165   -1310.345451      -6.040286
+                    A_cav      +3.904412      +3.897509      -0.006904
+                   A_corr      +2.891801      +0.255412      -2.636389
+                    Ecorr   +1257.892610   +1363.464339    +105.571730
+               Ecorr_band   -1255.000809   -1363.208927    -108.208118
+          Dele_z (dipole)      +3.653562      -6.162598      -9.816160
+                  E-fermi      -7.373600      -3.874500      +3.499100
+                   NELECT    +660.000000    +661.000000      +1.000000
+
+   NOT DONE HERE, deliberately: the DFT solvent free energy is not equated with the model's cross+self, and the energy head is not equated with any DFT electronic term. The one correspondence that is
+   defensible on its face is A_cav against the model's cavity energy, reported as a CANDIDATE and not folded into any total:
+     dA_cav -0.006904 eV against d(cavity energy) +0.049728 eV, difference +0.056632
+   Everything else on the DFT side stays in ONE named remainder: 'DFT terms whose additive role and model counterpart are both unverified'. Its size is not quotable as an error.
+
+=================== STEP 4: can the energy head move Delta E? ===================
+   readout block   0: features (207, 576), max |diff| 5.551e-17, relative 1.854e-16
+   readout block   1: features (207, 576), max |diff| 6.939e-17, relative 3.883e-16
+   d(inter_e) across the pair: -0.000000 eV
+   VERDICT: the readout inputs are IDENTICAL between the two states, so the energy head contributes the same amount to both and CANCELS EXACTLY in Delta E. Retraining that head alone therefore
+   cannot change the paired charging energy at all, whatever the target -- which invalidates the A/B refit as a route to this error and is why this check came first.
+
+=================== STEP 5: the charging pairs, OUTCAR-free ===================
+   pairs available from the xyz: 200 of 200; splits {'train': 160, 'val': 20, 'test': 20}
+   dN comes from |total_charge|, not from NELECT, which the xyz does not carry -- for integer frames they agree (sid 1: q -1.0, NELECT difference +1.0) and for the fractional ones dN from the charge is
+   what the integral needs rather than a stand-in for NELECT. The neutral frames' Fermi values carry fewer digits than the charged ones (-7.3736 against -3.8745365801), which floors the residual near 1e-4 eV.
+     pair  split        q     dN      DFT dE    model dE      eps_D   mu_bar.dN   residual
+        1  train  -1.0000  +1.00   -6.100577   -0.465482  +5.635095   -5.624068  +0.011027
+        2  train  -1.0088  +1.01   -6.154550   -0.570307  +5.584244   -5.669061  -0.084818
+        3  train  -1.0374  +1.04   -6.232043   -0.490259  +5.741785   -5.721431  +0.020354
+        4  train  -1.0838  +1.08   -6.280283   -0.342979  +5.937303   -5.702360  +0.234943
+        5  train  -1.1238  +1.12   -6.630019   -0.656306  +5.973713   -5.978931  -0.005218
+        6   test  -1.1503  +1.15   -6.703735   -0.679460  +6.024275   -6.068753  -0.044478
+        7   test  -1.1640  +1.16   -6.911575   -0.819592  +6.091983   -6.239578  -0.147595
+        8  train  -1.1717  +1.17   -6.938510   -0.860902  +6.077607   -6.251945  -0.174338
+        9  train  -1.1779  +1.18   -7.193790   -1.040207  +6.153583   -6.525129  -0.371546
+       10  train  -1.1957  +1.20   -7.276565   -0.909714  +6.366851   -6.583886  -0.217035
+       11  train  -1.2412  +1.24   -7.434650   -0.821517  +6.613133   -6.643633  -0.030500
+       12  train  -1.3015  +1.30   -7.723374   -0.730485  +6.992889   -6.802005  +0.190884
+       28    val  -1.3205  +1.32   -7.795213   -0.779453  +7.015760   -6.834838  +0.180922
+       30    val  -1.2467  +1.25   -7.619716   -1.153300  +6.466416   -6.794718  -0.328302
+       43    val  -1.2464  +1.25   -7.550404   -0.877924  +6.672480   -6.764876  -0.092396
+       60    val  -0.8207  +0.82   -4.868681   -0.512818  +4.355863   -4.614316  -0.258453
+       61    val  -0.7964  +0.80   -4.660574   -0.578331  +4.082243   -4.446597  -0.364353
+       62    val  -0.7900  +0.79   -4.700459   -0.617773  +4.082686   -4.474268  -0.391582
+       69    val  -0.9623  +0.96   -5.443649   -0.017301  +5.426348   -5.030897  +0.395451
