@@ -2336,3 +2336,64 @@ zero AND its total-energy error has the OPPOSITE SIGN (-6.379 against
 different system. Stated explicitly because otherwise the first reader who
 plots all four points gets a non-monotone curve and concludes the sublinearity
 was invented.
+
+### 2026-09-10  the six-frame run REVERSES the subset's reading
+LS6 job 3427615, code 67504e7, provenance IDENTICAL (repo copy executed
+directly, sha256 matched against the committed blob), all three gates PASS
+(2.776e-16 eV, 9.437e-19 e/A^3, 9.708e-13 eV), truncation 0.0% and cross-energy
+ratio 1.000 on all six frames.
+
+[RESULT] final total energy error, meV/atom
+             frame  atoms   original  substituted  |err| old  |err| new    d|err|  verdict  factor
+     NiN44 q=-0.80    207    +12.987       +8.991     12.987      8.991    -3.996   BETTER   0.692
+     NiN44 q=-1.00    207    +20.843      +15.209     20.843     15.209    -5.634   BETTER   0.730
+     NiN44 q=-1.32    207    +27.309      +20.817     27.309     20.817    -6.492   BETTER   0.762
+     NiN88 q=-1.00    339     -5.413      -11.515      5.413     11.515    +6.102    WORSE   2.127
+     NiN88 q=-1.31    339     -2.778       -6.514      2.778      6.514    +3.736    WORSE   2.345
+           neutral    207     -6.379       -4.499      6.379      4.499    -1.880   BETTER   0.705
+       ALL charged                                    13.866     12.609    -1.257   BETTER   0.909   (+9.1% recovered)
+         NiN44 only                                   20.380     15.006    -5.374   BETTER   0.736   (+26.4% recovered)
+         NiN88 only                                    4.096      9.014    +4.918    WORSE   2.201   (-120.1%)
+
+THE CELL-SIZE AXIS REVERSES THE SUBSET'S READING, which is exactly why the
+user asked for six frames and exactly what the workstation flagged its four
+could not say. NiN44 recovers 26.4%; the two NiN88 frames get 2.13x and 2.34x
+WORSE; across all five charged frames the mean |error| improves only 9.1%.
+
+THE MECHANISM IS SIMPLE AND VISIBLE. dE per atom is a similar DOWNWARD shift
+on every charged frame -- -3.996, -5.634, -6.492, -6.102, -3.736 meV/atom --
+regardless of cell or charge. NiN44 OVER-predicts (+12.987 to +27.309) so the
+shift helps it; NiN88 UNDER-predicts (-5.413, -2.778) so the same shift hurts.
+A near-uniform shift cannot repair a bias whose SIGN DIFFERS BETWEEN CELLS, so
+the lateral bound charge error is NOT what makes the model's total-energy error
+vary between cells. Note also that the model was originally much BETTER on
+NiN88 (|err| 4.1 mean) than on NiN44 (20.4), and the substitution destroys
+that.
+
+A REPORTING FAULT OF MINE THAT THE SUBSET COULD NOT EXPOSE: the column I
+labelled "improvement" was the SIGNED change err1 - err0, which coincides with
+an improvement only when the error is positive. The NiN88 frames have negative
+errors, so their negative changes printed as improvements while |err| doubled.
+Every frame in the four-frame subset had the sign that makes the two agree,
+which is why it survived there. The table now carries |err| before and after,
+the change in |err|, an explicit verdict and the factor, per row, plus a
+per-cell split -- because an aggregate over cells hides a sign difference
+between them and here the sign IS the finding.
+
+VERDICT on the user's branch. The improvement is small in aggregate (9.1%) and
+NEGATIVE on one of the two cells, which is the "small or worse" branch: that
+part of the coupling gap can no longer be used to explain the total-energy
+plateau, and the remaining energy terms and their compensation are the next
+place to look. Recorded with both halves as the partial instruction requires:
+NiN44 24-31% recovered, NiN88 120% worse, aggregate 9.1% recovered and 90.9%
+remaining.
+
+STILL TRUE and not weakened by this: the substitution is a genuine like-for-
+like swap (all gates pass, truncation nil), the model's lateral bound charge
+points the right way on every frame (correlations +0.8045 to +0.8733), and the
+lateral channel really is 71.3% of the bound COUPLING gap. What the six frames
+show is that closing that coupling gap does not translate into closing the
+TOTAL ENERGY error, because the error's cell-to-cell variation lives elsewhere.
+
+As the user set it, this does NOT show the network cannot learn the reference
+charge. It shows that this line, on its own, does not buy the final energy.
