@@ -1865,6 +1865,157 @@ at the bound, no training can supply a larger correction whatever delta_p*
 asks for; far below it, the amplitude is a learning outcome rather than a
 representational limit.
 
-w_env and u on the solve grid are rebuilt exactly as solve_graph does,
-clamp(fourier_upsample(w_env, f)) then the normalised cumsum, and saved, so
-step 3 needs no second model call. Dispatched to the 4090. RESULT PENDING.
+Ran on the 4090 across six iterations (e48faec first, final 04c384b), ~12-15
+s each, provenance certified IDENTICAL every time, every repeated number
+reproducing to the digit. Gate 1.301e-18, both solves exit on tolerance.
+
+VERDICT: STEP 2 FAILS ON ITS OWN TERMS. Step 3 does not run.
+
+STEP 1 -- holding a1 fixed shrinks the target 3.74-fold and REVERSES last
+entry's shape verdict.
+  P_off* rms 3.5170e-02; prior_model 3.8408e-02; p_off_model 3.7477e-02
+  delta_p* (needed) 3.6777e-03; delta_p (supplied) 9.6013e-04
+  old target rms 1.3765e-02 -> new 3.6777e-03, ratio 0.267, their mutual
+    correlation +0.9177
+So the head is short by 3.83x, NOT the 14x recorded above -- that figure was
+measured against prior_ref, the correct p_off for the REFERENCE a1, so it
+charged delta_p with a1's error. But the shape comes out WORSE against the
+correct target, correlation +0.8580 against +0.9553, and gain-alone recovery
+falls from 71.0% to 49.7%. Fixing the target weakened "right shape in the
+main", it did not strengthen it. Both figures follow from the correlation,
+since the residual after ANY optimal gain is sqrt(1 - corr^2).
+
+A PRESENTATION FAULT CORRECTED IN PASSING, and it mattered: the split
+originally scaled the TARGET down to fit the head, which is not a repair, and
+reported 83.3% removed against a denominator of the raw difference. Scaling
+delta_p UP against a denominator of what is needed gives 49.7%. Only the
+second is actionable and the first would have been read as the headline.
+
+HEAD SATURATION, and it was UNREACHABLE at first: delta_stats is spread into
+self.last_diagnostics (pb1d_backend.py line 510), not into solve_graph's
+returned dict, so out.get("c_absmax") was always None and an "if is not None"
+swallowed the whole block SILENTLY -- worse than the bug. Once read:
+c_absmax 0.007093, 2.8% of the hard bound c_max = 0.25; scaling every c_k by
+the 3.83x shortfall reaches 10.9%, comfortably inside. The missing amplitude
+is a LEARNING OUTCOME, not a representational limit, so step 3 would never
+have been blocked by clipping in either direction. That bounds the amplitude
+question only; the 49.7% leaves shape open.
+
+STEP 2a, WIRING ONLY: bound-charge L1 with P_off* is 0.00365 e against
+7.56925 e for the model's own p_off, on int|.| 2.0193 e. That 0.00365 is
+numerically the 3-D reconstruction's own 0.18% floor, so the algebra is right
+and nothing physical follows.
+
+STEP 2b -- SELF-CONSISTENT RE-SOLVE
+                      case   net (e)   chg L1  bound L1   ion L1     cross      self     total   d total
+             DFT reference   +1.0000  0.00000   0.00000  0.00000   -3.0243   +1.5237   -1.5005   +0.0000
+     baseline, model p_off   +1.0000  0.63739   0.80003  0.18687   -2.6289   +1.4718   -1.1572   +0.3434
+   exact P_off*, re-solved   +1.0000  0.47303   0.63902  0.19199   -3.0020   +1.4869   -1.5151   -0.0145
+
+  BETTER: charge sum L1 -25.8%, bound L1 -20.1%, cross gap +0.3953 -> +0.0223,
+          self gap -0.0520 -> -0.0368, total gap +0.3434 -> -0.0145 eV (96%)
+  WORSE:  ion L1 +2.7%; potential rms 0.11093 -> 0.22339 eV (+101.4%), of
+          which mean -0.04109 -> -0.12304 (3.0x) and mean-removed 0.10304 ->
+          0.18645 (+81.0%); longest-wavelength (45 A) amplitude 0.08041 ->
+          0.20436 eV (+154.2%); mutual bound-ion term 0.0288 -> 0.1261 eV from
+          the reference (4.4x)
+
+Applying the user's stop rule as written and not softened: it names aggregate
+charge, the POTENTIAL, cross energy and the full self-energy, and two of those
+went the wrong way -- the potential by a factor of two and the mutual term by
+4.4x. The total energy gap closing 96% while the field agreement halves is the
+compensating-error signature this work exists to remove, so the closed energy
+gap cannot stand as the verdict, any more than the ionic channel's 10.6-fold
+improvement could when the aggregate moved 0.03%. Same trap with the sign of
+the surprise reversed.
+
+WHY THE POTENTIAL WORSENED -- mechanism identified in the source, not guessed.
+A first attempt assumed phi_sol was an untouched solute-side quantity so the
+error would split into a fixed bracket plus l0_inv(solvent charge error). Its
+own gate REFUTED that: the bracket differed between the two cases by 1.972e-01
+eV, half its own magnitude, at both signs. The reason is in the code:
+
+  phi_sol = cvhar_z + cvdip
+  cvdip   = cdipol_potential_1d(nz, lz, ef_z, indmin)
+  ef_z    = c_unit * d_mix        <- the SOLVENT CHARGE's own dipole
+
+and cdipol_potential_1d returns (-e_comp*lz/nz) * ii * cutoff, a LINEAR RAMP
+in the signed distance from the cell centre, tapered at the edge. cvhar_z is
+fixed; phi_sol is not. p_off changes the solvent charge, which changes its
+dipole, which drives a ramp into phi_sol. That is the dipole-feedback path and
+it is the self-consistent coupling.
+
+It also explains the band pattern, which fit NEITHER branch the table was
+built to distinguish:
+       modes    wavelength |   charge err rms: base -> P_off*  | potential err rms: base -> P_off*
+         1-3     >= 15.0 A |   2.176e-05 -> 6.137e-06  better 3.5x |  6.789e-02 -> 1.611e-01  WORSE 2.4x
+        4-10      >= 4.5 A |   9.869e-05 -> 6.330e-05  better      |  7.325e-02 -> 8.699e-02  WORSE
+       11-30      >= 1.5 A |   1.913e-04 -> 1.957e-04  worse       |  2.404e-02 -> 3.262e-02  WORSE
+      31-100      >= 0.5 A |   1.444e-04 -> 7.245e-05  better      |  8.053e-03 -> 1.294e-02  WORSE
+     101-300      >= 0.1 A |   1.665e-05 -> 9.885e-06  better      |  6.197e-04 -> 7.410e-04  WORSE
+The charge improves in four of five bands INCLUDING the lowest, 3.5-fold
+there, and the potential worsens in all five. Not the 1/k^2 weighting trade
+either branch assumed. A ramp is the longest-wavelength component -- the 45 A
+amplitude is the largest single part of the change -- and a TAPERED ramp is
+not a single Fourier mode, so it puts weight in every band at once.
+
+THE EXACT DECOMPOSITION, gate closing at 3.545e-12 eV (8e-12 of the change):
+                                           term   rms (eV)       mean   45 A amp
+                  total change in the potential    0.13373   -0.08195    0.13003
+                        of it, the G=0 constant    0.08195   -0.08195    0.00000
+                 of it, the rest (mean removed)    0.10569   +0.00000    0.13003
+              from dipole feedback (cvdip ramp)    0.06679   -0.00000    0.07438
+              from the charge directly (l0_inv)    0.05925   +0.00000    0.07100
+Only the last three combine, and they do, at an implied correlation of +0.4041
+-- they reinforce rather than oppose. As variance shares of the total change:
+G=0 constant 37.6%, dipole feedback 24.9%, direct charge 19.6%, their cross
+term 17.9%.
+
+The constant needed its own row because without it the table invited an
+impossibility: 0.06679 + 0.05925 = 0.12604 is capped 6.1% BELOW the printed
+0.13373, and solving for the correlation gives +1.2524. l0_inv annihilates the
+constant so the direct term carries none of it. Fourth member of the
+difference-of-norms family and the first in the presentation rather than the
+reasoning. Cross-checked as real: the potential error's mean moved -0.04109 to
+-0.12304, a difference of exactly the -0.08195 reported, and the mean-removed
+part still worsened 81.0%, so neither part accounts for the degradation alone.
+
+BOTH CANDIDATE INPUTS ARE EXONERATED BY MEASUREMENT, which makes the
+conclusion stronger than the reading written in advance. That reading was "if
+P_off* moves the dipole FURTHER from the reference the degradation is
+explained". The dipole error goes -0.29449 -> -0.04943 e A (reference
+16.70259, baseline 16.40810, P_off* 16.65316): 5.96x CLOSER. So at a charge
+profile AND a dipole both closer to the reference,
+cvhar_z + cvdip + l0_inv(charge) moves FURTHER from the DFT total potential.
+Neither input is the problem; the construction of the potential is.
+
+TWO OPEN ITEMS, NOT ONE, and this was dispatched as a question with the
+criterion set in advance. The cdipol ramp is ii*cutoff and the taper breaks
+its antisymmetry, so mean(cvdip) could have scaled with the dipole and the
+constant would then belong to the same path. Measured: mean of the feedback
+change is 0.0% of the total constant. So the tapered ramp produces NO mean and
+the G=0 constant is a SEPARATE term.
+  item 1: the potential construction -- the cdipol taper form and cvhar_z.
+  item 2: the G=0 bookkeeping, unattributed.
+THE TWO ARE NOT EQUAL IN SIZE AND THE NAMED ONE IS THE SMALLER: the identified
+dipole-feedback mechanism is 24.9% of the variance while the unexplained
+constant is 37.6%. Writing this up as "the mechanism is the dipole feedback"
+would lose the larger term sitting beside it.
+
+NO MECHANISM IS OFFERED for why the construction fails at correct inputs, and
+one candidate is explicitly withheld: that the baseline's wrong dipole was
+compensating an error in the ramp form. It fits, and it is the same shape as
+the solute-side compensation story that failed its own gate this round, so it
+needs its own gate before anyone states it.
+
+VOID, and dropped from script and ledger: the 0.15884 eV "floor" on the
+potential error and "the baseline sits below its own floor only by
+cancellation". Both rested on the refuted bracket. Also void as a
+discriminator: the sign of the correlation between the solvent term and the
+bracket -- with bracket 0.15884, solvent 0.07288 and total 0.11093 the
+correlation is FORCED to -0.788, because a total smaller than one of its parts
+requires a negative sign. The discriminator has to be something the magnitudes
+do not already fix.
+
+NOT DONE, per the stop rule: step 3, and the confirmation on a second charged
+frame and a neutral frame, which the user scheduled after step 2 succeeded.
