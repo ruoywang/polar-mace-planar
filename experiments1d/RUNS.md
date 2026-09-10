@@ -1730,14 +1730,53 @@ errors: the model's own closure satisfies the same identity with its own
 fields and its bound-charge total is close to the reference, which largely
 forces the two errors to oppose.
 
-CONSEQUENCE THAT MUST TRAVEL WITH THE DIAGNOSIS -- it is not a repair list.
-Rescaling prior by 1/1.551 = 0.645 would cover 85.9% of its rms gap, which
-moves the result most of the way from the baseline's L1 of 7.57 e toward the
-(model a1, ref p_off) row's 33.70 e. So fixing the covariance gain ALONE is
-expected to make the bound charge substantially WORSE, because it removes a
-compensation the wrong a1 currently relies on. The two have to be addressed
-together, and any change still gets judged on aggregate charge, potential and
-energy.
+CONSEQUENCE THAT MUST TRAVEL WITH THE DIAGNOSIS -- it is not a repair list,
+and this is measured rather than argued (code 99ee87f, the fifth row of the
+2x2):
+
+     model prior/1.551   -0.0000  35.7184  -35.7095  34.52551  1.52e-01   +1.325   96.1%
+
+Dividing prior by its own best gain 1.551 -- the single change that removes
+85.9% of its rms error -- gives charge L1 34.52551 e against the baseline's
+7.56925 e, a factor of 4.56. So fixing the covariance gain ALONE makes the
+bound charge substantially WORSE, because it removes a compensation the wrong
+a1 currently relies on. The two halves have to move together, and any change
+still gets judged on aggregate charge, potential and energy.
+
+TWO THINGS THE FACTOR ALONE HIDES:
+  the coupling gap does not merely grow, it FLIPS SIGN and grows 6.4-fold,
+  +5.5832 eV to -35.7095 eV. "4.56x worse in L1" invites the reading that the
+  shortfall deepens; it is the opposite -- the gain-only fix overshoots past
+  the reference into over-attraction.
+  and the gain-only fix is slightly worse than substituting the reference
+  p_off outright, 34.52551 against 33.69750 e. So a partial move inside the
+  coupled pair is not even MONOTONE toward the full move. Fourth instance of
+  the structural theme: partial moves inside a coupled pair do not
+  interpolate.
+
+THE ASYMMETRY, which is what actually shapes any repair: the two halves are
+not equally tractable and a1 is the binding constraint. prior's error is 85.9%
+removable by one scalar, so a joint change has a cheap, well-specified handle
+on that half. a1's is 7.2% removable by ANY scalar and 77.7% pure cavity, so
+its half has no scalar handle at all and needs the cavity, or the grid the
+cavity is computed on. And there is no repair ORDER either -- the 4.7-fold
+cancellation read forwards says any single-coefficient change is a regression
+on the aggregate, so "fix a1 first" is not available as a plan.
+
+METHOD NOTE, stated as the positive rule and generalising past this chain.
+Measure each piece against its own reference and leave the identity intact;
+reach for substitution only when the pieces are not bound by one. Three
+substitution designs in this chain failed that way and I wrote all three,
+while the one thing that separated anything was the scale-plus-residual
+decomposition, which never disturbed the identity. Separately: a bound and a
+measurement are STAGES, not alternatives. The triangle inequality is the cheap
+sign test run before committing, and its output is a decision about whether to
+measure, not a result to report. Publishing a ratio of aggregates was skipping
+the first stage; publishing the 28.5-38.9 e interval as the answer would have
+been stopping at it. Both are the same error -- treating a stage as the
+destination. Concretely here: the bound gave the sign for free and contained
+the answer, while the point estimate available from the same inputs was 28.9 e
+against a measured 34.53 e, 16% low and sitting exactly on its own lower edge.
 
 THREE CORRECTIONS TO MY OWN SCRIPT, all found by the workstation:
   the covariance gate's 1e-18 absolute threshold was unachievable -- one
