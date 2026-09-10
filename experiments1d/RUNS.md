@@ -1167,3 +1167,63 @@ fine, meaningless as printed. The absolute L1 values are the statement. Last
 time I wrote in this ledger that a percentage needs a denominator large
 compared with the effect rather than merely non-zero -- and then did not
 apply it here.
+
+## IONIC 2x2: TOTAL POTENTIAL AGAINST IONIC SWITCH (job 3427096, code 2f8b614)
+Direct substitution, charged frame, no re-solve. Script sha256 b733e123...,
+IDENTICAL to the committed copy (job 3427013 was the same script before the
+sign fix; its 2x2 was correctly refused by its own gate).
+
+MY BUG, caught by the gate in 3427013: the solver works in the
+ELECTRON-ENERGY convention -- which is why the backend writes
+rho_ion_z = -(n_ion/volume), n_work being odd -- while the DFT side here uses
+-PHI_raw, i.e. PHYSICAL. Feeding the solver's phi straight in crossed the two
+conventions and produced exactly the negated ionic charge (net -1.0000 e
+against the model's +1.0000). Fixed by negating the model's total potential,
+and the script now IDENTIFIES the convention by measurement: physical gives
+6.505e-19, flipped gives 2.520e-03.
+
+GATES both PASS: model phi + model s_ion reproduces the model's own rho_ion to
+6.505e-19 e/A^3; DFT phi + DFT s_ion reproduces RHOION on this grid to
+L1 0.58% (the 0.42% above the native-grid 0.00% is the averaging error plus
+the band-limited 500 -> 600 resample).
+
+  cell                     net (e)  int|.|    cross      gap       L1   shift  resid
+  model phi, model s_ion   +1.0000  1.0000  -2.0802  +0.1417  0.18687  +0.375   1.4%
+  DFT phi,   model s_ion   +1.1317  1.1317  -2.3314  +0.3929  0.13218  +0.375   0.9%
+  model phi, DFT s_ion     +0.8863  0.8863  -1.7399  -0.1986  0.11403  +0.025   1.3%
+  DFT phi,   DFT s_ion     +1.0053  1.0053  -1.9531  +0.0146  0.00583  +0.025   0.7%
+
+THE READING SET FOR THIS RUN DOES NOT FIRE, and the answer is the other way
+round. Swapping the TOTAL POTENTIAL alone leaves the ionic layer displacement
+exactly where it was, +0.375 -> +0.375 A. Swapping the ionic SWITCH alone
+collapses it, +0.375 -> +0.025 A. So with the potential held fixed the
+displacement is carried by s_ion, not by the total potential, and there is no
+direct evidence here for concentrating on how the model produces that
+potential.
+
+THAT IS NOT A CONTRADICTION of job 3426875/3426892, where substituting the
+cavity WITH a re-solve left the displacement at 0.400 -> 0.450 A. The
+difference is the re-solve: here the potential is held, so this measures the
+DIRECT sensitivity; there the solve was allowed to respond and the resulting
+potential moved the layer back. Together they say the layer position is a
+self-consistent outcome of switch and solve together, and neither input owns
+it. Both are measurements of different things, and this run measures direct
+sensitivity only.
+
+AND THE ENERGY SHOWS A CANCELLATION that makes single-factor attribution
+invalid: |gap| is 0.1417 eV for the model pair, but 0.3929 with the DFT
+potential alone and 0.1986 with the DFT switch alone -- BOTH single swaps are
+worse -- and 0.0146 with both. So the model's total potential and its ionic
+switch each carry an error and those errors partially cancel in the coupling
+energy. Repairing either one in isolation would make the energy worse.
+
+THE AVERAGING QUESTION, now on comparable quantities rather than an L1 against
+a displacement, which is what the previous reading did wrongly:
+  A: 3-D pointwise, then averaged   shift -0.000 A, resid 0.0%, gap -0.0000 eV
+  B: averaged first, then 1-D       shift +0.025 A, resid 0.7%, gap +0.0146 eV
+So averaging introduces displacement +0.025 A, profile error +0.7 points and
+coupling -0.0146 eV, against the model's own +0.375 A and +0.1417 eV. That is
+7% of the displacement and 10% of the gap. And in L1 the model's ionic profile
+is 0.18687 e off the reference, 19% of the 1.0 e total, against the averaging
+error's 0.58%. Averaging is not the main cause, now measured on like against
+like.
