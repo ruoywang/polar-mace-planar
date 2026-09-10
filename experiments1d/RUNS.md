@@ -2098,4 +2098,62 @@ spectral energy above the model closure grid's cut at mode 150, which the
 model's assembly cannot represent since cvhar is upsampled from 300 in z; and
 the model's SOLUTE dipole error, the term correction 2 says was never checked.
 
-Dispatched to the 4090. RESULT PENDING.
+Ran on the 4090, provenance certified IDENTICAL. The branch is answered
+unambiguously.
+
+THE IDENTITY WAS CHECKED IN SOURCE BEFORE RUNNING, not taken on faith:
+pb1d_backend.py:388-390 gives n_e_values = neutral_v - net_values and
+cvhar3 = phi_base - l0_inv(net_g), with neutral_v and phi_base coming from the
+baseline tables, hence independent of the substituted density and cancelling
+in the difference. The one precondition -- both arms using the same baseline
+row -- holds, since baseline_index.json maps this geometry to a single row.
+
+GATE: the assembly reproduces the model's own converged potential from its own
+inputs and its own solvent charge, mean-removed max abs deviation 7.507e-12
+eV, constant +1.020240 eV. PASS -- so cvdip, l0_inv, indmin, c_unit, center_z,
+the dipole mixing and every sign are validated together.
+
+[RESULT] one solvent charge (DFT bound + ionic, net +0.99999 e), two solute
+inputs, mean-removed:
+                        solute input        L1       max       rms  45 A amp    dipole
+       DFT solute potential + dipole    0.0167    0.0171   0.00157   0.00001   -0.3653
+     model solute potential + dipole    8.4556    0.4196   0.20944   0.23008   -0.9439
+
+The all-DFT rebuild error is 0.00157 eV rms, 0.05% of the potential's own
+3.35043 eV. Swapping in the model's solute input takes it to 0.20944 eV, a
+FACTOR OF 133.
+
+VERDICT on the user's branches: the SOLUTE INPUT is the priority. Two things
+are exonerated by the same run -- the potential ASSEMBLY, which reproduces the
+DFT total potential to 0.05% when fed DFT solute inputs, and GRID REACH, since
+0.00% of cvhar_DFT's spectral energy sits above the model closure grid's
+mode-150 cut.
+
+THE CONSTANT lands correctly for the all-DFT row: the neutrality offset is
+-1.062176 eV giving a mean of -1.06218 against the DFT potential's -1.06133,
+agreeing to 0.85 mV. The model-solute row's is off by 0.138 eV. And the stored
+DFT potential's own offset is -0.000849 eV, so the calibration is essentially
+zero as it should be. The user's electroneutrality point is directly visible:
+the constant tracks the shape rather than being independent of it.
+
+THE TERM THE USER IDENTIFIED AS NEVER CHECKED IS THE LARGE ONE:
+  electron profile: model int 660.99991, DFT 660.99999; difference rms 6.98500
+  solute potential: cvhar_model rms 3.43934, cvhar_DFT 3.48212; difference rms
+    0.12710 eV
+  solute dipole: model -6.74120, DFT -6.16258 (300 grid) and -6.16260 (native
+    500); MODEL ERROR +0.57862 e A
+That solute dipole error is about 12x the solvent dipole error the previous
+round was optimising (-0.04943 e A after P_off*). And the result table's dipole
+column difference, -0.9439 against -0.3653, is exactly -0.57862 -- so the
+feedback term is carrying the solute dipole error, and the two measurements are
+consistent. The electron COUNT matches to 1e-4 while the profile differs at
+6.985 rms, so this is a shape error in the predicted density, not a charge
+error.
+
+WHAT THIS DOES NOT SEPARATE, flagged rather than left implicit: the model's
+solute input was swapped as a UNIT -- cvhar shape and dipole together -- so
+which of the two dominates is not established, and both are non-trivial alone,
+0.12710 eV rms in cvhar and +0.57862 e A in the dipole. But unlike a1/p_off
+these are two SEPARATE inputs rather than two halves of one identity, so a
+one-at-a-time swap IS a controlled intervention here and the obstruction that
+defeated three earlier designs does not apply. Proposed to the user, not run.
