@@ -933,3 +933,53 @@ throughout because it read $$ inside the subshell, which is the subshell's
 own PID rather than the python process. The MemAvailable column is valid
 (238 GB flat); the process RSS column measured nothing, which is the one
 thing I added it for.
+
+## 1-D CAVITY SUBSTITUTION (job 3426811, code 9216d28): ISOLATION FAILED
+Script sha256 e856ba84093bf38f, verified IDENTICAL to the committed copy.
+Both solves converged on their criteria on both frames (fixed-point tol after
+7 steps of a 60 cap; Newton tol with 8 and 7 outer of a 12 cap), so nothing
+below is a convergence artefact, and max |ne_dft - ne_model| = 1.618 e/A^3
+confirms the substitution took effect.
+
+THE CHECK I BUILT FOR THIS FIRED. "solute potential identical across the two
+solves" reads max |d cvhar3| 4.142e-01 eV on the charged frame and 4.265e-01
+on the neutral one, not zero. So the two solves did NOT share the same solute
+potential and the intervention did not isolate the cavity, which is what the
+design required. Verified beforehand and still true: closure_from_fields uses
+its n_e_density argument only in tp.create_cavity_torch. What I did not
+account for is that after the solve the model side responds -- constant
+potential and charge equilibration make the solute answer a changed solvent
+-- or, alternatively, that my wrapper captures the last of several closure
+calls and the two runs took different paths through them. Which of those it
+is I have NOT determined. Either way this run cannot attribute anything to
+the cavity, and the numbers below answer a different question: rebuild the
+cavity from the DFT density and re-solve EVERYTHING.
+
+As that different question, on one fixed potential taken from run 1:
+  charged BOUND  coupling 0.496 -> 0.436 x DFT; displacement -0.423 -> -1.419
+                 A; residual 48.5% -> 52.3%; int|.| 2.0275 -> 2.2710; the
+                 0.525 eV gap becomes 0.588 eV, 11.9% WORSE
+  charged IONIC  coupling 1.074 -> 1.084; displacement -0.461 -> -0.522 A, so
+                 the ~0.42 A displacement does NOT shrink; residual 21.2% ->
+                 24.5%; gap +0.144 -> +0.165, 13.9% worse
+  neutral BOUND  coupling 1.020 -> 1.684; displacement +0.437 -> -1.394 A;
+                 correlation 0.706 -> 0.469; residual 70.8% -> 88.3%; int|.|
+                 0.377 -> 0.802
+  neutral IONIC  4e-3 e of charge, correlation about zero, shift +4.5 A --
+                 noise, and it should have been suppressed
+So on this run "the more accurate cavity also corrects the background charge
+position" is not supported and the movement is in the opposite direction --
+limited, because of the failed isolation, to "after the solute potential
+moved with it".
+
+TWO PRESENTATION DEFECTS OF MINE
+- The neutral BOUND line printed "-3254.9% of it closed": arithmetically
+  right, meaningless, because the denominator is a near-zero baseline
+  (+0.0107 eV). My guard tests abs(den) > 1e-12, which 0.0107 passes. A
+  percentage needs a denominator that is large compared with the effect, not
+  merely non-zero. The absolute values are the statement: +0.0107 ->
+  +0.3591 eV.
+- No negligible-channel guard on the neutral ionic row, although I had added
+  exactly that guard to profile_shift_scan the same afternoon after the
+  workstation found it there. Building a guard and not carrying it to the next
+  script is the same failure as not having built it.
