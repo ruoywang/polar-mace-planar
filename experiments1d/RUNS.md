@@ -1796,3 +1796,75 @@ THREE CORRECTIONS TO MY OWN SCRIPT, all found by the workstation:
   relative difference goes as sqrt(2(1-corr)), and sqrt(2*9.0e-05) = 1.34e-02
   exactly. A correlation is never a relative error -- it is a relative error
   squared and halved. Same family as the difference-of-norms slip.
+
+## 2026-09-10  poff_exact_target.py -- hold a1 fixed, get the compensation right
+code e48faec. The user set a staged plan with a stop rule, and step 1 of it
+dissolves the obstruction that ended the previous entry.
+
+THE MOVE. With a1 HELD at the model's value there is only ONE unknown left in
+P = a1 E + p_off, and it is exactly determined:
+
+  P_off*   = plane_mean(P_DFT) - a1_model * plane_mean(E_DFT)
+  delta_p* = P_off* - prior_model
+
+The 2x2 failed because a1 and p_off are complementary halves of one
+decomposition, so substituting either alone breaks a cancellation the
+reference itself relies on. Defining the target WITH the model's own a1 makes
+the pair exact by construction and leaves nothing to break. This is the
+user's, not mine.
+
+A CORRECTION IT CARRIES, and it retracts a verdict from the entry above:
+prior_ref = Pz_ref - A_ref*Ez_ref is the correct p_off for the REFERENCE a1,
+NOT for the model's. Scoring delta_p against it therefore charged delta_p with
+a1's error as well, so the "delta_p is right in shape and about fourteen times
+too weak" verdict was measured against the wrong target. Step 1 re-decides it
+against delta_p*. The 13.72x and the 71.0% from that entry are suspended until
+it does.
+
+Also recorded from the user: the branch conclusion stays where it was -- the
+model's bound charge has close to the right total and a clearly wrong shape,
+and swapping the DFT total potential alone does not repair it. Nothing further
+is claimed, and the generation of the total potential remains not excluded.
+
+EXPLICITLY OUT OF SCOPE this round, per the user: no grid change, and no
+scaling up of the correction coefficients. The question is only whether
+getting the compensation right, with everything else as it is, improves the
+aggregate.
+
+  STEP 1  arrays only. P_off* and delta_p*, how far the target moved from the
+          old one, and the amplitude-versus-shape split of the current delta_p
+          against the CORRECT target -- by best-scale-plus-residual, which is
+          the one decomposition in this chain that has separated anything,
+          rather than by substitution.
+  STEP 2a wiring check, labelled as such: P_off* was built at the DFT field,
+          so reproducing the reference there proves the algebra and nothing
+          physical. The residual should be the 500->600 operator
+          discretisation plus the 0.18% by which the 3-D reconstruction
+          differs from stored RHOB.
+  STEP 2b the actual test. P_off* in, RE-SOLVE self-consistently with every
+          other input the same tensor object, judged on aggregate charge sum
+          L1 against RHOB+RHOION, bound and ion L1 separately, cross coupling,
+          and the FULL self-energy on the SUM field so the bound-ion mutual
+          term is included, plus the potential profile and both solver exit
+          reasons. Gated on the baseline re-solve reproducing the model's own
+          bound charge.
+  STEP 3  not run. Only if step 2 improves: can the existing head produce
+          delta_p* within its own basis and its actual clipping.
+
+THE USER'S STOP RULE, to be applied and not softened: if the aggregate does
+not improve, STOP -- the compensation is not the binding problem and the next
+place to look is the other inputs and the self-consistent coupling, not
+training. A bound-channel-only improvement is NOT success; that is the trap
+the s_ion round set, where the ionic channel improved 10.6-fold and the
+aggregate moved 0.03%.
+
+ONE FREE NUMBER THAT MAY DECIDE STEP 3 IN ADVANCE. The head is
+delta_p = G_0.2 * [w_env(z) * sum_k c_k B_k(u)] with K = 8 zones and
+c_k = c_max*tanh(...) at c_max = 0.25 -- a HARD bound. So c_absmax is printed:
+at the bound, no training can supply a larger correction whatever delta_p*
+asks for; far below it, the amplitude is a learning outcome rather than a
+representational limit.
+
+w_env and u on the solve grid are rebuilt exactly as solve_graph does,
+clamp(fourier_upsample(w_env, f)) then the normalised cumsum, and saved, so
+step 3 needs no second model call. Dispatched to the 4090. RESULT PENDING.
