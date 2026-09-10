@@ -224,6 +224,7 @@ def run(sid):
     t["_label"] = float(a.info["energy"])
     t["_nat"] = nat
     t["_q"] = float(a.info.get("total_charge", 0.0))
+    t["_fermi"] = float(a.info.get("Fermi", float("nan")))
     t["_feats"] = {i: torch.cat(v, 0).clone() for i, v in grab.items()}
     return t
 
@@ -356,22 +357,70 @@ if len(PAIRS_VAL) < len(_pairs_all):
     print(f"   SUBSET: {len(PAIRS_VAL)} of {len(_pairs_all)} pairs complete "
           f"here; the bias and RMSE below cover only those and must be "
           f"reported as a subset.")
-print(f"   {'pair':>6} {'q':>7} {'DFT dE':>12} {'model dE':>12} "
-      f"{'model-DFT':>12}")
+# A HYPOTHESIS TO TEST HERE, not a conclusion, and it came out of the one
+# pair the workstation ran. The four terms that cannot contribute to Delta E
+# are e0 (per-species, identical species) and inter_e (identical features, so
+# the descriptor is charge-blind), plus two disabled terms. So the model has NO
+# channel for the energy of the ADDED ELECTRON ITSELF -- no integral mu dN --
+# and on that pair the missing amount matched the mean Fermi level to 0.20%:
+#   eps_Delta = +5.635095, so the model is short by -5.635095 eV
+#   mean Fermi x dN = (-3.8745 + -7.3736)/2 x 1 = -5.6240 eV, residual -0.0110
+# The endpoints do NOT match (-1.76 and +1.74), so it is specifically the
+# TRAPEZOID. One pair cannot distinguish that from coincidence; twenty pairs
+# with dN spread over 0.8 to 1.3 can, because a varying dN makes the relation
+# a one-parameter prediction rather than a single number. The columns below
+# test it and the residual RMSE says how much it explains.
+print(f"   {'pair':>6} {'q':>7} {'dN':>6} {'DFT dE':>11} {'model dE':>11} "
+      f"{'eps_D':>10} {'mu_bar.dN':>11} {'residual':>10}")
 rows = []
 for k in PAIRS_VAL:
     mc, mn = run(k), run(600 + k)
     de_m = mc["_total"] - mn["_total"]
     de_d = mc["_label"] - mn["_label"]
-    rows.append((k, mc["_q"], de_d, de_m, de_m - de_d))
-    print(f"   {k:>6} {mc['_q']:+7.2f} {de_d:+12.6f} {de_m:+12.6f} "
-          f"{de_m-de_d:+12.6f}")
-e = np.array([r[4] for r in rows])
-print(f"   {'bias':>6} {'':>7} {'':>12} {'':>12} {e.mean():+12.6f}")
-print(f"   {'RMSE':>6} {'':>7} {'':>12} {'':>12} "
-      f"{np.sqrt((e*e).mean()):12.6f}")
-print(f"   {'min/max':>6} {'':>7} {'':>12} {'':>12} "
-      f"{e.min():+.4f}/{e.max():+.4f}")
+    dN = -mc["_q"]
+    mu = 0.5 * (mc["_fermi"] + mn["_fermi"])
+    res = (de_m - de_d) + mu * dN
+    rows.append((k, mc["_q"], dN, de_d, de_m, de_m - de_d, mu * dN, res, mu,
+                 mc["_fermi"], mn["_fermi"]))
+    print(f"   {k:>6} {mc['_q']:+7.2f} {dN:+6.2f} {de_d:+11.6f} "
+          f"{de_m:+11.6f} {de_m-de_d:+10.6f} {mu*dN:+11.6f} {res:+10.6f}")
+e = np.array([r[5] for r in rows])
+mu_dn = np.array([r[6] for r in rows])
+res = np.array([r[7] for r in rows])
+print(f"   {'bias':>6} {'':>7} {'':>6} {'':>11} {'':>11} {e.mean():+10.6f} "
+      f"{mu_dn.mean():+11.6f} {res.mean():+10.6f}")
+print(f"   {'RMSE':>6} {'':>7} {'':>6} {'':>11} {'':>11} "
+      f"{np.sqrt((e*e).mean()):10.6f} {'':>11} {np.sqrt((res*res).mean()):10.6f}")
+print(f"   {'min/max':>6} {'':>7} {'':>6} {'':>11} {'':>11} "
+      f"{e.min():+.3f}/{e.max():+.3f} {'':>11} {res.min():+.3f}/{res.max():+.3f}")
+print(f"\n   THE ELECTRON-ENERGY HYPOTHESIS, tested rather than asserted. "
+      f"eps_Delta RMSE {np.sqrt((e*e).mean()):.4f} eV; after crediting "
+      f"mu_bar x dN the residual RMSE is {np.sqrt((res*res).mean()):.4f} eV, "
+      f"so the trapezoid integral of the\n   chemical potential accounts for "
+      f"{100*(1-np.sqrt((res*res).mean())/max(np.sqrt((e*e).mean()),1e-30)):.1f}% "
+      f"of the charging-energy error in RMS. Correlation between eps_Delta and "
+      f"-mu_bar x dN: {np.corrcoef(e, -mu_dn)[0,1]:+.4f}.")
+_sl = float(np.polyfit(-mu_dn, e, 1)[0]) if len(rows) > 2 else float('nan')
+print(f"   Regressing eps_Delta on -mu_bar x dN gives slope {_sl:+.4f} "
+      f"(1.0000 would mean the missing energy IS the electron's own energy at "
+      f"the average chemical potential).")
+# endpoint controls: trapezoid against either endpoint is the whole question,
+# and on the single pair the endpoints missed by -1.76 and +1.74 eV while the
+# mean missed by -0.011. Computed from the stored Fermi values, no extra runs.
+dn = np.array([r[2] for r in rows])
+fc = np.array([r[9] for r in rows])
+fn = np.array([r[10] for r in rows])
+for nm, mu_alt in (("charged-endpoint Fermi", fc),
+                   ("neutral-endpoint Fermi", fn),
+                   ("trapezoid mean", 0.5 * (fc + fn))):
+    r_alt = e + mu_alt * dn
+    print(f"   crediting the {nm:>22}: residual RMSE "
+          f"{np.sqrt((r_alt*r_alt).mean()):8.4f} eV, bias "
+          f"{r_alt.mean():+8.4f}")
+print(f"   Only the trapezoid is expected to work if the missing quantity is "
+      f"an integral of the chemical potential over the electron count; an "
+      f"endpoint working equally well would mean it is something else.",
+      flush=True)
 print(f"\n   eV per pair. The sid1/sid601 value above ({dE_m-dE_d:+.4f}) sits "
       f"at percentile "
       f"{100.0*float((e < (dE_m-dE_d)).mean()):.0f} of these 20, so the first "
@@ -380,8 +429,9 @@ print(f"\n   eV per pair. The sid1/sid601 value above ({dE_m-dE_d:+.4f}) sits "
 np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
                       "charging_reconcile.npz"),
          pair=np.array([r[0] for r in rows]), q=np.array([r[1] for r in rows]),
-         dft=np.array([r[2] for r in rows]), model=np.array([r[3] for r in rows]),
-         err=e)
+         dN=dn, dft=np.array([r[3] for r in rows]),
+         model=np.array([r[4] for r in rows]), err=e, mu_dn=mu_dn,
+         residual=res, fermi_charged=fc, fermi_neutral=fn)
 for h in hooks:
     h.remove()
 print("\nDONE")
