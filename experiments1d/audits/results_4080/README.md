@@ -1102,3 +1102,105 @@ baseline's wrong dipole was compensating an error in the ramp form fits but is
 not stated as a finding — it is the same shape as the solute-side compensation
 story that failed its own gate in this same chain, and it needs its own gate
 first.
+
+## Dispatched control: potential_rebuild (mace HEAD d40b5ec) — the SOLUTE INPUT is the priority
+
+`potreb_d40b5ec.log`. mace d40b5ec, pb 9b3b9ba, executed file sha256
+d2fede6351cd99985b2e4d4b31fc29ae8d835e99b6a4ef32947c5cb8ca700b6f, IDENTICAL to
+the commit.
+
+### Corrections to conclusions recorded ABOVE in this file
+
+The user rejected three of the readings recorded in the previous sections. All
+three are corrected here and the earlier text should be read subject to this:
+
+1. **"Both candidate inputs are exonerated by measurement" is WRONG.** A better
+   charge L1 and a better solvent dipole do not imply that every spatial
+   component determining the potential improved, and a band rms does not
+   establish it. Worse, the dipole measured there was the first moment of the
+   SOLVENT charge, while the feedback uses
+   `dip_z = val_ion_dipole_z + dsol_z - q*center_z`, which contains the model's
+   SOLUTE dipole — never checked until this run. And holding `cvhar_z` fixed
+   across two cases says nothing about whether `cvhar_z` is correct.
+2. **The "two open items" framing is WRONG and is withdrawn.** The solver fixes
+   the potential's constant by ionic electroneutrality — the residual's G=0 row
+   is `mean(n_b + n_ion) + q_sol = 0` and `n_ion` depends on phi's mean through
+   `n_work` — so the constant MUST move when the shape moves. A G=0 change
+   therefore implies no separate bookkeeping error. The 0.0% measurement stands;
+   the conclusion drawn from it does not.
+3. **"Energy closing while the field degrades is the compensating-error
+   signature" was too broad.** The full self-energy IMPROVED, 0.0520 to 0.0368 eV,
+   and the cross energy improved 0.3953 to 0.0223; only the mutual term inside
+   the self-energy worsened. The sufficient reason to pause was the potential
+   alone. The pause stands, the reason given for it was wider than the evidence.
+
+Scope limit to carry with the earlier table: its `total` column is the 1-D
+solvent electrostatic energy at a FIXED bare-solute potential, containing neither
+the dipole correction nor the G=0 term, so "96% closed" is not a statement about
+the full DFT energy.
+
+### The cvhar identity checks out, and its precondition holds
+
+`cvhar_DFT = cvhar_model + l0_inv(n_e_DFT - n_e_model)` is correct. Verified in
+source: `cvhar3 = phi_base - l0_inv(net_g)` with `net = neutral_v - n_e` at
+pb1d_backend.py:388-390, and `neutral_v`/`phi_base` come from the baseline
+tables (`self._rt_tables.fields(...)`, or `fields[0]`/`fields[1]`), so they are
+independent of the electron density being substituted and cancel in the
+difference. PHI genuinely never enters. The precondition is that both arms use
+the same baseline row, which they do — `baseline_index.json` maps this geometry
+to one row.
+
+### GATE PASSES
+
+Shape: max abs deviation after removing the constant **7.507e-12 eV**; the
+constant itself +1.020240 eV. So cvdip, l0_inv, indmin, c_unit, center_z, the
+dipole mixing and every sign are validated at once.
+
+### RESULT: one solvent charge, two solute inputs
+
+| solute input | L1 | max | rms | 45 A amp | dipole |
+|---|---|---|---|---|---|
+| DFT solute potential + dipole | 0.0167 | 0.0171 | **0.00157** | 0.00001 | -0.3653 |
+| model solute potential + dipole | 8.4556 | 0.4196 | **0.20944** | 0.23008 | -0.9439 |
+
+The all-DFT rebuild error is 0.00157 eV rms, **0.05%** of the potential's own rms
+of 3.35043 eV. Swapping in the model's solute input takes it to 0.20944 eV, a
+**factor of 133**.
+
+By the branches set in advance — "all-DFT rebuilds and the model's input does not
+-> the solute input is the priority" — **the solute input is the priority.** The
+assembly is not at fault: it reproduces the DFT potential to 0.05% when given DFT
+solute inputs, and 0.00% of cvhar_DFT's spectral energy sits above the model
+grid's mode-150 cut, so grid reach is not the constraint either.
+
+The two solute inputs differ as follows:
+
+- electron profile: model int 660.99991 against DFT 660.99999; difference rms 6.98500
+- solute potential: cvhar_model rms 3.43934, cvhar_DFT 3.48212, difference rms **0.12710 eV**
+- **solute dipole: model -6.74120 against DFT -6.16258 (300 grid) and -6.16260 (native 500), so the model's error is +0.57862 e A**
+
+That dipole error is the term never checked before, and it is about 12x the
+solvent dipole error that the previous round was optimising (-0.04943 e A after
+P_off*). The `dipole` column difference in the result table, -0.9439 against
+-0.3653, is 0.5786 — exactly the solute dipole error, so the two are consistent.
+
+### The constant lands correctly for the all-DFT row
+
+| row | offset | mean after offset | DFT potential's mean |
+|---|---|---|---|
+| DFT solute potential + dipole | -1.062176 | -1.06218 | -1.06133 |
+| model solute potential + dipole | -0.923560 | -0.92356 | -1.06133 |
+| DFT total potential (stored) | -0.000849 | -1.06218 | -1.06133 |
+
+The stored potential's own offset is -0.000849 eV, i.e. the calibration is
+essentially zero as it should be. The all-DFT rebuild's constant agrees with the
+DFT potential's mean to 0.85 mV; the model-solute rebuild's is off by 0.138 eV.
+
+### What this does NOT separate
+
+The model's solute input was swapped as a unit — `cvhar` shape and the dipole
+together — so which of the two dominates is not established. Both are non-trivial
+on their own: 0.12710 eV rms in `cvhar` and +0.57862 e A in the dipole. Unlike
+`a1`/`p_off`, these are two separate inputs and not two halves of one identity,
+so a one-at-a-time swap IS a controlled intervention here and would separate
+them. Not run, not requested.

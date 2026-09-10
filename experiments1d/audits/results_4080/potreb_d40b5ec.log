@@ -1,0 +1,41 @@
+PROVENANCE mace=d40b5ec pb=9b3b9ba sha256(potential_rebuild.py)=d2fede6351cd99985b2e4d4b31fc29ae8d835e99b6a4ef32947c5cb8ca700b6f (IDENTICAL to committed d40b5ec)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  one solvent charge (DFT bound + ionic) for both rows; only the SOLUTE input changes. Existing fields only, no fitting.
+
+  solve grid 600, closure/density grid 300, DFT native 500; c_unit -4.709356e-04, center_z 22.5000 A, indmin 1, q_sol +1.000000
+
+[GATE] the assembly reproduces the model's own converged potential from its own inputs and its own solvent charge
+   shape: max abs deviation after removing the constant 7.507e-12 eV; the constant itself +1.020240 eV
+   [PASS] -- this validates cvdip, l0_inv, indmin, c_unit, center_z, the dipole mixing and every sign at once. If it fails nothing below can be read.
+
+[THE TWO SOLUTE INPUTS]
+   electron profile: model int 660.99991, DFT 660.99999 (values = density * V, so the mean is the electron count / 1); difference rms 6.98500
+   solute potential: cvhar_model rms 3.43934, cvhar_DFT 3.48212, difference rms 0.12710 eV
+   solute dipole: model -6.74120, DFT -6.16258 (on the 300 grid) and -6.16260 (on the native 500) e A -- the model's error is +0.57862
+   grid reach: the model's cvhar is upsampled from 300 so it carries no mode above 150; share of cvhar_DFT's spectral energy above that cut 0.00%
+
+[RESULT] one solvent charge (DFT bound + ionic, net +0.99999 e), two solute inputs. Mean-removed, since the constant is checked separately below.
+                        solute input        L1       max       rms  45 A amp    dipole
+       DFT solute potential + dipole    0.0167    0.0171   0.00157   0.00001   -0.3653
+     model solute potential + dipole    8.4556    0.4196   0.20944   0.23008   -0.9439
+
+  all-DFT rebuild error 0.00157 eV rms, which is 0.05% of the potential's own rms (3.35043 eV)
+  swapping in the model's solute input takes it to 0.20944 eV, a factor of 133.02
+
+[THE CONSTANT] checked against the condition the solver actually uses, not folded into the shape. The residual's G=0 row is mean(n_b + n_ion) + q_sol = 0 and n_ion depends on phi's mean through n_work,
+  so the constant is set by ionic electroneutrality and MUST move when the shape moves -- which is why a G=0 change does not imply a separate bookkeeping error.
+   target ionic total from DFT RHOION +0.999995 e
+        DFT solute potential + dipole: offset -1.062176 eV, its own mean +0.00000, mean after the offset -1.06218 vs the DFT potential's -1.06133
+      model solute potential + dipole: offset -0.923560 eV, its own mean +0.00000, mean after the offset -0.92356 vs the DFT potential's -1.06133
+         DFT total potential (stored): offset -0.000849 eV, its own mean -1.06133, mean after the offset -1.06218 vs the DFT potential's -1.06133
+   (the stored DFT total potential's own offset is the calibration: it should be ~0, and each rebuild's offset says how far its constant sits from neutrality.)
+
+[READING]
+  all-DFT rebuilds and the model's input does not -> the SOLUTE INPUT is the priority.
+  all-DFT does not rebuild -> the potential ASSEMBLY, boundary and grid conventions.
+  both rebuild -> back to the residual charge error and the self-consistent response.
+  Nothing here is a share of the DFT error; these are rebuild errors against the stored DFT total potential with one solvent charge held fixed. Plane-averaged 1-D only.
+
+  arrays saved to potential_rebuild_arrays.npz
+DONE
