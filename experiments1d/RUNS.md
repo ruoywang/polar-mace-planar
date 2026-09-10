@@ -2179,3 +2179,71 @@ which of the two dominates is not established, and both are non-trivial alone,
 these are two SEPARATE inputs rather than two halves of one identity, so a
 one-at-a-time swap IS a controlled intervention here and the obstruction that
 defeated three earlier designs does not apply. Proposed to the user, not run.
+
+## 2026-09-10  lateral_bound_swap.py -- what does fixing the lateral bound charge buy?
+code 09d4389. The user moved this back to the MAIN LINE and specified one
+experiment.
+
+WHY THIS IS THE MAIN LINE. The bound coupling gap splits by channel as
+plane-average 0.525 eV (28.7%) and LATERAL 1.307 eV (71.3%) -- the T2 channel
+decomposition recorded earlier in this ledger. The 3-D fit's only
+responsibility is that lateral shortfall, and every round since the s_ion
+result has been inside the 1-D plane-averaged channel, i.e. the other 28.7%.
+The question this line was opened for is what fixing the lateral part actually
+buys the final energy.
+
+THE EXPERIMENT. On the six already-checked frames (sid 61, 1, 28, 201, 353,
+601) with the current checkpoint, substitute
+
+    lat_DFT(r) = rho_b_DFT(r) - plane_mean(rho_b_DFT)(z)
+
+for the model's own lateral bound residual. Held fixed: the solute electron
+density, the 1-D background, the ionic charge and every other network output.
+Every z-plane of the substituted field sums to zero -- the same per-plane
+conserving form d_sup_b already has -- so the net charge, the 1-D profile and
+the z-dipole are untouched BY CONSTRUCTION rather than by argument.
+
+WHY THE ENERGY UPDATE IS A ONE-TERM CHANGE. The reconciliation identity gives
+e_xsol = int delta*phi, e_self = 0.5 int delta*phi[delta] and
+int rho_1d*phi[delta] = 0 by the per-plane projection, and
+solvent3d_energy_g = e_xsol + e_self enters the total energy additively
+(extensions.py). Since lat_DFT also has zero plane means the cross term stays
+zero and comp and E_bl are unaffected, so the entire effect is
+
+    dE = [cross + self](d_i + lat_DFT) - [cross + self](d_b + d_i)
+
+with the self-energy on the SUM, which keeps the bound-ion interaction inside
+it instead of dropping it between two separate self energies.
+
+THREE GATES on exactly that chain: the model's own 3-D term reproduced through
+THE Coulomb function, so solvent3d_energy_g really is cross+self; the
+substituted field's plane means; and the 1-D/3-D cross term after the swap. If
+the first fails, dE is not a one-term change and the table must not be read.
+
+THE LIMITATION THAT TRAVELS WITH THE NUMBER, not after it: the model's energy
+grid is coarser laterally than the DFT one (100x100 against 168x168), so the
+swap can only inject the lateral structure that grid can represent. The share
+of native lateral power above the model grid's lateral Nyquist is reported and
+the cross energy is computed on BOTH grids. Agreement means truncation does
+not matter for the energy; disagreement makes the improvement a LOWER BOUND on
+what a perfect lateral fix would give.
+
+THE READING, set by the user in advance:
+  the charged frames' deviation drops clearly -> a basis for concentrating on
+      how the 3-D bound charge is represented and trained
+  the improvement is small or negative -> that part of the coupling gap can no
+      longer be used to explain the total-energy plateau, and the remaining
+      energy terms and their compensation have to be examined
+  it improves partly -> record exactly how much is recovered and how much
+      remains
+
+Two things expected to matter beyond the table: the correlation between the
+model's own d_sup_b and lat_DFT per frame, which says whether the model's
+lateral charge points the right way at all and doubles as the sign check; and
+the neutral frame, where the ionic channel is identically zero so its row
+isolates the bound lateral effect with no ionic contribution.
+
+The user was explicit that this does NOT show the network can learn the
+reference charge. It settles whether the line is worth the work.
+
+Dispatched to the 4090. RESULT PENDING.
