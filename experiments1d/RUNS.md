@@ -1113,3 +1113,57 @@ caveat stands. And the DFT-cavity "best-by-coupling" shift reads +1.500 A in
 both delta_p states, exactly the edge of the +-1.5 A scan window: censored,
 not measured, and not to be quoted as a shift. The by-residual column is
 interior and valid.
+
+## IONIC ORDER OF OPERATIONS (job 3426981, code a600938), charged frame only
+Script sha256 cce1f42bfb641fc2, IDENTICAL to the committed copy. No model, no
+re-solve; native DFT grid (168,168,500) throughout, so no interpolation.
+params: LION True, LNLION True, theta_b 4.360394e-01, ZBETA 3.894110e+01,
+n_max 2.762136e-03, invBETA 2.567981e-02.
+
+A. THE 3-D PATH REPRODUCES RHOION EXACTLY, not approximately.
+Sign measured rather than assumed: phi = -PHI_raw needs offset c = -0.000000
+eV and gives pointwise int|d rho| 0.000000 e, 0.00% of int|rho_ref|, max
+deviation 1.311e-12 e/A^3. phi = +PHI_raw gives 209.61% and is rejected.
+So in one shot this validates the formula, the parameters, the cavity recipe
+(s_ion from create_cavity_torch on the DFT density), the sign convention, the
+units AND the reference zero -- and the required offset is ZERO, i.e. the
+stored PHI already carries the correct electrolyte reference. No gauge
+adjustment is needed anywhere, and the mean must not be subtracted.
+
+THE SENSITIVITY IS THE OTHER HALF OF THE RESULT and it is severe:
+  c -0.20 eV -> total +9.260 e      c -0.05 -> +6.978
+  c  0.00    -> +0.999995 (target)  c +0.05 -> -5.830   c +0.20 -> -9.254
+A 0.05 eV error in the potential changes the total ionic charge by a factor of
+about 7. That is exactly ZBETA * 0.05 = 1.95 in the sinh argument and
+exp(1.95) = 7.0, so the number is the expected exponential and not an
+artefact. The ionic channel is exponentially sensitive to the potential
+reference.
+
+B. AVERAGING FIRST IS NOT THE PROBLEM.
+  case                              total (e)   int|.| (e)   L1 vs ref   max dev
+  DFT reference RHOION              +0.999995     0.999995    0.000000   0
+  A: 3-D pointwise, then averaged   +0.999995     0.999995    0.000000   1.3e-12
+  B: averaged first, same offset    +1.005279     1.005279    0.005326   2.4e-05
+  B: averaged first, own offset     +0.999995     0.999995    0.009432   2.4e-05
+The 1-D path's own neutrality offset is c1 +0.000035 eV against -0.000000,
+itself a consequence of the order of operations. Its error is 0.0053 e in L1
+with the shared offset, 0.0094 e with its own, against a 1.0 e total -- so
+0.5 to 0.9%, and the largest plane-profile deviation is 2.4e-05 e/A^3. It
+produces essentially no displacement.
+
+READING, by the user's own criteria: A reproduces and B ALSO essentially
+reproduces, so the averaging approximation is NOT the priority, and the
+indicated next place is the model's potential and its boundary handling. The
+sensitivity above makes that direction quantitative rather than a guess: a
+sub-0.1 eV error in the model's solute potential is enough to move the ionic
+charge by a large factor, and an order-of-operations error of 0.5% cannot
+explain a 0.4 A layer displacement or the 7.4% ionic coupling gap
+(+0.144 eV against a -1.936 eV reference).
+
+DEFECT IN MY OUTPUT, the third of this class: the line "order-of-operations
+penalty: L1 of the 1-D path is 12321156.54x the 3-D path's" divides by the
+3-D path's L1, which is exactly zero because it reproduces. Arithmetically
+fine, meaningless as printed. The absolute L1 values are the statement. Last
+time I wrote in this ledger that a percentage needs a denominator large
+compared with the effect rather than merely non-zero -- and then did not
+apply it here.
