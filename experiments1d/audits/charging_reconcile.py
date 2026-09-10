@@ -77,6 +77,36 @@ PAIRS_VAL = [28, 30, 43, 60, 61, 62, 69, 79, 83, 94,
              128, 134, 148, 153, 159, 177, 180, 185, 186, 189]
 if os.environ.get("KIT_PAIRS"):
     PAIRS_VAL = [int(x) for x in os.environ["KIT_PAIRS"].split(",") if x.strip()]
+PAIR_FROM = int(os.environ.get("KIT_PAIR_FROM", "1"))
+PAIR_TO = int(os.environ.get("KIT_PAIR_TO", "200"))
+# THE MEASURED LEAK, and the workstation was right that it is real: RSS grew
+# monotonically 1.98 -> 8.09 GB over 38 forwards, about 161 MB each, with the
+# GPU flat, so host-side. Its candidate (_grid_for's unbounded _grids) is
+# REFUTED by measurement: the cells are identical across frames -- 1 distinct
+# Lattice string over 60 train frames -- so that key never varies and the
+# cache holds at most one entry per system. What does grow per sample:
+#   self._bl_ram[sample_id], a RAM cache of two baseline fields at ~24 MB a
+#   sample, bounded only at MACE_PB1D_PRELOAD_MAX=512, i.e. up to ~12 GB;
+#   and baseline_cache.npy is mmap'd, so every sample's row faults in pages
+#   that count in RSS and are never dropped.
+# MACE_PB1D_NO_PRELOAD=1 sets that cache to zero, the loop evicts per frame,
+# and it reports its own RSS so "fixed" is testable from the log rather than
+# from the external monitor. Chunking is the fallback if it is not enough.
+os.environ.setdefault("MACE_PB1D_NO_PRELOAD", "1")
+
+
+def _rss_gb():
+    try:
+        with open("/proc/self/status") as f:
+            for ln in f:
+                if ln.startswith("VmRSS"):
+                    return float(ln.split()[1]) / 1048576.0
+    except OSError:
+        pass
+    return float("nan")
+
+
+_backend = {}
 
 
 def dftdir(sid):
@@ -152,6 +182,25 @@ for p in model.parameters():
 model.solvent3d_energy = True
 model.solvent_cavity_energy = True
 model.solvent_baseline_coupling = True
+
+_bk = PB.PB1DBackend.solve_graph
+def _wrap_bk(self, *a, **k):
+    _backend["b"] = self
+    return _bk(self, *a, **k)
+PB.PB1DBackend.solve_graph = _wrap_bk
+
+
+def _evict():
+    """Drop the per-sample caches so the loop does not grow with the number of
+    frames. Reported rather than assumed: the RSS line says whether it worked."""
+    b = _backend.get("b")
+    if b is not None:
+        for nm in ("_bl_ram", "_grids", "_solvers", "_c_units"):
+            d = getattr(b, nm, None)
+            if isinstance(d, dict):
+                d.clear()
+    torch.cuda.empty_cache()
+
 
 grab = {}
 def mk_hook(i):
@@ -375,6 +424,12 @@ print(f"   dN comes from |total_charge|, not from NELECT, which the xyz does "
       f"1e-4 eV.")
 print(f"   {'pair':>6} {'split':>6} {'q':>8} {'dN':>6} {'DFT dE':>11} "
       f"{'model dE':>11} {'eps_D':>10} {'mu_bar.dN':>11} {'residual':>10}")
+PAIRS = [k for k in PAIRS if PAIR_FROM <= k <= PAIR_TO]
+if (PAIR_FROM, PAIR_TO) != (1, 200):
+    print(f"   CHUNK: pairs {PAIR_FROM}-{PAIR_TO}, {len(PAIRS)} of them; the "
+          f"aggregate lines below cover this chunk only and must be combined "
+          f"across chunks before being reported.")
+_rss0 = _rss_gb()
 rows, failed = [], []
 for k in PAIRS:
     try:
@@ -389,6 +444,12 @@ for k in PAIRS:
     res = (de_m - de_d) + mu * dN
     rows.append((k, mc["_q"], dN, de_d, de_m, de_m - de_d, mu * dN, res, mu,
                  mc["_fermi"], mn["_fermi"], split_by_sid[k]))
+    _evict()
+    if len(rows) % 20 == 0:
+        print(f"   [rss] after {len(rows)} pairs: {_rss_gb():.2f} GB "
+              f"(start {_rss0:.2f}, growth "
+              f"{(_rss_gb()-_rss0)/max(len(rows)*2,1)*1024:.0f} MB/forward)",
+              flush=True)
     if len(rows) <= 12 or split_by_sid[k] == "val":
         print(f"   {k:>6} {split_by_sid[k]:>6} {mc['_q']:+8.4f} {dN:+6.2f} "
               f"{de_d:+11.6f} {de_m:+11.6f} {de_m-de_d:+10.6f} "
