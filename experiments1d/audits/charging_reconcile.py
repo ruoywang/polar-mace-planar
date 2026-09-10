@@ -102,6 +102,41 @@ def dft_terms(sid):
     return out
 
 
+# ---- availability census FIRST: refuse to start rather than crash halfway.
+# The DFT payload is not the same on every machine that can run this, and a
+# script that prints four steps and then throws FileNotFoundError inside the
+# fifth is worse than one that says up front what it cannot do. This is the
+# guard lateral_bound_swap.py grew two rounds ago and which did not carry
+# over -- the workstation caught it before running.
+def _have(sid):
+    d = dftdir(sid)
+    return (d is not None and os.path.exists(f"{d}/OUTCAR")
+            and os.path.exists(f"{d}/log.out"))
+
+
+_pairs_all = list(PAIRS_VAL)
+PAIRS_VAL = [k for k in _pairs_all if _have(k) and _have(600 + k)]
+_missing = [(k, "charged" if not _have(k) else "neutral")
+            for k in _pairs_all if k not in PAIRS_VAL]
+print(f"  DFT availability census: step 1 pair (1/601) "
+      f"{'present' if _have(1) and _have(601) else 'MISSING'}; "
+      f"complete val pairs {len(PAIRS_VAL)} of {len(_pairs_all)}")
+if _missing:
+    mc = [k for k, w in _missing if w == "charged"]
+    mn = [k for k, w in _missing if w == "neutral"]
+    print(f"    incomplete pairs: {len(_missing)} -- missing charged side for "
+          f"{mc if mc else 'none'}, missing neutral side for "
+          f"{mn if mn else 'none'}")
+if not (_have(1) and _have(601)):
+    raise SystemExit("  STOP: steps 1-4 need the sid1/sid601 pair and this "
+                     "machine does not hold it. Run where the payload is "
+                     "rather than substituting another pair.")
+if not PAIRS_VAL:
+    print(f"    -> STEP 5 WILL BE SKIPPED on this machine, and skipped is not "
+          f"'done with fewer pairs': 0 complete pairs means the table cannot "
+          f"be formed at all. Steps 1-4 still run and are self-contained.",
+          flush=True)
+
 device = torch_tools.init_device("cuda")
 torch_tools.set_default_dtype("float64")
 model = torch.load(f=os.path.join(CKDIR, "s3d_gate_bl2_run-123.model"),
@@ -307,8 +342,20 @@ else:
           f"retraining it is not excluded. Its actual leverage is "
           f"d(inter_e) above.")
 
-print(f"\n=================== STEP 5: the 20 validation pairs "
+print(f"\n=================== STEP 5: the validation pairs "
       f"===================")
+if not PAIRS_VAL:
+    print(f"   SKIPPED: 0 of {len(_pairs_all)} val pairs are complete on this "
+          f"machine. Not a reduced table -- no table. The step-1 pair is the "
+          f"only complete one here and it is already reported above.")
+    for h in hooks:
+        h.remove()
+    print("\nDONE (steps 1-4 only)")
+    raise SystemExit(0)
+if len(PAIRS_VAL) < len(_pairs_all):
+    print(f"   SUBSET: {len(PAIRS_VAL)} of {len(_pairs_all)} pairs complete "
+          f"here; the bias and RMSE below cover only those and must be "
+          f"reported as a subset.")
 print(f"   {'pair':>6} {'q':>7} {'DFT dE':>12} {'model dE':>12} "
       f"{'model-DFT':>12}")
 rows = []
