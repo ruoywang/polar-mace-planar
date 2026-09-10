@@ -1331,3 +1331,61 @@ OPERATIVE CAVEAT: the substituted group's bound charge comes from its OWN
 re-solve, so these tables show the NET of the ionic improvement and the bound
 channel's response to it, and that net is zero in energy. Separating the two
 needs the bound channel scored on its own, which this run does not do.
+
+CORRECTION, supplied by the user immediately after the above was written, and
+it overturns the last paragraph. The bound channel CAN be scored on its own
+from the numbers already in hand, because the cross coupling is linear in the
+charge: cross = int rho phi with rho = rho_bound + rho_ion, so the couplings
+of the two channels ADD and the bound term is simply (total - ionic):
+
+  coupling error, model - reference (eV)   baseline   after the s_ion swap
+    bound                                   +0.5371          +0.4141
+    ionic                                   -0.1417          -0.0170
+    total                                   +0.3954          +0.3971
+
+BOTH channels improved -- bound by 0.1230, ionic by 0.1247 -- and their errors
+have OPPOSITE signs: the bound channel under-attracts, the ionic over-attracts.
+Each moving closer to the reference therefore removed part of a mutual
+cancellation and left the total slightly worse. My own reading two paragraphs
+up, "both terms get worse", is arithmetically correct about the TOTALS and
+wrong at the channel level, which is the level that carries the physics. The
+result must NOT be read as "the bound charge was degraded to absorb the ionic
+gain": nothing here supports that, and the decomposition contradicts it.
+
+What still does not follow from the coupling: whether the bound DISTRIBUTION
+improved. Coupling is one scalar projection of the profile onto the solute
+potential; two different profiles can share it. That requires comparing the
+arrays directly, with no shift and no scale.
+
+SCOPE OF THE WHOLE-SYSTEM TABLE, which it failed to state: every number in it
+is the PLANE-AVERAGED 1-D electrostatic total. None of the lateral 3-D error
+is in any of them, so nothing in that table bears on the 3-D fit, whose only
+responsibility remains the lateral shortfall.
+
+## 2026-09-10  bound_response_test.py -- driven wrong, or responds wrong?
+code 940549c (parent 3f1518d added the script, b947b7e the whole-system entry
+above). Frame sid 1 only. One model forward to capture the solver kwargs, then
+n_b = B @ phi + nb_off evaluated directly with a1 and p_off HELD FIXED at the
+captured baseline and only the driving potential swapped, model -> DFT. No
+self-consistent re-solve, so nothing else can move. Compared against the
+plane-averaged DFT RHOB directly, no shift and no scale.
+
+The branch, set by the user in advance: if the bound distribution visibly
+recovers, the priority becomes how the total potential is generated; if it
+stays clearly wrong, the priority is the bound response itself -- the cavity,
+the 1-D closure and the learned correction. Either way the point is to
+separate "the potential driving it is wrong" from "its response to the
+potential is wrong", which is more targeted than extending the basis or
+retraining, and any later fix is still judged on aggregate charge, potential
+and energy together.
+
+Three things measured rather than assumed, after this chain's history: the
+relative sign of PHI_raw and the solver's phi, by correlation with the mean
+removed, with both signs reported; whether a constant offset in phi can reach
+the bound charge at all, via |B @ 1| against |B @ phi|; and how much the two
+driving potentials actually differ, since a near-identical pair would make the
+swap vacuous. Plus a cross-check that this run's baseline bound coupling gap
+reproduces the +0.5371 eV obtained above by the different route.
+
+Dispatched to the 4090 workstation per the user's preference for quick tests.
+RESULT PENDING.
