@@ -216,13 +216,14 @@ Solver1D.solve = wrap_sv
 _sg = PB.PB1DBackend.solve_graph
 def wrap_sg(self, *a, **k):
     out = _sg(self, *a, **k)
-    for k2 in ("prior_solve", "delta_p", "rho_bound_z", "rho_ion_z",
-               "w_env_solve", "u_solve", "c_absmax", "dp_rms"):
+    for k2 in ("prior_solve", "delta_p", "rho_bound_z", "rho_ion_z"):
         v = out.get(k2)
         if torch.is_tensor(v):
             cap[k2] = v.detach().clone()
-        elif v is not None:
-            cap[k2] = v
+    # c_absmax and dp_rms are built in delta_stats and spread into
+    # self.last_diagnostics (pb1d_backend.py line 510), NOT into the returned
+    # dict, so out.get("c_absmax") is always None. Read the attribute.
+    cap["diag"] = dict(getattr(self, "last_diagnostics", {}) or {})
     return out
 PB.PB1DBackend.solve_graph = wrap_sg
 _clo = PB.closure_from_fields
@@ -301,29 +302,49 @@ print(f"    old target rms {float(old_need.pow(2).mean().sqrt()):.4e}, new "
       f"target rms {float(dp_star.pow(2).mean().sqrt()):.4e}, ratio "
       f"{float(dp_star.pow(2).mean().sqrt())/max(float(old_need.pow(2).mean().sqrt()),1e-30):.3f}, "
       f"correlation between them {corr(dp_star, old_need):+.4f}")
-print(f"\n  AMPLITUDE OR SHAPE -- re-decided against the correct target")
-print(f"  {'delta_p vs':>26} {'best scale':>11} {'err rms':>11} "
-      f"{'after rescale':>14} {'removed':>8} {'corr':>8}")
-for lbl, tgt in (("delta_p* (correct)", dp_star),
+print(f"\n  AMPLITUDE OR SHAPE -- re-decided against the correct target. The "
+      f"scale is applied to DELTA_P, not to the target: shrinking the target "
+      f"to fit the head is not a repair, and the fraction it appears to\n  "
+      f"remove is measured against the raw difference rather than against "
+      f"what is needed, which makes it read far better than it is.")
+print(f"  {'delta_p rescaled to fit':>26} {'gain':>9} {'needed rms':>11} "
+      f"{'left over':>11} {'supplied':>9} {'corr':>8}")
+for lbl, tgt in (("delta_p* (correct target)", dp_star),
                  ("the old target", old_need)):
-    sc, e0, e1 = split(dp_m, tgt)
-    print(f"  {lbl:>26} {sc:11.4f} {e0:11.4e} {e1:14.4e} "
-          f"{100*(1-e1/max(e0,1e-30)):7.1f}% {corr(dp_m,tgt):+8.4f}")
+    sc = float((tgt * dp_m).sum() / torch.clamp((dp_m * dp_m).sum(), min=1e-300))
+    need_rms = float(tgt.pow(2).mean().sqrt())
+    res = float((tgt - sc * dp_m).pow(2).mean().sqrt())
+    print(f"  {lbl:>26} {sc:9.3f} {need_rms:11.4e} {res:11.4e} "
+          f"{100*(1-res/max(need_rms,1e-30)):8.1f}% {corr(dp_m,tgt):+8.4f}")
 sc_s = float((dp_star * dp_m).sum() / torch.clamp((dp_m * dp_m).sum(), min=1e-300))
 res_s = float((dp_star - sc_s * dp_m).pow(2).mean().sqrt())
-print(f"  rescaling delta_p by {sc_s:.2f}x would leave rms {res_s:.4e} of "
-      f"{float(dp_star.pow(2).mean().sqrt()):.4e} needed, i.e. a pure gain "
-      f"change removes {100*(1-res_s/max(float(dp_star.pow(2).mean().sqrt()),1e-30)):.1f}%")
-c_am = cap.get("c_absmax")
-if c_am is not None:
-    print(f"\n  HEAD SATURATION, free here and decisive for step 3: c_absmax "
-          f"{float(c_am):.6f} against the hard bound c_max = 0.25 "
-          f"({100*float(c_am)/0.25:.1f}% of it). delta_p = "
-          f"G_0.2 * [w_env * sum_k c_k B_k(u)], K = 8, "
-          f"c_k = 0.25*tanh(...).\n  If this is already at the bound, no "
-          f"training can supply a larger correction and step 3 is decided in "
-          f"advance; if it is far below, the amplitude is a learning outcome "
-          f"and not a representational limit.", flush=True)
+print(f"  So a pure gain change on the head supplies "
+      f"{100*(1-res_s/max(float(dp_star.pow(2).mean().sqrt()),1e-30)):.1f}% of "
+      f"delta_p*, and the head is short by a factor of "
+      f"{float(dp_star.pow(2).mean().sqrt())/max(float(dp_m.pow(2).mean().sqrt()),1e-30):.2f}. "
+      f"Both numbers follow from the correlation, since the residual after "
+      f"ANY optimal gain is sqrt(1 - corr^2) of the target.")
+c_am = cap.get("diag", {}).get("c_absmax")
+print(f"\n  HEAD SATURATION -- free here and decisive for step 3. "
+      f"delta_p = G_0.2 * [w_env * sum_k c_k B_k(u)], K = 8, "
+      f"c_k = 0.25*tanh(...), so c_max = 0.25 is a HARD bound.")
+if c_am is None:
+    print(f"   [FAIL] c_absmax could NOT be read -- this is the number the "
+          f"step-3 decision rests on, so its absence is a failure and not a "
+          f"skipped line. Do not proceed to step 3 without it.", flush=True)
+else:
+    frac = 100.0 * float(c_am) / 0.25
+    print(f"   c_absmax {float(c_am):.6f}, i.e. {frac:.1f}% of the bound; "
+          f"dp_rms {cap['diag'].get('dp_rms', float('nan')):.4e}")
+    print(f"   The head needs {float(dp_star.pow(2).mean().sqrt())/max(float(dp_m.pow(2).mean().sqrt()),1e-30):.2f}x "
+          f"more amplitude. Scaling every c_k by that factor would reach "
+          f"{frac*float(dp_star.pow(2).mean().sqrt())/max(float(dp_m.pow(2).mean().sqrt()),1e-30):.1f}% "
+          f"of the bound, which is "
+          f"{'INSIDE it, so the amplitude is a learning outcome and not a representational limit' if frac*float(dp_star.pow(2).mean().sqrt())/max(float(dp_m.pow(2).mean().sqrt()),1e-30) <= 100.0 else 'BEYOND it, so the head is clipped and no training can supply the correction'}."
+          f"\n   (that scaling argument assumes the shape is held, which the "
+          f"gain-alone recovery above shows only partly holds -- it bounds the "
+          f"amplitude question, it does not answer the shape one)",
+          flush=True)
 
 # ======================================================================
 # STEP 2 -- put it in and re-solve
@@ -377,8 +398,12 @@ def whole(d):
     cross = float((rt * phi_score).sum() * dz * area)
     se = selfE(rt)
     dphi = d["phi"] - (-fresample(phi_dft_z, nz_s))
+    sp = torch.fft.rfft(dphi) / nz_s
     return dict(
         lbl=d["lbl"], net=float(rt.sum() * dz * area),
+        pmean=float(dphi.mean()),
+        pdev=float((dphi - dphi.mean()).pow(2).mean().sqrt()),
+        pm1=float(2.0 * torch.sqrt(sp[1].real ** 2 + sp[1].imag ** 2)),
         l1=float((rt - rt_ref).abs().sum() * dz * area),
         mx=float((rt - rt_ref).abs().max()),
         l1b=float((d["rb"] - rho_b_ref).abs().sum() * dz * area),
@@ -403,10 +428,54 @@ print(f"\n  mutual bound-ion term (self energy of the SUM minus the two "
       f"separate self energies, so the interaction is included):")
 for r in rows:
     print(f"    {r['lbl']:>24} {r['mutual']:+9.4f} eV")
-print(f"  potential profile error against the DFT total potential:")
+print(f"  potential profile error against the DFT total potential, split so a "
+      f"constant offset cannot masquerade as a shape change:")
 for r in rows[1:]:
     print(f"    {r['lbl']:>24} L1 {r['pl1']:.4f}, max {r['pmx']:.4f}, rms "
-          f"{r['prms']:.5f} eV")
+          f"{r['prms']:.5f}; of which mean {r['pmean']:+.5f} and "
+          f"mean-removed rms {r['pdev']:.5f}; longest-wavelength (45 A) "
+          f"amplitude {r['pm1']:.5f} eV")
+
+# WHY a charge that improves in L1 can still worsen the potential: the 1-D
+# Poisson kernel is l0_inv ~ 1/k^2, so the potential is dominated by the
+# lowest modes while an L1 on the charge weights every mode equally. This
+# block says whether that is what happened, instead of leaving "charge better,
+# potential worse" as an unexplained tension. It is also the physically
+# decisive part for a constant-potential model: the longest-wavelength
+# component of the potential IS the cross-cell potential drop.
+BANDS = [(1, 3), (4, 10), (11, 30), (31, 100), (101, nz_s // 2)]
+print(f"\n  WHERE THE TWO DISAGREE, band by band. l0_inv goes as 1/k^2, so "
+      f"the potential is set by the lowest modes while charge L1 weights all "
+      f"modes alike -- this says whether the charge gain and the potential\n"
+      f"  loss are in the same place or in different places.")
+print(f"  {'modes':>10} {'wavelength':>13} | {'charge err rms':>28} | "
+      f"{'potential err rms':>28}")
+print(f"  {'':>10} {'':>13} | {'baseline':>13} {'P_off*':>14} | "
+      f"{'baseline':>13} {'P_off*':>14}")
+rt_ref_ = rho_b_ref + rho_i_ref
+phi_ref_ = -fresample(phi_dft_z, nz_s)
+
+
+def band_rms(x, lo, hi):
+    sp_ = torch.fft.rfft(x)
+    q = torch.zeros_like(sp_); q[lo:hi + 1] = sp_[lo:hi + 1]
+    return float(torch.fft.irfft(q, n=nz_s).pow(2).mean().sqrt())
+
+
+for lo, hi in BANDS:
+    wl = lz / hi
+    ce_b = band_rms((base["rb"] + base["ri"]) - rt_ref_, lo, hi)
+    ce_s = band_rms((star["rb"] + star["ri"]) - rt_ref_, lo, hi)
+    pe_b = band_rms(base["phi"] - phi_ref_, lo, hi)
+    pe_s = band_rms(star["phi"] - phi_ref_, lo, hi)
+    m_c = "better" if ce_s < ce_b else "WORSE"
+    m_p = "better" if pe_s < pe_b else "WORSE"
+    print(f"  {f'{lo}-{hi}':>10} {f'>= {wl:.1f} A':>13} | {ce_b:13.3e} "
+          f"{ce_s:9.3e} {m_c:>4} | {pe_b:13.3e} {pe_s:9.3e} {m_p:>4}")
+print(f"  (charge better at high k while the potential worsens at low k = the "
+      f"energy closure is compensating and the field is going the wrong way. "
+      f"Both worsening at low k together = one defect, not a trade.)",
+      flush=True)
 for k in ("fix_exit", "newton_exit"):
     print(f"  solver exit {k}: baseline {(base['exit'] or {}).get(k)}, "
           f"P_off* {(star['exit'] or {}).get(k)}")
@@ -414,7 +483,9 @@ b_, s_ = rows[1], rows[2]
 print(f"\n  VERDICT on step 2, on the aggregate and not on the bound channel "
       f"alone:")
 for nm, kk, unit in (("charge sum L1", "l1", "e"), ("bound L1", "l1b", "e"),
-                     ("ion L1", "l1i", "e"), ("potential rms", "prms", "eV")):
+                     ("ion L1", "l1i", "e"), ("potential rms", "prms", "eV"),
+                     ("potential mean-rm", "pdev", "eV"),
+                     ("potential 45 A", "pm1", "eV")):
     d0, d1 = b_[kk], s_[kk]
     print(f"    {nm:>16}: {d0:.5f} -> {d1:.5f} {unit} "
           f"({'BETTER' if d1 < d0 else 'worse'}, "
@@ -424,6 +495,14 @@ for nm, kk in (("cross gap", "cross"), ("self gap", "self"),
     g0, g1 = b_[kk] - r0[kk], s_[kk] - r0[kk]
     print(f"    {nm:>16}: {g0:+.4f} -> {g1:+.4f} eV "
           f"({'BETTER' if abs(g1) < abs(g0) else 'worse'})")
+print(f"\n  MIXED IS NOT A PASS. The stop rule names aggregate charge, the "
+      f"POTENTIAL, cross energy and the full self-energy including the "
+      f"bound-ion mutual term. If the potential or the mutual term goes the\n"
+      f"  wrong way while the energy gap closes, that is the signature of "
+      f"compensating errors -- which is the thing this line of work exists to "
+      f"remove -- and the energy closure cannot stand as the verdict on its "
+      f"own,\n  any more than the ionic channel's 10.6-fold improvement could "
+      f"when the aggregate moved 0.03%.")
 print(f"\n  If the aggregate does not improve here, STOP: the compensation is "
       f"not the binding problem and the next place to look is the other "
       f"inputs and the self-consistent coupling, not training. If it does "
