@@ -983,3 +983,66 @@ TWO PRESENTATION DEFECTS OF MINE
   exactly that guard to profile_shift_scan the same afternoon after the
   workstation found it there. Building a guard and not carrying it to the next
   script is the same failure as not having built it.
+
+## THE 1-D CAVITY CONTROL, PROPERLY ISOLATED (job 3426875, code 56fe2d8)
+Script sha256 97dfd0e2563a33d4, IDENTICAL to the committed copy. 3m16s.
+One full model call; the low-level solver called directly twice from the
+captured inputs, differing ONLY in the three cavity-derived arguments
+(s_ion, a1, p_off). Solve grid nz_s 600 (upsample f=2).
+
+ALL FOUR GATES PASS, both frames, with exact zeros:
+  G1 baseline reproduces the model's own profiles: max abs 0.000e+00 for
+     both bound and ionic -- bitwise, not merely close
+  G2 same tensor objects True; max |d cvhar_z| 0.000e+00 eV; q_sol identical
+  G3 max |d dphi/dz| 0.000e+00 eV/A; mean cvhar_z +0.000000 in both groups,
+     so the reference zero is shared
+  G4 both solves exit on their criteria
+Cavity input differs as intended: max |ne_dft - ne_model| 1.618 / 1.613
+e/A^3. So the control the previous attempt failed to establish now holds and
+the numbers can be read.
+
+The trap avoided: a1 = plane_mean(a3_scr) and a3_scr depends on the cavity AND
+on phi_sol, so the substituted a1 must NOT come from a second full model call.
+It is recomputed by calling closure_from_fields with the DFT density and RUN
+1's phi_sol.
+
+CHARGED FRAME, reference bound coupling -1.0955 eV, ionic -1.9362 eV
+  BOUND  coupling 0.501x -> 0.395x; ABSOLUTE gap -0.5468 -> -0.6625 eV, i.e.
+         0.116 eV WORSE; profile error 48.6% -> 65.6%; displacement by
+         residual +0.075 -> -0.425 A
+  IONIC  coupling 1.074x -> 1.085x; ABSOLUTE gap +0.1441 -> +0.1641 eV;
+         profile error 1.4% -> 1.2%; displacement by residual +0.400 ->
+         +0.450 A
+NEUTRAL FRAME, reference bound coupling -0.5182 eV
+  BOUND  coupling 1.031x -> 1.507x; ABSOLUTE gap +0.0160 -> +0.2628 eV, much
+         worse; profile error 66.1% -> 57.1%, BETTER; displacement by
+         residual +0.150 -> +0.375 A
+  IONIC  skipped by the negligible-channel guard (reference coupling
+         +0.000550 eV on 0.0041 e). The guard was carried over this time.
+
+ANSWERS to the three intended questions, control established:
+1. The ionic layer displacement does NOT shrink. It stays at 0.40 -> 0.45 A
+   by residual (0.450 -> 0.500 by coupling). The cavity is not the source of
+   that displacement.
+2. The bound profile error moves in OPPOSITE directions on the two frames:
+   worse on charged (48.6% -> 65.6%), better on neutral (66.1% -> 57.1%).
+3. The absolute cross-energy gap gets worse everywhere: charged bound
+   -0.547 -> -0.663 eV, charged ionic +0.144 -> +0.164, neutral bound
+   +0.016 -> +0.263.
+So substituting a DFT-density-built cavity, with the solute side rigorously
+fixed, does not improve any of the three. The only improvements are in
+profile SHAPE (neutral bound, and marginally the charged ionic) while the
+corresponding couplings worsen -- shape and energy again moving oppositely,
+the same pattern the shift scan showed.
+
+TWO THINGS NOT TO MISREAD, both mine to flag:
+- These numbers live on the SOLVE grid (nz_s 600) with the 1-D cvhar_z
+  potential, whereas the earlier 0.525 eV figure came from the model grid
+  with the plane-averaged 3-D potential. The reference bound coupling here is
+  -1.0955 against -1.0429 there. So compare WITHIN this run, model cavity
+  against DFT cavity, and do not set 0.5468 against 0.525 as though they were
+  the same measurement.
+- The charged bound "best-by-coupling" shift for the DFT cavity reads +1.500
+  A, which is exactly the edge of the +-1.5 A scan window. That value is
+  CENSORED, not measured, and must not be quoted as a shift. The
+  by-residual column (-0.425 A) is interior and valid.
