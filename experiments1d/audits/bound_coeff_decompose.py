@@ -257,16 +257,27 @@ wbs_d, ds_d = wb1d_spec(nzd, lz_d, SIGMA_B), d1d_spec(nzd, lz_d)
 rho_from_1d = apply_spec(apply_spec(Pz_ref_n, ds_d, nzd), wbs_d, nzd)
 e_red = float((rho_from_1d - rho_b_3d_z).abs().max())
 e_dec = float((A_ref_n * Ez_ref_n + prior_ref_n - Pz_ref_n).abs().max())
+# threshold must be RELATIVE: an absolute 1e-18 is unachievable for terms of
+# order 0.2 in float64, where one epsilon is already 4e-17. And note what this
+# gate can and cannot show -- prior_ref is DEFINED here as
+# Pz_ref - A_ref*Ez_ref, so the identity holds by construction and this
+# measures float64 re-association only. The SUBSTANTIVE identity is the next
+# gate, which compares two independently computed quantities.
+eps_dec = 2.220446049250313e-16 * float((A_ref_n * Ez_ref_n).abs().max())
 Ez_from_1d = -apply_spec(apply_spec(phi_dft_z, ds_d, nzd), wbs_d, nzd)
 e_fld = float((Ez_from_1d - Ez_ref_n).abs().max())
 scl = max(float(rho_b_3d_z.abs().max()), 1e-30)
-g2a, g2b = e_dec < 1e-18, e_red / scl < 1e-3
+g2a, g2b = e_dec < 10.0 * eps_dec, e_red / scl < 1e-3
 g2c = e_fld / max(float(Ez_ref_n.abs().max()), 1e-30) < 1e-3
 print(f"\n[STEP 2] the reference decomposition -- three identities MEASURED, "
       f"not assumed")
 print(f"   [{'PASS' if g2a else 'FAIL'}] A_ref*<E_z> + prior_ref = "
-      f"plane_mean(P_z): max abs {e_dec:.3e}. The covariance makes the 1-D "
-      f"product EXACT, so these two are the correct a1 and p_off.")
+      f"plane_mean(P_z): max abs {e_dec:.3e}, i.e. {e_dec/max(eps_dec,1e-300):.2f} "
+      f"float64 epsilon on the terms being summed. The covariance makes the "
+      f"1-D product EXACT, so these two are the correct a1 and p_off --\n"
+      f"       but prior_ref is DEFINED here as Pz_ref - A_ref*Ez_ref, so this "
+      f"holds by construction and the gate measures round-off, nothing "
+      f"physical. The next gate is the substantive one.")
 print(f"   [{'PASS' if g2b else 'FAIL'}] the 1-D operator on plane_mean(P_z) "
       f"equals the plane average of the 3-D charge: max abs {e_red:.3e} "
       f"against a profile max of {scl:.3e} e/A^3.\n       This is the "
@@ -407,6 +418,32 @@ print(f"  a1's error split: total rms "
       f"in rms; the remainder is the saturation/pairing heuristic, which "
       f"evaluates the response at a screened VACUUM field estimate rather "
       f"than at the self-consistent one)")
+
+def best_scale(m_, r_):
+    """The single factor s minimising |m - s r|, plus what is left after it.
+    This is what separates a WRONG AMPLITUDE from a WRONG SHAPE, and it cannot
+    be inferred from an rms and a mean-removed correlation: a1 carries a large
+    positive mean, so those two numbers are not on the same footing."""
+    sc = float((m_ * r_).sum() / torch.clamp((r_ * r_).sum(), min=1e-300))
+    e0 = float((m_ - r_).pow(2).mean().sqrt())
+    e1 = float((m_ - sc * r_).pow(2).mean().sqrt())
+    return sc, e0, e1
+
+
+print(f"\n[STEP 3a-2] wrong amplitude or wrong shape? The single best scale "
+      f"factor, and the residual it cannot remove")
+print(f"  {'quantity':>34} {'best scale':>11} {'err rms':>11} "
+      f"{'after rescale':>14} {'removed':>8}")
+for lbl, m_, r_ in (("a1  (mean response)", a1_m, A_ref),
+                    ("prior  (covariance background)", prior_m, prior_ref),
+                    ("p_off = prior + delta_p", p_off_m, prior_ref)):
+    sc, e0, e1 = best_scale(m_, r_)
+    print(f"  {lbl:>34} {sc:11.4f} {e0:11.4e} {e1:14.4e} "
+          f"{100*(1-e1/max(e0,1e-30)):7.1f}%")
+print(f"  (a scale far from 1 with most of the error removed = the shape is "
+      f"right and the gain is wrong. A scale near 1 with little removed = the "
+      f"shape itself is wrong.)", flush=True)
+
 need = prior_ref - prior_m
 sup = float((dp_m * need).sum() / torch.clamp((need * need).sum(), min=1e-300))
 print(f"\n[STEP 3b] did the learned correction move prior toward the "
@@ -421,8 +458,25 @@ print(f"  projection of delta_p onto what was needed: {sup:+.4f} "
 print(f"  residual after the correction: rms "
       f"{float((need - dp_m).pow(2).mean().sqrt()):.4e} against "
       f"{float(need.pow(2).mean().sqrt()):.4e} before "
-      f"({'reduced' if float((need-dp_m).pow(2).mean().sqrt()) < float(need.pow(2).mean().sqrt()) else 'NOT reduced'})",
-      flush=True)
+      f"({'reduced' if float((need-dp_m).pow(2).mean().sqrt()) < float(need.pow(2).mean().sqrt()) else 'NOT reduced'})")
+_sc = float((need * dp_m).sum() / torch.clamp((dp_m * dp_m).sum(), min=1e-300))
+_e1 = float((need - _sc * dp_m).pow(2).mean().sqrt())
+print(f"  IF delta_p were simply rescaled by {_sc:.2f}x: residual rms "
+      f"{_e1:.4e}, i.e. {100*(1-_e1/max(float(need.pow(2).mean().sqrt()),1e-30)):.1f}% "
+      f"of what is needed removed by a pure gain change.")
+print(f"  This rescale residual is the decisive number, not the correlation: "
+      f"two profiles both localised at the dielectric interface correlate "
+      f"highly whatever their detail, so +{corr(dp_m, need):.4f} alone could "
+      f"be a\n  localisation artefact. The rescale residual is not -- if it "
+      f"is small, the learned correction has the right shape and only the "
+      f"wrong gain.", flush=True)
+print(f"\n[cavity plateau, same recipe and parameters, different grid] "
+      f"plane_mean(s_diel) max: model {float(sd_m.max()):.7f} on its "
+      f"{nz_c}-in-z grid, reference {float(sd_ref.max()):.7f} on the DFT "
+      f"native {nzd}\n  (the earlier density test found the model grid gives "
+      f"the same plateau for BOTH densities, so density is not the "
+      f"difference here -- that leaves resolution, and this is the first "
+      f"direct evidence for it)", flush=True)
 print(f"\n[STEP 3c] grid reach -- the model's closure grid is {nz_c} in z, so "
       f"its coefficients carry no mode above {nz_c//2}. Share of the "
       f"reference's spectral energy above that cut:")
@@ -477,20 +531,42 @@ for la, lp, a_, p_ in cells:
           f"{m_['shift']:+8.3f} {100*m_['resid']:6.1f}%{fl}")
 mm, rm = out[("model", "model")], out[("ref", "model")]
 mr, rr_ = out[("model", "ref")], out[("ref", "ref")]
-print(f"\n  reading the 2x2 by L1 (e): both model {mm['l1']:.5f}; fixing a1 "
-      f"alone -> {rm['l1']:.5f} ({100*(rm['l1']-mm['l1'])/max(mm['l1'],1e-30):+.1f}%); "
-      f"fixing p_off alone -> {mr['l1']:.5f} "
-      f"({100*(mr['l1']-mm['l1'])/max(mm['l1'],1e-30):+.1f}%); both -> "
-      f"{rr_['l1']:.5f}")
+print(f"\n  by L1 (e): both model {mm['l1']:.5f}; a1 from the reference "
+      f"-> {rm['l1']:.5f}; p_off from the reference -> {mr['l1']:.5f}; "
+      f"both -> {rr_['l1']:.5f}")
 print(f"  The 'ref/ref' row is a closure check, not a result: it must come "
       f"back at the reference. If it does not, the chain is broken and no "
-      f"attribution holds.\n  Whichever single swap removes most of the error "
-      f"names the faulty piece -- mean response, covariance background, or "
-      f"(via 3b) the learned correction. Plane-averaged 1-D only; no lateral "
-      f"3-D error is in any of it.", flush=True)
+      f"attribution holds.")
+print(f"  WHAT THE SINGLE SWAPS ARE, and what they cannot say. Each row's "
+      f"deviation from ref/ref is exactly one error array: ref/model isolates "
+      f"the p_off error, model/ref the a1 error, model/model both. But\n  "
+      f"a1*E + prior = plane_mean(a3*E) holds by construction on BOTH sides, "
+      f"so the two coefficients are complementary halves of one decomposition "
+      f"and a reference half paired with a model half breaks a cancellation\n"
+      f"  the reference itself relies on -- measured on the reference side as "
+      f"a1*E rms against plane_mean(P_z) rms below. So a single swap being "
+      f"worse does NOT indict that coefficient, and 'whichever swap helps "
+      f"most'\n  is not an available reading. What the rows DO give is the "
+      f"size of each error's uncompensated effect and how much the two errors "
+      f"cancel when both are present.")
+print(f"  Plane-averaged 1-D only; no lateral 3-D error is in any of it.",
+      flush=True)
+_ea, _ep = rm['l1'], mr['l1']
+print(f"  uncompensated: p_off error alone {_ea:.5f} e, a1 error alone "
+      f"{_ep:.5f} e, both together {mm['l1']:.5f} e -> the two coefficient "
+      f"errors cancel {0.5*(_ea+_ep)/max(mm['l1'],1e-30):.1f}-fold in L1.")
+print(f"  That cancellation is partly structural, not an independent finding: "
+      f"the model's own closure satisfies the same identity with its own "
+      f"fields, and the model's bound-charge total is close to the "
+      f"reference,\n  so the two errors are largely forced to oppose. It is "
+      f"reported as a magnitude, not read as a correlation between "
+      f"independent errors.", flush=True)
 
 # ---- the polarization integral, cross-check only ----
-P_int = -torch.cumsum(rho_b_ref, dim=0) * dz
+# rho_b = +WB @ D @ P (since n_b = -V WB D P and rho = -(n_b/V)), so the
+# running integral of rho_b is +W_B P, NOT -W_B P. The earlier minus made the
+# two arrays exact negatives -- ratio 1.99986 with correlation -0.999910.
+P_int = torch.cumsum(rho_b_ref, dim=0) * dz
 P_int = P_int - P_int.mean()
 Pz_wb = apply_spec(Pz_ref, wbs, nz_s)
 Pz_wb = Pz_wb - Pz_wb.mean()
