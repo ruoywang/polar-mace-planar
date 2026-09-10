@@ -976,3 +976,70 @@ One wording bug to fix: the failing line's own explanatory clause reads
 "-- so the split is exact and the sign is measured, not assumed", which asserts
 the opposite of the FAIL it is attached to. Same class as a gate whose number
 contradicts its label, inverted — here the label is right and the prose is wrong.
+
+## Re-run at a943679: the identity closes, and it refutes the expected reading
+
+`poff_a943679.log`. mace a943679, pb 9b3b9ba, executed file sha256
+50f9e7aa342fb34f3ca7042870d6bdbc798d69385db2c38b80c36f251f15d136, IDENTICAL to
+the commit.
+
+**The identity closes at machine precision.** The measured change in the total
+potential equals the dipole-feedback change plus the direct charge term, up to
+the dropped G=0 constant: max abs residual **1.898e-12 eV**, 8.13e-12 of the
+change itself. So the dipole-feedback path identified in the source is a complete
+account of the change, and `phi_sol` moving is confirmed as the mechanism.
+
+| term | rms (eV) | 45 A amp |
+|---|---|---|
+| total change in the potential | 0.13373 | 0.13003 |
+| from dipole feedback (cvdip ramp) | 0.06679 | 0.07438 |
+| from the charge directly (l0_inv) | 0.05925 | 0.07100 |
+
+The two contributions are comparable in size and they reinforce rather than
+oppose — the total exceeds either.
+
+### But the dipole moves TOWARD the reference, not away
+
+| case | dipole (e A) | error |
+|---|---|---|
+| DFT reference | 16.70259 | +0.00000 |
+| baseline | 16.40810 | -0.29449 |
+| exact P_off* | 16.65316 | **-0.04943** |
+
+P_off* takes the dipole error from -0.29449 to -0.04943 — **5.96x closer** to the
+reference. The reading written into the script was "if P_off* moves the dipole
+FURTHER from the reference while improving the profile's L1, then the potential
+degradation is the ramp being driven by a quantity the intervention makes worse".
+That is refuted: the intervention makes the dipole substantially better.
+
+### What the three facts together do support
+
+The profile improves (charge sum L1 -25.8%), the dipole improves 5.96-fold, and
+the potential error still doubles — with the change decomposing exactly into the
+ramp and the direct charge term. So the degradation is not attributable to either
+input being made worse. What it indicts is the construction of the potential
+itself: at a charge profile and a dipole both closer to the reference,
+`cvhar_z + cvdip` moves further from the DFT total potential. The tapered-ramp
+form and `cvhar_z` are where that has to be examined, which is the "other inputs
+and the self-consistent coupling" branch of the user's tree, now reached with the
+mechanism named rather than by elimination.
+
+Stated as an inference from three measured quantities, not as a tested mechanism.
+What it does NOT say is why — no compensation story is offered here, after one
+already failed its own gate.
+
+### A caution on combining the three rms values
+
+They cannot be combined. Taking `total = dipole + charge` at face value and
+solving for the correlation gives **+1.2524**, which is impossible for real
+arrays; and the triangle inequality caps the rms of the two-term sum at
+0.06679 + 0.05925 = 0.12604 against a printed total of 0.13373, a 6.1% excess.
+The gap is the dropped G=0 constant, which the residual of 1.898e-12 accounts for
+but which the printed component rms values omit. So the constant is material, not
+a rounding detail, and the three numbers are not a decomposition anyone should
+add up.
+
+### Step 2
+
+Verdict unchanged. Charge and energy improve, the potential doubles, the mutual
+term moves 4.4x further out, ion L1 rises. Step 3 does not run.
