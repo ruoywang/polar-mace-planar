@@ -904,3 +904,75 @@ observed. That is a hypothesis about a compensation between the solvent and
 solute channels rather than between charge and potential at different k. Testing
 it needs `l0_inv` applied to each charge error separately and compared against
 the potential error directly, which this run does not do.
+
+## Re-run at 06ba920: my compensation hypothesis is REFUTED by its own gate
+
+`poff_06ba920.log`. mace 06ba920, pb 9b3b9ba, executed file sha256
+c0d5f1657da11078d9700ce148e3ce635f44fb61c23e3367018c8b206d68dc45, IDENTICAL to
+the commit. Every earlier number reproduces to the digit.
+
+The decomposition was built to test the hypothesis recorded above — that the
+solvent charge error had been cancelling a fixed solute-side error in the
+potential. **The gate that licenses reading it FAILED, and the hypothesis does
+not survive.**
+
+   [FAIL] the untouched bracket is identical for both cases at sign +1:
+          max abs difference 1.972e-01 eV, 5.07e-01 of its own max
+   sign -1 is worse: 3.162e-01 eV
+
+The bracket was required to be identical between the two cases because the
+solute side is untouched. It differs by half its own magnitude, and neither
+`l0_inv` sign fixes that, so the premise is false: the bracket is not an
+untouched solute-side quantity. `phi_sol` is part of the self-consistent
+solution, so it moves when `p_off` changes.
+
+### The negative correlations carry no information
+
+| quantity | rms (eV) | |
+|---|---|---|
+| fixed bracket (solute side) | 0.15884 | |
+| baseline: solvent-charge term | 0.07288 | |
+| baseline: TOTAL potential error | 0.11093 | corr(solvent, bracket) -0.8154 |
+| P_off*: solvent-charge term | 0.01939 | |
+| P_off*: TOTAL potential error | 0.22339 | corr(solvent, bracket) -0.7673 |
+
+The correlation is algebraically determined by the three rms values, because the
+parts must sum to the total: from 0.15884, 0.07288 and 0.11093 alone the implied
+correlation is -0.788, against the reported -0.815. Whenever the total is smaller
+than one of its parts the correlation MUST be negative. So the negative sign is
+forced arithmetic and is not evidence for the hypothesis it was built to test.
+This is the same trap as reporting a correlation as a relative error: a quantity
+already fixed by numbers on the same page being presented as an independent
+measurement.
+
+### An arithmetic proof that the split is inconsistent as printed
+
+Independently of the gate: with a bracket rms of 0.15884 and the P_off* solvent
+term at 0.01939, no correlation in [-1, 1] can produce that case's total of
+0.22339 — the required value is **+3.94**. So the single printed bracket rms
+cannot apply to both cases. By the triangle inequality the P_off* bracket must
+lie in [0.204, 0.243] eV, i.e. **28% to 53% above the baseline's 0.15884**.
+
+That is the substantive result of this run. The part of the potential error that
+was supposed to be untouched grows by roughly a third to a half when `p_off` is
+replaced. So P_off* does not merely fail to fix the potential — it makes the
+non-solvent-charge part of the potential error worse as well, which is why the
+degradation appears in every band.
+
+### Consequences
+
+- My hypothesis is refuted in its own terms. There is no fixed solute-side error
+  being uncovered, so there is no 0.15884 eV floor, and the claim that the
+  baseline sits "below its own floor only by cancellation" is void.
+- The verdict on step 2 is unchanged and if anything firmer: the intervention
+  degrades the potential both through the solvent term and through the part that
+  was assumed fixed.
+- Where it routes: at the self-consistent coupling, since the mechanism by which
+  a change in `p_off` moves `phi_sol` is exactly that coupling. That is the same
+  destination the user's tree already named, reached now by measurement rather
+  than by elimination.
+
+One wording bug to fix: the failing line's own explanatory clause reads
+"-- so the split is exact and the sign is measured, not assumed", which asserts
+the opposite of the FAIL it is attached to. Same class as a gate whose number
+contradicts its label, inverted — here the label is right and the prose is wrong.
