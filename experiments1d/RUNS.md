@@ -2246,4 +2246,53 @@ isolates the bound lateral effect with no ionic contribution.
 The user was explicit that this does NOT show the network can learn the
 reference charge. It settles whether the line is worth the work.
 
-Dispatched to the 4090. RESULT PENDING.
+4090 SUBSET (KIT_FRAMES=n44, four frames, code c8560dd, provenance IDENTICAL,
+peak RSS 2.33 GB, peak GPU 4811 MiB, no kill despite four 250 MB ASCII reads).
+The six-frame LS6 run (job 3427615, all frames incl. the NiN88 cell) is
+separate and adds the cell-size axis the subset cannot speak to.
+
+ALL THREE GATES PASS: the model's own 3-D term through THE Coulomb function to
+3.331e-16 eV, the substituted field's plane means to 8.743e-19 e/A^3, and the
+1-D/3-D cross term after the swap to 9.711e-13 eV. So dE is a one-term change
+and comp and E_bl are genuinely untouched.
+
+TRUNCATION DOES NOT APPLY, so these are values and NOT lower bounds. Power
+above the model grid's lateral Nyquist is 0.0% on all four frames, and the
+cross energy on the model grid equals the native-grid one at ratio 1.000 every
+time (-2.3991, -2.1808, -2.3886, -0.4309). The stated condition was that
+agreement means truncation does not matter for the energy; it agrees exactly.
+Coherent with the physics: RHOB is already Gaussian-smoothed at sigma_b, whose
+cutoff sits below the model grid's lateral Nyquist, so there is nothing up
+there to lose.
+
+[RESULT] final total energy error, meV/atom
+             frame  atoms   original  substituted  improvement  fraction
+     NiN44 q=-0.80    207    +12.987       +8.991       -3.996     30.8%
+     NiN44 q=-1.00    207    +20.843      +15.209       -5.634     27.0%
+     NiN44 q=-1.32    207    +27.309      +20.817       -6.492     23.8%
+           neutral    207     -6.379       -4.499       +1.881     29.5%
+  charged mean |err|            20.380       15.006       -5.374     26.4%
+
+THE USER'S PARTIAL BRANCH, so both halves as instructed: 26.4% of the charged
+error is RECOVERED and 73.6% REMAINS -- 15.006 meV/atom of an original 20.380.
+The neutral frame, where the ionic channel is identically zero, gives 29.5%,
+consistent with the charged frames rather than different, so the effect is not
+an artefact of the ionic channel.
+
+THE SIGN CHECK PASSES: correlation between the model's own d_sup_b and lat_DFT
+is +0.8733, +0.8632, +0.8337, +0.8396 -- the model's lateral bound charge
+points the right way on every frame, and it is not a convention error.
+
+TWO TRENDS THE MEAN HIDES, and they carry more than the 26.4% does.
+  The fraction recovered FALLS with charge: 30.8%, 27.0%, 23.8% across
+  q = -0.80, -1.00, -1.32. The more charged the frame, the less of its error a
+  perfect lateral bound charge explains.
+  And the residual KEEPS THE CHARGE DEPENDENCE: after substitution the error
+  is still monotone in |q| (+8.991, +15.209, +20.817) and grows slightly
+  faster across the sweep than the original did, 2.32x against 2.10x. So a
+  perfect lateral bound charge does not remove the charge-driven part of the
+  total-energy error, and whatever carries the remaining three quarters is
+  ALSO charge-driven. That is a statement about where the rest is.
+26.4% with a falling trend and a charge-dependent residual is a different
+object from 26.4% flat across the sweep, and neither reading should be taken
+from the mean alone.
