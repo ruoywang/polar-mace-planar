@@ -1387,5 +1387,119 @@ driving potentials actually differ, since a near-identical pair would make the
 swap vacuous. Plus a cross-check that this run's baseline bound coupling gap
 reproduces the +0.5371 eV obtained above by the different route.
 
-Dispatched to the 4090 workstation per the user's preference for quick tests.
-RESULT PENDING.
+Ran on the 4090 workstation, ~10 s, code 52ea73c after one round of
+correction (first run 940549c). All gates PASS. Provenance certified: sha256
+of the executed file IDENTICAL to the commit, peak RSS 2.0 GB.
+
+GATES AND CONVENTIONS, all measured:
+  n_b = B @ phi + nb_off reproduces the model's own bound charge to exactly
+    0.000e+00 -- the response really is that linear map.
+  max |B @ 1| 1.219e-10 against max |B @ phi| 4.128e+03, ratio 2.95e-14. B
+    annihilates constants outright, so the electrolyte reference zero CANNOT
+    reach the bound charge at all. That closes the reference-zero question for
+    this channel by measurement rather than by reading the formula.
+  sign by correlation, mean removed: +PHI_raw +0.9995, -PHI_raw -0.9995.
+    Separates cleanly; +PHI_raw is the solver's convention, as expected from
+    physical = -out["phi"] and physical = -PHI_raw both having been measured.
+  room to act: the two driving potentials differ by rms 0.11093 eV, 0.10304
+    with the constant removed. Not vacuous.
+  CROSS-CHECK: the baseline bound coupling gap comes out +0.5370 eV here
+    against the +0.5371 obtained by total-minus-ionic from the whole-system
+    run. Two routes, same quantity, agreeing to 0.0001 eV.
+
+[RESULT] response fixed, driving potential swapped, no re-solve
+                          case   net (e)   int|.|     cross       gap        L1   max dev    shift   resid
+            DFT reference RHOB   +0.0000   2.0193   -1.0857   +0.0000   0.00000  0.00e+00   -0.000    0.0%
+     model response, model phi   +0.0000   2.0302   -0.5487   +0.5370   0.80003  2.38e-03   +0.050   48.7%
+       model response, DFT phi   +0.0000   8.5965   +4.4975   +5.5832   7.56925  2.05e-02   +0.825   85.0%
+No row's displacement is at the +-2.0 A scan edge. The coupling flips sign
+from attraction to repulsion; int|.| goes 4.3x too large; L1 rises 9.5-fold.
+
+VERDICT on the user's branch: the bound distribution does NOT recover when
+the correct potential is supplied -- it gets substantially worse. By the rule
+set in advance, the priority is therefore the bound RESPONSE itself: the
+cavity, the 1-D closure and the learned correction, not the generation of the
+total potential.
+
+WHAT THE TEST IS AND IS NOT. It tests the response OPERATOR, not the fixed
+point: a correct linear response fed the correct driver must return the
+correct answer whether or not it is self-consistent, so "no re-solve" is what
+makes the reading possible rather than what spoils it. The one real limit is
+that plane-averaging does not commute with the response -- <a1 E> is not
+<a1><E> -- so some of the discrepancy belongs to the 1-D closure's averaging
+order rather than to a1 or p_off being wrong. That is inside the user's own
+list, so it does not change the branch, but it does mean the sub-part is not
+yet isolated. The 7% figure measured for the ionic channel's averaging order
+must NOT be imported here; the bound channel's is unmeasured.
+
+A STRUCTURAL FACT that came out of the mechanism block and sharpens the
+direction: nb_off/V has sum|.| 7.2847 and B@phi_model/V has 7.3768, against a
+result of 0.14266 -- each term is 51.7x the bound charge it produces, their
+summed magnitude 102.8x. So the model reaches the RIGHT bound-charge magnitude
+(int|.| 2.0302 e against the reference 2.0193 e) as a small residue of two
+much larger terms, and that residue is calibrated to the model's own
+potential: supply a different one and the magnitude goes 4.3x too large. Since
+nb_off is a FIXED array with no phi dependence, nothing compensates. Equivalent
+statement: a1 E is close to -p_off up to a constant, so the model's total
+polarization is nearly flat in z and the bound charge lives in its small
+departures from flatness.
+
+TWO CORRECTIONS I MADE TO THE WORKSTATION'S FIRST READING, both then confirmed
+by measurement. It read the table as a broken cancellation and argued a 1%
+perturbation of B@phi explained the whole degradation, so the swap was
+ill-posed. The conclusion (do not read the dichotomy off the raw table) was
+right; the mechanism was wrong twice over:
+  1. nb_off is IDENTICAL in both arms, so it cancels exactly out of the
+     difference -- rho(dft) - rho(model) = -(B @ dphi)/V, with no nb_off in
+     it. Verified at 8.361e-16. A near-cancellation common to both arms cannot
+     amplify the difference between them.
+  2. "1.03% smaller in aggregate" is a difference of L1 norms, not the norm of
+     the difference -- int|a+b| against int|a|+int|b| yet again. The triangle
+     inequality alone bounded the real perturbation at 6.3-10.1% of B@phi; it
+     measures 7.1%, six to ten times the quoted figure. And the result moves
+     1.00x the perturbation: the amplification is exactly none.
+What stands is that B @ dphi is simply large next to a small bound charge --
+0.5206 in density units, which is 7.41 e in L1 against a reference int|.| of
+2.0193 e, so the swap changes the bound charge by 3.7x the entire reference.
+That is a statement about the bound charge being small, not about tuning.
+
+THE OPERATOR GAIN IS FALLING, NOT RISING, so the "double derivative amplifies
+the top of the band" reading was backwards in direction, not merely in degree.
+B applied to unit cosines is BAND-PASS, peaking near mode 60 (k about 8.4/A)
+and falling fifteen orders of magnitude by mode 300 (2.37e-15): the two
+Gaussian smoothings in B = V WB D diag(a1) D WB beat the two derivatives
+comfortably. So the 1.81x difference between the potentials in the top half of
+the band cannot drive anything -- the gain there is 1e-15. Nearly the entire
+potential difference sits in modes 1-30 (rms 0.10272 of 0.10304), where the
+gain is still rising.
+
+THE STAGED SWAP FAILED AS DESIGNED and only its endpoint is readable. Swapping
+only dphi below a cutoff gives L1 27.6, 23.6, 36.7, 40.8, 24.8, 16.0, 8.58,
+7.58, 7.57 for cutoffs 5, 10, 20, 30, 50, 75, 100, 150, 250 -- every partial
+swap is far WORSE than the complete one, worst of all at modes 1-30, which is
+where essentially the whole potential difference lives. The cause is measured:
+the per-band L1s of B @ dphi sum to 6.12412 against an actual 0.52056, an
+11.8-fold cancellation BETWEEN bands, so the bands are not independently
+substitutable and those band shares are shares of the uncancelled sum, not
+contributions to the net effect (the same non-additivity as above -- nobody
+should quote 46.7% as "half the effect"). Consequence: there is no turn point
+to read, the design's intended reading is unavailable, and what survives is
+the endpoint -- the full swap is the BEST of all of them and still 9.5x worse
+than the baseline. "Nothing helps at any length scale" is robust; the shape of
+the curve carries no separate reading and none is drawn from it.
+
+DISMISSED BY MEASUREMENT: my grid-mismatch worry. Modes 251-300, which the DFT
+grid cannot populate after the 500->600 upsample, contribute 0.00000.
+
+THE FLIPPED-SIGN ROW IS NOT A SIGN CONTROL, as the workstation showed:
+rho(-phi_dft) = (B @ phi_dft - nb_off)/V and B @ phi_dft is approximately
+-nb_off pointwise, so it returns about -2 nb_off/V. Measured sum|.| 14.5805
+against 2 x 7.2847 = 14.5693, agreeing to 0.07%. It measures the offset and
+says nothing about the response; relabelled as a probe.
+
+BANKED, and it needs no substitution at all: the baseline bound profile has a
+48.7% shape residual at a displacement of only +0.050 A, with L1 0.80003 e
+against int|.| 2.0193 e. Against the ionic channel's 1.4% residual and
+0.18687 e, the bound channel carries 4.3x the 1-D charge error and 3.8x the
+coupling gap. The 1-D error lives in the bound channel, and it is SHAPE, not
+position. Plane-averaged 1-D throughout; no lateral 3-D error is in any of it.
