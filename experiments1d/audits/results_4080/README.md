@@ -751,3 +751,86 @@ repair order. The two halves must move together, and they are not equally
 tractable — prior's error is 85.9% removable by one scalar, a1's is 7.2%
 removable by any scalar and 77.7% pure cavity, so a1 is the binding constraint
 and needs the cavity or the grid it is computed on.
+
+## Dispatched job: poff_exact_target (mace HEAD e48faec)
+
+`poff_e48faec.log`. mace e48faec, pb 9b3b9ba, executed file sha256
+76fa7ca7714acd95c4652aa9a86af0941368fb92f29a94c3f0e00056e4514b5b, IDENTICAL to
+the commit. Gate passes: the baseline re-solve reproduces the model's own bound
+charge to 1.301e-18 e/A^3. Both solves exit on tolerance.
+
+### The requested c_absmax did NOT print, and the reason is a one-line bug
+
+The number described as "free here and decisive for step 3" is absent from the
+output, with no message, because `if c_am is not None:` silently skipped. The
+cause: the script reads `out.get("c_absmax")` from `solve_graph`'s return dict,
+but `pb1d_backend.py` spreads `delta_stats` — which is where `c_absmax` and
+`dp_rms` live — into **`self.last_diagnostics`** at line 516, not into the
+returned dict. So the key is never in `out`.
+
+The fix is one line and the wrapper already holds what it needs: read
+`self.last_diagnostics["c_absmax"]` after the call instead of `out.get(...)`.
+`w_env_solve` and `u_solve` did capture, which is why the omission is easy to
+miss — most of that key list worked.
+
+### STEP 1: holding a1 fixed shrinks the target 3.7-fold, and reverses last round's shape verdict
+
+| quantity | rms |
+|---|---|
+| P_off* (the exact target) | 3.5170e-02 |
+| prior_model | 3.8408e-02 |
+| p_off_model | 3.7477e-02 |
+| **delta_p\* (needed)** | **3.6777e-03** |
+| **delta_p (supplied)** | **9.6013e-04** |
+
+Old target rms 1.3765e-02, new 3.6777e-03, ratio 0.267, mutual correlation
++0.9177. So scoring `delta_p` against `prior_ref - prior_model` last round did
+charge it with a1's error, exactly as diagnosed. The head is short by a factor
+of 3.83, **not the 1/14 reported last round**.
+
+| delta_p vs | best scale | err rms | after rescale | removed | corr |
+|---|---|---|---|---|---|
+| delta_p* (correct) | 0.2256 | 2.8886e-03 | 4.8304e-04 | 83.3% | **+0.8580** |
+| the old target | 0.0668 | 1.2850e-02 | 2.7837e-04 | 97.8% | +0.9553 |
+
+and separately: rescaling `delta_p` by 3.31x leaves 1.8503e-03 of 3.6777e-03,
+so **a pure gain change removes 49.7%**.
+
+Those two percentages answer different questions and the actionable one is the
+smaller. The 83.3% row scales the TARGET down by 0.2256 to fit `delta_p`, and its
+denominator is the raw difference 2.8886e-03; the 49.7% scales `delta_p` UP by
+3.31x to fit the target, with the denominator being what is needed. Both follow
+from corr = +0.8580 — the residual fraction after any optimal gain is
+`sqrt(1 - corr^2)` = 0.514 — so no gain choice can recover more than about half.
+Against the correct target the shape agreement is WORSE than it looked last
+round (+0.8580 against +0.9553) and gain-alone recovery falls from 71.0% to
+49.7%. Last round's "right shape in the main" is weakened by fixing the target.
+
+### STEP 2a wiring check
+
+Bound-charge L1 with P_off* at the fixed DFT field: 0.00365 e against 7.56925 e
+for the model's own p_off, on an int|.| of 2.0193 e. That 0.00365 is the same
+number as the 3-D reconstruction's own 0.18% floor, so the algebra is right and
+this proves nothing physical, as labelled.
+
+### STEP 2b: the aggregate is MIXED, not a pass
+
+| case | net (e) | chg L1 | bound L1 | ion L1 | cross | self | total | d total |
+|---|---|---|---|---|---|---|---|---|
+| DFT reference | +1.0000 | 0.00000 | 0.00000 | 0.00000 | -3.0243 | +1.5237 | -1.5005 | +0.0000 |
+| baseline, model p_off | +1.0000 | 0.63739 | 0.80003 | 0.18687 | -2.6289 | +1.4718 | -1.1572 | +0.3434 |
+| exact P_off*, re-solved | +1.0000 | 0.47303 | 0.63902 | 0.19199 | -3.0020 | +1.4869 | -1.5151 | **-0.0145** |
+
+Better: charge sum L1 -25.8%, bound L1 -20.1%, cross gap +0.3953 to +0.0223 eV,
+self gap -0.0520 to -0.0368 eV, total gap +0.3434 to -0.0145 eV.
+Worse: ion L1 +2.7%, **potential rms 0.11093 to 0.22339 eV (+101.4%)**, and the
+**mutual bound-ion term +0.0288 to +0.1261 eV from the reference (4.4x)**.
+
+Two of the quantities the stop rule names as part of the aggregate got worse, one
+of them by a factor of two, so this is not a clean improvement and should not be
+reported as one. The specific tension needing a decision: the total energy gap
+crosses zero and closes by 96% while the potential profile error doubles. Energy
+agreement improving as field agreement degrades is the signature of compensating
+errors, which is the thing this line of work exists to remove — so "the total gap
+closed" cannot be taken as the verdict on its own. I am not resolving it in
+either direction.
