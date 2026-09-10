@@ -1043,3 +1043,62 @@ add up.
 
 Verdict unchanged. Charge and energy improve, the potential doubles, the mutual
 term moves 4.4x further out, ion L1 rises. Step 3 does not run.
+
+## Final run at 04c384b: the constant is NOT the dipole path, so there are TWO items
+
+`poff_04c384b.log`. mace 04c384b, pb 9b3b9ba, executed file sha256
+3da5565b2e93fb50e658434b4c137e23e6d13699c744d5134655e204cea9b850, IDENTICAL to
+the commit. Identity still closes: max abs residual 3.545e-12 eV.
+
+| term | rms (eV) | mean | 45 A amp |
+|---|---|---|---|
+| total change in the potential | 0.13373 | -0.08195 | 0.13003 |
+| of it, the G=0 constant | **0.08195** | -0.08195 | 0.00000 |
+| of it, the rest (mean removed) | 0.10569 | +0.00000 | 0.13003 |
+| from dipole feedback (cvdip ramp) | 0.06679 | -0.00000 | 0.07438 |
+| from the charge directly (l0_inv) | 0.05925 | +0.00000 | 0.07100 |
+
+The decomposition is now internally consistent — the last three rows combine at
+an implied correlation of +0.4041, and 0.06679, 0.05925 and +0.4041 reproduce
+0.10569 exactly. The impossibility flagged in the previous run is gone.
+
+### The answer to the dispatched question: 0.0%, so two items and not one
+
+**Mean of the feedback change -0.00000 eV against the total constant
+-0.08195 eV, i.e. 0.0% of it.** The criterion set in advance was "near 100% means
+one open item, not two". It is zero, to within the 5e-6 eV that the printed
+precision allows, so:
+
+- The tapered `ii*cutoff` ramp does NOT produce a mean. The taper breaking the
+  ramp's antisymmetry was the reason the constant might have belonged to the same
+  path, and it does not — measured, not argued.
+- The G=0 constant is a **separate** term, and it is the **largest single named
+  part of the degradation**: 0.08195 eV rms against 0.06679 for the dipole
+  feedback and 0.05925 for the direct charge term, i.e. 37.6% of the change in
+  variance.
+- So the user gets **two** things to look at, not one: the construction of the
+  potential (the cdipol taper form and `cvhar_z`), and separately the G=0
+  bookkeeping.
+
+Cross-check that the constant is real rather than an artefact of this split: the
+potential error's mean went -0.04109 to -0.12304 eV between the two cases, a
+difference of -0.08195, which is exactly the constant reported here. And the
+mean-removed rms still worsened 81.0%, so neither part accounts for the
+degradation alone.
+
+### Frame closed
+
+Step 2 fails: charge sum L1 -25.8%, bound L1 -20.1% and the energy gap closing
+96% from +0.3434 to -0.0145 eV do not carry it against a potential rms that
+doubles, a 45 A component up 154.2%, a bound-ion mutual term 4.4x further from
+the reference and ion L1 up 2.7%. Step 3 does not run — and separately would not
+have been blocked by clipping, since c_absmax is 0.007093, 2.8% of the 0.25
+bound, reaching 10.9% after the 3.83x amplitude shortfall.
+
+Both candidate inputs are exonerated by measurement: the charge profile improves
+and the dipole improves 5.96-fold (-0.29449 to -0.04943 e A), and the potential
+still degrades. No mechanism is offered for why. In particular the story that the
+baseline's wrong dipole was compensating an error in the ramp form fits but is
+not stated as a finding — it is the same shape as the solute-side compensation
+story that failed its own gate in this same chain, and it needs its own gate
+first.
