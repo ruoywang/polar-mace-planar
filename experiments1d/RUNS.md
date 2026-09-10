@@ -2149,8 +2149,28 @@ round was optimising (-0.04943 e A after P_off*). And the result table's dipole
 column difference, -0.9439 against -0.3653, is exactly -0.57860 -- so the
 feedback term is carrying the solute dipole error, and the two measurements are
 consistent. The electron COUNT matches to 1e-4 while the profile differs at
-6.985 rms, so this is a shape error in the predicted density, not a charge
-error.
+6.985 rms -- but stated that way it compares two quantities in different units
+with no scale. Relative to their own references: count 1.2e-07 (8e-05 in 661),
+density shape 0.411% (6.98500 against a profile rms of 1.698128e+03). The
+shape error is therefore 3.4e+04 times the count error in relative terms, and
+THAT pair is what makes this a shape error in the predicted density rather
+than a charge error.
+
+THE FOUR RELATIVE ERRORS, each against its own reference scale, in the order
+the assembly applies them: electron count 1.2e-07, density shape 0.411%,
+cvhar 3.650% (0.12710 against 3.482119), rebuilt potential 6.251% (0.20944
+against 3.35043). Each is larger than the last, and l0_inv sits between the
+second and third while the dipole correction sits between the third and
+fourth. NO SHARES ARE ATTRIBUTED -- the two contributions were never
+separated, and treating the printed parts of a total as a decomposition is
+exactly what went wrong the round before.
+
+A SIGN FAULT IN MY OWN SCRIPT, not just in the report: the output line
+computed dip_DFT - dip_model and labelled it "the model's error", so its sign
+and its label disagreed, and that is where the +0.57862 came from. Fixing only
+the ledger would have left the next reader to repeat it from the log, which is
+how this chain's four earlier sign errors propagated. The line now prints
+MODEL MINUS REFERENCE with the convention named.
 
 WHAT THIS DOES NOT SEPARATE, flagged rather than left implicit: the model's
 solute input was swapped as a UNIT -- cvhar shape and dipole together -- so

@@ -285,18 +285,39 @@ dip_dft = _sd(fresample(ne_val_dft_n, nz_c), cap["pos_frac"],
 dip_dft_native = _sd(ne_val_dft_n, cap["pos_frac"], cap["z_val"],
                      cap["cell64"])
 print(f"\n[THE TWO SOLUTE INPUTS]")
-print(f"   electron profile: model int {float(ne_model.mean()):.5f}, DFT "
-      f"{float(ne_dft.mean()):.5f} (values = density * V, so the mean is the "
-      f"electron count / 1); difference rms "
-      f"{float((ne_dft-ne_model).pow(2).mean().sqrt()):.5f}")
-print(f"   solute potential: cvhar_model rms "
-      f"{float(kw['cvhar_z'].pow(2).mean().sqrt()):.5f}, cvhar_DFT "
-      f"{float(cvhar_dft.pow(2).mean().sqrt()):.5f}, difference rms "
-      f"{float((cvhar_dft-kw['cvhar_z']).pow(2).mean().sqrt()):.5f} eV")
-print(f"   solute dipole: model {float(kw['val_ion_dipole_z']):+.5f}, DFT "
+# every difference is reported RELATIVE to the reference's own scale as well
+# as absolutely: "the count matches to 1e-4 while the profile differs at
+# 6.985" compares two quantities in different units with no scale, and gives a
+# reader no way to judge which is small. The relative pair is the argument.
+_nc_m, _nc_d = float(ne_model.mean()), float(ne_dft.mean())
+_ne_rms = float(ne_dft.pow(2).mean().sqrt())
+_ne_dif = float((ne_dft - ne_model).pow(2).mean().sqrt())
+_rel_cnt = abs(_nc_m - _nc_d) / max(abs(_nc_d), 1e-30)
+_rel_shp = _ne_dif / max(_ne_rms, 1e-30)
+print(f"   electron COUNT: model {_nc_m:.5f}, DFT {_nc_d:.5f} (values = "
+      f"density * V, so the profile mean is the electron count); difference "
+      f"{abs(_nc_m-_nc_d):.2e}, RELATIVE {_rel_cnt:.2e}")
+print(f"   electron SHAPE: profile rms {_ne_rms:.6e}, difference rms "
+      f"{_ne_dif:.5f}, RELATIVE {100*_rel_shp:.3f}%")
+print(f"     -> the shape error is {_rel_shp/max(_rel_cnt,1e-30):.1e} times "
+      f"the count error in relative terms, which is what makes this a SHAPE "
+      f"error in the predicted density and not a charge error")
+_cv_d = float(cvhar_dft.pow(2).mean().sqrt())
+_cv_dif = float((cvhar_dft - kw["cvhar_z"]).pow(2).mean().sqrt())
+print(f"   solute POTENTIAL: cvhar_model rms "
+      f"{float(kw['cvhar_z'].pow(2).mean().sqrt()):.5f}, cvhar_DFT {_cv_d:.5f}"
+      f", difference rms {_cv_dif:.5f} eV, RELATIVE "
+      f"{100*_cv_dif/max(_cv_d,1e-30):.3f}%")
+# model MINUS reference, stated as such: the previous version computed
+# reference minus model and labelled it "the model's error", so its sign and
+# its label disagreed and that discrepancy was passed onward
+_dip_err = float(kw["val_ion_dipole_z"]) - float(dip_dft)
+print(f"   solute DIPOLE: model {float(kw['val_ion_dipole_z']):+.5f}, DFT "
       f"{float(dip_dft):+.5f} (on the {nz_c} grid) and "
-      f"{float(dip_dft_native):+.5f} (on the native {nzd}) e A -- the model's "
-      f"error is {float(dip_dft)-float(kw['val_ion_dipole_z']):+.5f}")
+      f"{float(dip_dft_native):+.5f} (native {nzd}) e A")
+print(f"     -> MODEL MINUS REFERENCE = {_dip_err:+.5f} e A, i.e. the model's "
+      f"dipole is {'more negative' if _dip_err < 0 else 'more positive'} by "
+      f"{abs(_dip_err):.5f}")
 print(f"   grid reach: the model's cvhar is upsampled from {nz_c} so it "
       f"carries no mode above {nz_c//2}; share of cvhar_DFT's spectral energy "
       f"above that cut {100*hi_share(cvhar_dft, nz_c//2):.2f}%", flush=True)
@@ -334,6 +355,17 @@ print(f"\n  all-DFT rebuild error {eA:.5f} eV rms, which is "
       f"({ref_rms:.5f} eV)")
 print(f"  swapping in the model's solute input takes it to {eB:.5f} eV, "
       f"a factor of {eB/max(eA,1e-30):.2f}")
+print(f"\n  the four relative errors, each against its own reference scale, "
+      f"in the order the assembly applies them:")
+print(f"    electron count   {_rel_cnt:.2e}")
+print(f"    density shape    {100*_rel_shp:.3f}%")
+print(f"    cvhar            {100*_cv_dif/max(_cv_d,1e-30):.3f}%")
+print(f"    rebuilt potential {100*eB/max(ref_rms,1e-30):.3f}%")
+print(f"  Each is larger than the last, and l0_inv sits between the second "
+      f"and third while the dipole correction sits between the third and "
+      f"fourth. NO SHARES ARE ATTRIBUTED: the two contributions were never\n"
+      f"  separated, and treating the printed parts of a total as a "
+      f"decomposition is exactly what went wrong last round.")
 
 # ---- the constant, by the ionic electroneutrality condition ----
 print(f"\n[THE CONSTANT] checked against the condition the solver actually "
