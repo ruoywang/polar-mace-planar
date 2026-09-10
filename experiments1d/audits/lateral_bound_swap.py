@@ -55,6 +55,12 @@ THE READING, set by the user in advance:
   it improves partly -> record exactly how much is recovered and how much is
       left.
 
+ONE CAVEAT ON THE ONE-TERM CLAIM, from the workstation: e_xsol = int delta*phi
+is a one-term change only because there is NO re-solve, so phi is fixed. If
+anyone later re-solves after the swap, dE stops being one term and the
+derivation has to be redone -- and the s_ion round showed how much a re-solve
+moves things.
+
 This does NOT show that the network can learn the reference charge. It settles
 whether the line is worth the work.
 """
@@ -85,7 +91,7 @@ GCE44, GCE88 = f"{DFT}/1-44_GCE", f"{DFT}/2-88_GCE"
 NEU = f"{DFT}/5-44_neutral_withsolv"
 CKDIR = os.environ.get("KIT_CKPT_DIR", "checkpoints")
 DATADIR = os.environ.get("KIT_DATA_DIR", "data")
-FRAMES = [
+_ALL = [
     (61, f"{GCE44}/cal_61", "NiN44 q=-0.80"),
     (1, f"{GCE44}/cal_1", "NiN44 q=-1.00"),
     (28, f"{GCE44}/cal_28", "NiN44 q=-1.32"),
@@ -93,6 +99,30 @@ FRAMES = [
     (353, f"{GCE88}/cal_153", "NiN88 q=-1.31"),
     (601, f"{NEU}/cal_1", "neutral"),
 ]
+# KIT_FRAMES selects a subset, because the NiN88 DFT payload is not on every
+# machine that can run this: "n44" is the three NiN44 charged frames plus the
+# neutral one, "n88" the two NiN88 frames, "all" (the default) everything.
+# The n44 subset keeps the charge sweep (-0.80, -1.00, -1.32) and the neutral
+# isolation but has NO cell-size variation, so a subset run must say so.
+_SEL = os.environ.get("KIT_FRAMES", "all").lower()
+if _SEL == "n44":
+    FRAMES = [f for f in _ALL if f[0] in (61, 1, 28, 601)]
+elif _SEL == "n88":
+    FRAMES = [f for f in _ALL if f[0] in (201, 353)]
+else:
+    FRAMES = _ALL
+_missing = [f[2] for f in FRAMES if not os.path.exists(f"{f[1]}/RHOB")]
+
+print(f"  KIT_FRAMES={_SEL}: {len(FRAMES)} of {len(_ALL)} frames -- "
+      f"{', '.join(f[2] for f in FRAMES)}")
+if _missing:
+    raise SystemExit(f"  STOP: RHOB missing for {_missing}. This machine does "
+                     f"not hold that DFT payload; run those frames where it "
+                     f"does rather than dropping them from the table.")
+if len(FRAMES) < len(_ALL):
+    print(f"  SUBSET RUN -- the table below covers {len(FRAMES)} frames, not "
+          f"the six the user named. Report it as a subset and say which "
+          f"variation is absent (n44 has no cell-size variation).")
 
 device = torch_tools.init_device("cuda")
 torch_tools.set_default_dtype("float64")
