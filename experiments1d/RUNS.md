@@ -2360,28 +2360,52 @@ user asked for six frames and exactly what the workstation flagged its four
 could not say. NiN44 recovers 26.4%; the two NiN88 frames get 2.13x and 2.34x
 WORSE; across all five charged frames the mean |error| improves only 9.1%.
 
-THE MECHANISM IS SIMPLE AND VISIBLE. dE per atom is a similar DOWNWARD shift
-on every charged frame -- -3.996, -5.634, -6.492, -6.102, -3.736 meV/atom --
-regardless of cell or charge. NiN44 OVER-predicts (+12.987 to +27.309) so the
+THE MECHANISM RESTS ON THE SIGN, NOT ON THE MAGNITUDE -- and an earlier
+phrasing of mine overstated it. dE per atom is NEGATIVE on all five charged
+frames (-3.996, -5.634, -6.492, -6.102, -3.736 meV/atom), and that uniform
+SIGN is the whole argument: a shift of uniform sign cannot repair a bias whose
+sign DIFFERS between cells. NiN44 OVER-predicts (+12.987 to +27.309) so the
 shift helps it; NiN88 UNDER-predicts (-5.413, -2.778) so the same shift hurts.
-A near-uniform shift cannot repair a bias whose SIGN DIFFERS BETWEEN CELLS, so
-the lateral bound charge error is NOT what makes the model's total-energy error
-vary between cells. Note also that the model was originally much BETTER on
-NiN88 (|err| 4.1 mean) than on NiN44 (20.4), and the substitution destroys
-that.
+Hence the lateral bound charge error is NOT what makes the model's total-energy
+error vary between cells.
 
-A REPORTING FAULT OF MINE THAT THE SUBSET COULD NOT EXPOSE: the column I
-labelled "improvement" was the SIGNED change err1 - err0, which coincides with
-an improvement only when the error is positive. The NiN88 frames have negative
-errors, so their negative changes printed as improvements while |err| doubled.
-Every frame in the four-frame subset had the sign that makes the two agree,
-which is why it survived there. The table now carries |err| before and after,
+What is NOT supported, and what I wrote first: that the shift is "similar
+regardless of cell or charge". Its magnitude spreads 1.74x (3.736 to 6.492),
+and its |q| dependence has OPPOSITE sign in the two cells -- rising within
+NiN44 (3.996, 5.634, 6.492) and falling within NiN88 (6.102, 3.736). The
+conclusion never needed magnitude uniformity, and that sentence was both
+unsupported and stronger than the conclusion requires, which makes it the one
+most likely to be quoted back as if it were the measurement.
+
+A REPORTING FAULT OF MINE, AND THE SUBSET COULD HAVE EXPOSED IT -- an earlier
+version of this entry said it could not, which was too generous to both of us.
+The column I labelled "improvement" was the SIGNED change err1 - err0, which
+coincides with an improvement only when the error is positive. The NiN88
+frames have negative errors, so their negative changes printed as improvements
+while |err| doubled. But the four-frame subset ALREADY contained the
+inconsistency: the neutral frame's error is negative (-6.379 -> -4.499), so its
+"improvement" printed as +1.881 while the three NiN44 rows printed gains as
+NEGATIVE numbers. A column in which both a positive and a negative value mean
+"better" is self-contradicting on its face, and it was on the page. Worse on my
+side: my own verification script printed "improvement -3.996" next to
+"fraction 30.8%" and "improvement +1.880" next to "fraction 29.5%" -- I
+computed the fraction against |err|, which sidestepped the bug without my
+noticing that the column beside it was wrong. Both of us handled the sign
+structure well enough to get the neutral fraction right and neither flagged
+the convention. Half-catch on both sides, and the author's half is the larger
+one. The table now carries |err| before and after,
 the change in |err|, an explicit verdict and the factor, per row, plus a
 per-cell split -- because an aggregate over cells hides a sign difference
 between them and here the sign IS the finding.
 
-VERDICT on the user's branch. The improvement is small in aggregate (9.1%) and
-NEGATIVE on one of the two cells, which is the "small or worse" branch: that
+VERDICT on the user's branch -- LED BY THE PER-CELL SPLIT, not by the
+aggregate. NiN44 recovers 26.4% on three frames; NiN88 gets 120% WORSE on two;
+the two cells' errors have OPPOSITE SIGNS. The sign split IS the result, and
+any mean over the two cells hides exactly what was discovered, so the 9.1%
+aggregate is reported as a consequence rather than as the headline. It is
+arithmetically fine and substantively misleading on its own.
+The improvement is small in aggregate (9.1%) and NEGATIVE on one of the two
+cells, which is the "small or worse" branch: that
 part of the coupling gap can no longer be used to explain the total-energy
 plateau, and the remaining energy terms and their compensation are the next
 place to look. Recorded with both halves as the partial instruction requires:
@@ -2397,3 +2421,12 @@ TOTAL ENERGY error, because the error's cell-to-cell variation lives elsewhere.
 
 As the user set it, this does NOT show the network cannot learn the reference
 charge. It shows that this line, on its own, does not buy the final energy.
+
+ONE MORE FACT IN THAT TABLE, and it is not about the swap at all -- the
+workstation's point and the most actionable thing here. The model was
+originally about 5x BETTER on NiN88 (mean |err| 4.096) than on NiN44 (20.380),
+with the two cells' errors in OPPOSITE DIRECTIONS. That cell-dependent,
+sign-flipping bias is what the remaining error actually looks like, and it is
+now the thing to explain. It was visible before this experiment and this
+experiment only sharpened it, since a uniform-sign correction is exactly what
+cannot address it.
