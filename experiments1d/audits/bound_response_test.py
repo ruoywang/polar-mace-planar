@@ -284,7 +284,7 @@ def metrics(p, lbl):
 mref = metrics(rb_ref, "DFT reference RHOB")
 mA = metrics(rho_b_of(cap["phi_tot"]), "model response, model phi")
 mB = metrics(rho_b_of(phi_dft), "model response, DFT phi")
-mF = metrics(rho_b_of(-phi_dft), "  (control: DFT phi, flipped)")
+mF = metrics(rho_b_of(-phi_dft), "  (probe: -DFT phi, see below)")
 print(f"\n[RESULT] bound channel, response held fixed, driving potential "
       f"swapped, no re-solve")
 print(f"  {'case':>28} {'net (e)':>9} {'int|.|':>8} {'cross':>9} "
@@ -311,6 +311,151 @@ print(f"  (a visible recovery makes the generation of the total potential the "
        f"   priority -- cavity, 1-D closure and the learned correction. This "
        f"is the plane-averaged 1-D channel only; the lateral 3-D error is not\n"
        f"   in any of these numbers.)", flush=True)
+# ======================================================================
+# WHY THE SWAP MOVES THE ANSWER SO MUCH -- measured, three ways
+#
+# The workstation read the first table as a broken cancellation: nb_off/V and
+# B@phi/V are each about 52 times the bound charge they produce (their summed
+# magnitude about 103 times it), so it argued a 1% perturbation of B@phi
+# explains the whole degradation and the swap is therefore ill-posed. The
+# CONCLUSION -- do not read the dichotomy off that table -- stands, but the
+# mechanism does not, and it fails in a way this project has been caught by
+# repeatedly. Two separate errors:
+#
+#   1. nb_off is IDENTICAL in both arms, so it cancels exactly out of the
+#      difference: rho(phi_dft) - rho(phi_model) = -(B @ dphi)/V, with no
+#      nb_off in it. A near-cancellation common to both arms cannot amplify
+#      anything. Verified numerically below.
+#   2. "B@phi_dft is 1.03% smaller in aggregate" is a difference of L1 norms,
+#      not the norm of the difference -- the same shape as int|a+b| against
+#      int|a|+int|b|. The triangle inequality on the arrays already puts the
+#      real pointwise perturbation at 6.3-10.1% of B@phi in L1, six to ten
+#      times the quoted 1%, and the result moves by 0.461 against a
+#      perturbation of 0.461-0.747: an amplification of at most 1.0x, that is,
+#      none at all.
+#
+# So the swap moves the answer because B @ dphi is simply LARGE next to a
+# small true bound charge, and the open question is which length scales carry
+# it. That is what the three blocks below measure instead of arguing.
+#
+# The operator's own spectral gain settles whether a double derivative really
+# amplifies the top of the band here: B = V * WB @ D @ diag(a1) @ D @ WB
+# carries TWO Gaussian smoothings as well as two derivatives, and a Gaussian
+# damps high k faster than k^2 grows, so the amplification story may have the
+# sign backwards. Measured by applying B to unit cosines mode by mode.
+#
+# The band decomposition then says where in the spectrum B @ dphi comes from,
+# including the modes above the DFT's own native Nyquist -- the DFT grid is
+# 500 in z and is Fourier-upsampled to 600, so modes 251-300 are identically
+# zero on the DFT side and carry MODEL-only content. Any weight there is a
+# grid-mismatch artefact, not physics.
+#
+# And the staged swap is the salvage. Instead of swapping the whole potential
+# at once, it swaps only the part of dphi below a cutoff, walking the cutoff
+# up. If the bound charge improves while only the physically meaningful low
+# frequencies are swapped and only later degrades, the user's question is
+# answered at the scales that matter and the dichotomy survives. If it
+# degrades from the very first band, the response itself is implicated. Either
+# way the reading comes from where the curve turns, not from the endpoint.
+# ======================================================================
+dphi = phi_dft - cap["phi_tot"]
+d_direct = rho_b_of(phi_dft) - rho_b_of(cap["phi_tot"])
+d_oper = -((B @ dphi) / volume)
+print(f"\n[MECHANISM] the offset cannot amplify the swap")
+print(f"  rho(DFT phi) - rho(model phi) vs -(B @ dphi)/V: max abs difference "
+      f"{float((d_direct - d_oper).abs().max()):.3e} e/A^3 -- nb_off is "
+      f"identical in both arms and cancels exactly, so no cancellation "
+      f"involving it can amplify the change")
+sB = float(((B @ cap["phi_tot"]) / volume).abs().sum())
+sO = float((nb_off / volume).abs().sum())
+sR = float(rho_b_of(cap["phi_tot"]).abs().sum())
+sD = float(d_oper.abs().sum())
+print(f"  term magnitudes, sum|.| over z in e/A^3: nb_off/V {sO:.4f}, "
+      f"B@phi_model/V {sB:.4f}, result {sR:.5f} ({sB/max(sR,1e-30):.1f}x "
+      f"each term, {(sO+sB)/max(sR,1e-30):.1f}x their sum)")
+print(f"  the actual perturbation sum|B@dphi|/V {sD:.4f} = "
+      f"{100*sD/max(sB,1e-30):.1f}% of B@phi_model, against the 1.03% "
+      f"difference-of-norms; the result moves {sD/max(sD,1e-30):.2f}x that, "
+      f"so the amplification is 1.0x")
+print(f"  the -phi_dft probe returns approximately -2*nb_off/V: sum|.| "
+      f"{float(rho_b_of(-phi_dft).abs().sum()):.4f} against 2*{sO:.4f} = "
+      f"{2*sO:.4f} -- it measures the offset, NOT a sign control, so its row "
+      f"above carries no information about the response", flush=True)
+
+# ---- the operator's own spectral gain ---------------------------------
+print(f"\n[OPERATOR GAIN] B applied to unit cosines, mode by mode "
+      f"(does a double derivative really amplify the top of the band?)")
+nyq = nz_s // 2
+zc = torch.arange(nz_s, dtype=torch.float64, device=device) * (2 * math.pi / nz_s)
+print(f"  {'mode':>6} {'k (1/A)':>9} {'gain = |B@cos|_rms / V':>24}")
+for m in (1, 5, 15, 30, 60, 100, 150, 200, 250, 290, nyq):
+    g_m = float(((B @ torch.cos(m * zc)) / volume).pow(2).mean().sqrt())
+    print(f"  {m:6d} {2*math.pi*m/lz:9.3f} {g_m:24.4e}")
+print(f"  (rising with mode = the double derivative wins and high-frequency "
+      f"content dominates; falling = the two Gaussian smoothings win and the "
+      f"amplification story is backwards)", flush=True)
+
+# ---- where B @ dphi comes from ----------------------------------------
+BANDS = [(1, 30), (31, 75), (76, 150), (151, 250), (251, nyq)]
+sp_d = torch.fft.rfft(dphi)
+
+
+def band(lo, hi, spec=sp_d):
+    q = torch.zeros_like(spec); q[lo:hi + 1] = spec[lo:hi + 1]
+    return torch.fft.irfft(q, n=nz_s)
+
+
+print(f"\n[BANDS] where the perturbation and its effect live "
+      f"(mode 251-300 is above the DFT's own native Nyquist after the 500->"
+      f"600 upsample, so it is MODEL-only content and a grid artefact)")
+print(f"  {'modes':>10} {'rms dphi':>10} {'sum|B@d|/V':>12} {'share':>8}")
+tot = 0.0
+rows = []
+for lo, hi in BANDS:
+    pb_ = band(lo, hi)
+    e = float(((B @ pb_) / volume).abs().sum())
+    rows.append((lo, hi, float(pb_.pow(2).mean().sqrt()), e))
+    tot += e
+for lo, hi, r, e in rows:
+    print(f"  {f'{lo}-{hi}':>10} {r:10.5f} {e:12.5f} "
+          f"{100*e/max(tot,1e-30):7.1f}%")
+print(f"  {'sum':>10} {'':>10} {tot:12.5f}   (against sum|B@dphi|/V "
+      f"{sD:.5f}; they differ only by cancellation between bands)",
+      flush=True)
+
+# ---- the staged swap: read the turn, not the endpoint -----------------
+print(f"\n[STAGED SWAP] swap only the part of the potential below a cutoff, "
+      f"walking the cutoff up. Same fixed response, still no re-solve.")
+print(f"  {'cutoff':>18} {'net (e)':>9} {'int|.|':>8} {'gap':>9} {'L1':>9} "
+      f"{'shift':>8} {'resid':>7}")
+print(f"  {'none (baseline)':>18} {mA['net']:+9.4f} {mA['absq']:8.4f} "
+      f"{mA['gap']:+9.4f} {mA['l1']:9.5f} {mA['shift']:+8.3f} "
+      f"{100*mA['resid']:6.1f}%")
+best = None
+for kc in (5, 10, 20, 30, 50, 75, 100, 150, 200, 250, nyq):
+    m_ = metrics(rho_b_of(cap["phi_tot"] + band(1, kc)), f"<= {kc}")
+    tagb = ""
+    if best is None or m_["l1"] < best[1]:
+        best = (kc, m_["l1"], m_["gap"], m_["resid"])
+    print(f"  {f'modes 1-{kc}':>18} {m_['net']:+9.4f} {m_['absq']:8.4f} "
+          f"{m_['gap']:+9.4f} {m_['l1']:9.5f} {m_['shift']:+8.3f} "
+          f"{100*m_['resid']:6.1f}%{tagb}")
+print(f"  {'full swap':>18} {mB['net']:+9.4f} {mB['absq']:8.4f} "
+      f"{mB['gap']:+9.4f} {mB['l1']:9.5f} {mB['shift']:+8.3f} "
+      f"{100*mB['resid']:6.1f}%")
+print(f"\n  best cutoff by charge L1: modes 1-{best[0]}, L1 {best[1]:.5f} e "
+      f"against the baseline's {mA['l1']:.5f} e "
+      f"({'BETTER' if best[1] < mA['l1'] else 'no better'}), coupling gap "
+      f"{best[2]:+.4f} vs {mA['gap']:+.4f} eV, profile residual "
+      f"{100*best[3]:.1f}% vs {100*mA['resid']:.1f}%")
+print(f"  If no cutoff beats the baseline, swapping the potential does not "
+      f"help the bound charge at ANY length scale, and the response itself is "
+      f"implicated -- cavity, 1-D closure, learned correction.\n  If some "
+      f"cutoff does, the low-frequency structure of the total potential is "
+      f"part of the problem and its generation is worth checking at those "
+      f"scales.\n  Still plane-averaged 1-D throughout; no lateral 3-D error "
+      f"is in any of these numbers.", flush=True)
+
 np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
                       "bound_response_test_arrays.npz"),
          z=np.arange(nz_s) * dz, rho_b_ref=rb_ref.cpu().numpy(),
@@ -318,6 +463,9 @@ np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
          rho_b_dft_phi=rho_b_of(phi_dft).cpu().numpy(),
          rho_b_dft_phi_flipped=rho_b_of(-phi_dft).cpu().numpy(),
          phi_model=cap["phi_tot"].cpu().numpy(),
-         phi_dft=phi_dft.cpu().numpy(), phi_score=phi_score.cpu().numpy())
+         phi_dft=phi_dft.cpu().numpy(), phi_score=phi_score.cpu().numpy(),
+         nb_off_over_v=(nb_off / volume).cpu().numpy(),
+         b_phi_model_over_v=((B @ cap["phi_tot"]) / volume).cpu().numpy(),
+         b_dphi_over_v=d_oper.cpu().numpy())
 print(f"\n  arrays saved to bound_response_test_arrays.npz", flush=True)
 print("DONE")
