@@ -1,0 +1,79 @@
+PROVENANCE mace=52ea73c pb=9b3b9ba sha256(bound_response_test.py)=a2fbe411ba1f13f07d2f2046f9f10b0009f8496deb459f1b0111324d5c6d4862 (IDENTICAL to committed 52ea73c)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  one full model call; solve grid nz_s 600. Bound response held fixed: a1 and p_off from the captured baseline. Only the DRIVING potential changes. No re-solve.
+
+  GATES AND MEASURED CONVENTIONS
+   [PASS] the model's own potential reproduces the model's own bound charge through B and nb_off: max abs 0.000e+00 e/A^3 -- the response really is n_b = B @ phi + nb_off
+   [reference zero] max |B @ 1| 1.146e-10 against max |B @ phi| 4.128e+03, ratio 2.78e-14 -- tiny means the bound channel cannot see a constant offset in phi, so the electrolyte reference zero cannot affect this comparison at all
+   [PASS] relative sign measured by correlation with the model's own total potential (mean removed): +PHI_raw +0.9995, -PHI_raw -0.9995 -- +PHI_raw is the solver's convention, as the separation shows; both are reported below anyway
+   [room to act] the two driving potentials differ by: L1 2.7322, max 0.2915, rms 0.11093 eV; with the constant removed rms 0.10304 eV (constant +0.0411) -- a near-zero rms would make the swap vacuous
+
+[RESULT] bound channel, response held fixed, driving potential swapped, no re-solve
+                          case   net (e)   int|.|     cross       gap        L1   max dev    shift   resid
+            DFT reference RHOB   +0.0000   2.0193   -1.0857   +0.0000   0.00000  0.00e+00   -0.000    0.0%
+     model response, model phi   +0.0000   2.0302   -0.5487   +0.5370   0.80003  2.38e-03   +0.050   48.7%
+       model response, DFT phi   +0.0000   8.5965   +4.4975   +5.5832   7.56925  2.05e-02   +0.825   85.0%
+    (probe: -DFT phi, see below)   -0.0000 207.4935 +240.1045 +241.1903 208.82518  9.50e-01   +1.300   94.4%
+
+  CROSS-CHECK against the accepted whole-system run: the bound channel's coupling gap there was +0.5371 eV for this same baseline (derived as total minus ionic, since cross couplings add).
+  This run's baseline gap is +0.5370 eV, difference -0.0001 eV -- the same quantity computed a second way, so a mismatch would mean one of the two is wrong.
+
+  swapping the driving potential: coupling gap +0.5370 -> +5.5832 eV, charge L1 0.80003 -> 7.56925 e, max deviation 2.381e-03 -> 2.054e-02, displacement +0.050 -> +0.825 A, profile error 48.7% -> 85.0%
+  (a visible recovery makes the generation of the total potential the priority; staying clearly wrong makes the bound RESPONSE itself the
+   priority -- cavity, 1-D closure and the learned correction. This is the plane-averaged 1-D channel only; the lateral 3-D error is not
+   in any of these numbers.)
+
+[MECHANISM] the offset cannot amplify the swap
+  rho(DFT phi) - rho(model phi) vs -(B @ dphi)/V: max abs difference 8.361e-16 e/A^3 -- nb_off is identical in both arms and cancels exactly, so no cancellation involving it can amplify the change
+  term magnitudes, sum|.| over z in e/A^3: nb_off/V 7.2847, B@phi_model/V 7.3768, result 0.14266 (51.7x each term, 102.8x their sum)
+  the actual perturbation sum|B@dphi|/V 0.5206 = 7.1% of B@phi_model, against the 1.03% difference-of-norms; the result moves 1.00x that, so the amplification is 1.0x
+  the -phi_dft probe returns approximately -2*nb_off/V: sum|.| 14.5805 against 2*7.2847 = 14.5693 -- it measures the offset, NOT a sign control, so its row above carries no information about the response
+
+[OPERATOR GAIN] B applied to unit cosines, mode by mode (does a double derivative really amplify the top of the band?)
+    mode   k (1/A)   gain = |B@cos|_rms / V
+       1     0.140               6.8527e-03
+       5     0.698               9.8865e-02
+      15     2.094               8.1968e-01
+      30     4.189               2.6558e+00
+      60     8.378               4.6655e+00
+     100    13.963               1.8469e+00
+     150    20.944               9.2512e-02
+     200    27.925               7.9971e-04
+     250    34.907               1.3285e-06
+     290    40.492               3.3759e-09
+     300    41.888               2.3734e-15
+  (rising with mode = the double derivative wins and high-frequency content dominates; falling = the two Gaussian smoothings win and the amplification story is backwards)
+
+[BANDS] where the perturbation and its effect live (mode 251-300 is above the DFT's own native Nyquist after the 500->600 upsample, so it is MODEL-only content and a grid artefact)
+       modes   rms dphi   sum|B@d|/V    share
+        1-30    0.10272      2.86143    46.7%
+       31-75    0.00792      2.57460    42.0%
+      76-150    0.00149      0.68580    11.2%
+     151-250    0.00048      0.00228     0.0%
+     251-300    0.00001      0.00000     0.0%
+         sum                 6.12412   (against sum|B@dphi|/V 0.52056; they differ only by cancellation between bands)
+
+[STAGED SWAP] swap only the part of the potential below a cutoff, walking the cutoff up. Same fixed response, still no re-solve.
+              cutoff   net (e)   int|.|       gap        L1    shift   resid
+     none (baseline)   +0.0000   2.0302   +0.5370   0.80003   +0.050   48.7%
+           modes 1-5   -0.0000  28.5044   -3.8967  27.62705   -0.475   83.6%
+          modes 1-10   +0.0000  24.0294   +3.8190  23.58153   +0.475   92.6%
+          modes 1-20   +0.0000  36.7133   +5.7979  36.73508   +0.950   96.3%
+          modes 1-30   +0.0000  40.8309   +5.6470  40.77592   +0.900   96.6%
+          modes 1-50   +0.0000  24.9518   +5.5748  24.83785   +0.825   92.5%
+          modes 1-75   +0.0000  16.2669   +5.5854  16.04677   +0.800   88.0%
+         modes 1-100   +0.0000   9.3423   +5.5832   8.58265   +0.825   85.0%
+         modes 1-150   +0.0000   8.5995   +5.5832   7.57510   +0.825   85.0%
+         modes 1-200   +0.0000   8.5965   +5.5832   7.56926   +0.825   85.0%
+         modes 1-250   +0.0000   8.5965   +5.5832   7.56925   +0.825   85.0%
+         modes 1-300   +0.0000   8.5965   +5.5832   7.56925   +0.825   85.0%
+           full swap   +0.0000   8.5965   +5.5832   7.56925   +0.825   85.0%
+
+  best cutoff by charge L1: modes 1-250, L1 7.56925 e against the baseline's 0.80003 e (no better), coupling gap +5.5832 vs +0.5370 eV, profile residual 85.0% vs 48.7%
+  If no cutoff beats the baseline, swapping the potential does not help the bound charge at ANY length scale, and the response itself is implicated -- cavity, 1-D closure, learned correction.
+  If some cutoff does, the low-frequency structure of the total potential is part of the problem and its generation is worth checking at those scales.
+  Still plane-averaged 1-D throughout; no lateral 3-D error is in any of these numbers.
+
+  arrays saved to bound_response_test_arrays.npz
+DONE

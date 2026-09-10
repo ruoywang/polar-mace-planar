@@ -371,6 +371,10 @@ No row's displacement sits at the ±2.0 A scan edge.
 
 ### The table cannot answer the question it was built for
 
+> **The mechanism given in this section is WRONG. The conclusion it supports
+> survives, for a different reason. See "Correction: the mechanism was wrong"
+> below, which is backed by measurement at 52ea73c.**
+
 The bound charge is a near-total cancellation of two large terms, and only the
 model's own self-consistent potential produces the cancellation. Recovered
 exactly from the saved arrays by linearity — `rho(phi) = -(B@phi + C)/V`, so
@@ -410,3 +414,114 @@ and carry no information about the bound response at all.
 
 No reading of the priority question is offered from this table, and nothing
 here bears on the lateral 3-D error, which appears in none of these numbers.
+
+
+### Correction: the mechanism was wrong (measured at 52ea73c)
+
+Three errors of mine in the section above, all now measured rather than argued.
+The conclusion — do not read the driven-versus-responds dichotomy off that table
+— stands, but not for the reason I gave.
+
+**1. The offset cannot amplify anything.** `nb_off` is identical in both arms, so
+it cancels exactly out of the difference:
+`rho(phi_dft) - rho(phi_model) = -(B @ dphi)/V`, with no `nb_off` in it.
+Verified numerically: max abs difference between the two sides is 8.361e-16
+e/A^3. A cancellation both arms share cannot amplify the difference between
+them. The 103-fold figure is a real structural fact about the model — and to be
+precise it is 51.7x against each term and 102.8x against their sum, which I
+failed to distinguish — but it is not a mechanism for this comparison.
+
+**2. I compared norms instead of taking the norm of the difference.** "B@phi_dft
+is 1.03% smaller in aggregate" is `sum|a| - sum|b|`, not `sum|a-b|`. That is the
+`int|a+b|` against `int|a|+int|b|` error, the same one this project has now been
+caught by four times, and I made it two messages after flagging it in someone
+else's work. Measured: `sum|B@dphi|/V = 0.5206`, which is **7.1%** of
+`B@phi_model`, not 1.03%. The result moves by **1.00x** that perturbation — the
+amplification is exactly none, as it must be, since the map from `dphi` to the
+change in `rho` is precisely `-B/V`.
+
+**3. My spectral reading was backwards.** I asserted the top of the band is
+"exactly the band a double-derivative operator amplifies". B carries two Gaussian
+smoothings as well as two derivatives, and the Gaussians win. Measured gain of B
+on unit cosines:
+
+| mode | k (1/A) | gain |
+|---|---|---|
+| 1 | 0.140 | 6.85e-03 |
+| 5 | 0.698 | 9.89e-02 |
+| 15 | 2.094 | 8.20e-01 |
+| 30 | 4.189 | 2.66e+00 |
+| 60 | 8.378 | **4.67e+00** |
+| 100 | 13.963 | 1.85e+00 |
+| 150 | 20.944 | 9.25e-02 |
+| 200 | 27.925 | 8.00e-04 |
+| 250 | 34.907 | 1.33e-06 |
+| 300 | 41.888 | 2.37e-15 |
+
+B is band-pass with a peak near mode 60 and falls by fifteen orders of magnitude
+by mode 300. The 1.81x top-half difference between the two potentials therefore
+cannot drive anything: the operator's gain there is 1e-15.
+
+**What is actually true, and it does support the conclusion:** `B @ dphi` is
+large next to a small true bound charge. `sum|B@dphi|/V` is 0.5206 against the
+reference's `int|.|` of 2.0193 e, so a modest absolute perturbation is a large
+relative error. That is a statement about the bound charge being small, not
+about a tuned cancellation being broken.
+
+### Where the perturbation lives, and the staged swap
+
+| modes | rms dphi | sum&#124;B@d&#124;/V | share |
+|---|---|---|---|
+| 1-30 | 0.10272 | 2.86143 | 46.7% |
+| 31-75 | 0.00792 | 2.57460 | 42.0% |
+| 76-150 | 0.00149 | 0.68580 | 11.2% |
+| 151-250 | 0.00048 | 0.00228 | 0.0% |
+| 251-300 | 0.00001 | 0.00000 | 0.0% |
+
+Two things to read carefully here. The band L1s sum to 6.12412 against the
+actual `sum|B@dphi|/V` of 0.52056, an 11.8-fold cancellation BETWEEN bands, so
+those shares are fractions of the uncancelled sum and must not be read as
+contributions to the net effect — the same non-additivity as above. And the
+grid-mismatch band 251-300, which is model-only content after the 500->600
+upsample, contributes 0.00000: that concern is dismissed by measurement.
+
+Staged swap, cutoff walked upward, same fixed response, no re-solve:
+
+| cutoff | int&#124;.&#124; | gap | L1 | shift | resid |
+|---|---|---|---|---|---|
+| none (baseline) | 2.0302 | +0.5370 | **0.80003** | +0.050 | 48.7% |
+| modes 1-5 | 28.5044 | -3.8967 | 27.62705 | -0.475 | 83.6% |
+| modes 1-10 | 24.0294 | +3.8190 | 23.58153 | +0.475 | 92.6% |
+| modes 1-20 | 36.7133 | +5.7979 | 36.73508 | +0.950 | 96.3% |
+| modes 1-30 | 40.8309 | +5.6470 | 40.77592 | +0.900 | 96.6% |
+| modes 1-50 | 24.9518 | +5.5748 | 24.83785 | +0.825 | 92.5% |
+| modes 1-75 | 16.2669 | +5.5854 | 16.04677 | +0.800 | 88.0% |
+| modes 1-100 | 9.3423 | +5.5832 | 8.58265 | +0.825 | 85.0% |
+| modes 1-150 | 8.5995 | +5.5832 | 7.57510 | +0.825 | 85.0% |
+| modes 1-250 | 8.5965 | +5.5832 | 7.56925 | +0.825 | 85.0% |
+| full swap | 8.5965 | +5.5832 | 7.56925 | +0.825 | 85.0% |
+
+**No cutoff beats the baseline at any length scale.** The best is modes 1-250 at
+L1 7.56925 e against the baseline's 0.80003, still 9.5x worse. By the script's
+own stated criterion that implicates the bound response itself — cavity, 1-D
+closure, learned correction — rather than the generation of the total potential.
+
+One feature worth flagging rather than smoothing over: the partial swaps are far
+WORSE than the complete one, peaking at L1 40.78 for modes 1-30, and modes 1-30
+is where essentially all of the potential difference lives (rms dphi 0.10272 of a
+total 0.10304). So swapping the band that contains the entire difference is the
+worst option of all. That is consistent with the 11.8-fold inter-band
+cancellation measured above: the two potentials' band content is not
+independently substitutable, and the staged swap therefore establishes "nothing
+helps" robustly while its non-monotonic shape carries no separate reading.
+
+All of this remains plane-averaged 1-D. No lateral 3-D error appears anywhere in
+it.
+
+### One thing that does not depend on the substitution
+
+The baseline bound profile has a 48.7% shape residual at a displacement of only
++0.050 A, with L1 0.80003 e against `int|.|` 2.0193 e. Against the ionic
+channel's 1.4% residual and L1 0.18687 e, the bound channel carries 4.3x the 1-D
+charge error and 3.8x the coupling gap. The 1-D error is in the bound channel and
+it is shape, not position.
