@@ -63,6 +63,7 @@ from ase.io import read
 from mace import data as mace_data
 from mace.data import KeySpecification
 from mace.tools import torch_geometric, torch_tools, utils
+import mace.modules.pb1d_backend as PB          # needed by the _evict hook
 
 DFT = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single")
 CKDIR = os.environ.get("KIT_CKPT_DIR", "checkpoints")
