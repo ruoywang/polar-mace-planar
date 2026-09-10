@@ -1,0 +1,88 @@
+PROVENANCE mace=99ee87f pb=9b3b9ba sha256(bound_coeff_decompose.py)=7b7327ce6974c18d1db2b11af03947939ee4776c017419cce975003085966517 (IDENTICAL to committed 99ee87f)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  params from the PB config directly; sigma_b 0.125000 A, LNLDIEL True, N_MOL 3.350000e-02, alpha0_rot 5.872093e+02, alpha_pol 5.977855e+00
+
+  DFT native grid (168, 168, 500), cell volume 8538.5464 A^3, lz 45.0000 A
+
+[STEP 1] 3-D polarization from the DFT density and the DFT total potential, against DFT RHOB (plane-averaged, native grid)
+   reconstructed  net +0.000000 e, int|.| 2.0229 e
+   DFT RHOB       net +0.000000 e, int|.| 2.0193 e
+   [PASS] L1 0.00365 e = 0.18% of the reference int|.|, correlation +0.999991
+   (this reproduction is also what confirms the sign pair: phi enters as +PHI_raw and the density as -(n_b/V), the backend's own pair.
+    A failure here means the 3-D response, the cavity or the parameters are wrong and NOTHING below can be attributed.)
+
+[STEP 2] the reference decomposition -- three identities MEASURED, not assumed
+   [PASS] A_ref*<E_z> + prior_ref = plane_mean(P_z): max abs 1.279e-17, i.e. 0.30 float64 epsilon on the terms being summed. The covariance makes the 1-D product EXACT, so these two are the correct a1 and p_off --
+       but prior_ref is DEFINED here as Pz_ref - A_ref*Ez_ref, so this holds by construction and the gate measures round-off, nothing physical. The next gate is the substantive one.
+   [PASS] the 1-D operator on plane_mean(P_z) equals the plane average of the 3-D charge: max abs 6.939e-18 against a profile max of 2.933e-03 e/A^3.
+       This is the smoothing the user flagged -- the charge is div of W_B P, and the 1-D and 3-D forms agree only because both carry it.
+   [PASS] the 1-D driving field equals the plane average of the 3-D one: max abs 9.770e-14 against 3.054e+01 eV/A
+
+  one model call. Solve grid nz_s 600, closure grid 300, lz 45.0000 A, volume 8538.5464 A^3
+   [PASS] the two cells agree: model 8538.5464 vs DFT 8538.5464 A^3, relative 4.26e-16
+   [PASS] p_off = prior + delta_p as captured: max abs 0.000e+00
+   [PASS] this script's 1-D chain reproduces the model's own bound charge from a1, p_off and its own potential: max abs 4.856e-14 e/A^3
+
+[STEP 3a] the two coefficients against their reference (rms over z, and relative to the reference's own rms)
+                            quantity     ref rms   model rms     err rms      rel     corr
+                 a1  (mean response)  2.8973e-01  2.8167e-01  2.3947e-02    0.083  +0.9935
+      prior  (covariance background)  2.4731e-02  3.8408e-02  1.3765e-02    0.557  +0.9987
+             p_off = prior + delta_p  2.4731e-02  3.7477e-02  1.2850e-02    0.520  +0.9985
+  a1's error split: total rms 2.3947e-02, of which the pure cavity part resp_unit*(<s_diel>_model - <s_diel>_ref) is 1.8610e-02
+    (77.7% in rms; the remainder is the saturation/pairing heuristic, which evaluates the response at a screened VACUUM field estimate rather than at the self-consistent one)
+
+[STEP 3a-2] wrong amplitude or wrong shape? The single best scale factor, and the residual it cannot remove
+                            quantity  best scale     err rms  after rescale  removed
+                 a1  (mean response)      0.9692  2.3947e-02     2.2216e-02     7.2%
+      prior  (covariance background)      1.5510  1.3765e-02     1.9411e-03    85.9%
+             p_off = prior + delta_p      1.5132  1.2850e-02     2.0037e-03    84.4%
+  (a scale far from 1 with most of the error removed = the shape is right and the gain is wrong. A scale near 1 with little removed = the shape itself is wrong.)
+
+[STEP 3b] did the learned correction move prior toward the reference?
+  needed   = prior_ref - prior_model : rms 1.3765e-02
+  supplied = delta_p                 : rms 9.6013e-04
+  projection of delta_p onto what was needed: +0.0668 (1 = exactly the right correction, 0 = orthogonal, negative = the wrong direction), correlation +0.9553
+  residual after the correction: rms 1.2850e-02 against 1.3765e-02 before (reduced)
+  IF delta_p were simply rescaled by 13.72x: residual rms 3.9910e-03, i.e. 71.0% of what is needed removed by a pure gain change.
+  This rescale residual is the decisive number, not the correlation: two profiles both localised at the dielectric interface correlate highly whatever their detail, so +0.9553 alone could be a
+  localisation artefact. The rescale residual is not -- if it is small, the learned correction has the right shape and only the wrong gain.
+
+[cavity plateau, same recipe and parameters, different grid] plane_mean(s_diel) max: model 0.9447081 on its 300-in-z grid, reference 0.9999851 on the DFT native 500
+  (the earlier density test found the model grid gives the same plateau for BOTH densities, so density is not the difference here -- that leaves resolution, and this is the first direct evidence for it)
+
+[STEP 3c] grid reach -- the model's closure grid is 300 in z, so its coefficients carry no mode above 150. Share of the reference's spectral energy above that cut:
+    A_ref       0.00%
+    prior_ref   0.00%
+  (a large share is content the model's grid cannot represent at all, which is the cavity/a1 grid error the user left open.)
+
+[STEP 3d] together: swap one coefficient at a time, all driven by the DFT total potential (the field the reference was built from), no re-solve
+        a1    p_off   net (e)   int|.|       gap        L1   max dev    shift   resid
+         -        -   +0.0000   2.0193   +0.0000   0.00000  0.00e+00   -0.000    0.0%   <- DFT reference RHOB
+     model    model   -0.0000   8.5965   +5.5832   7.56925  2.05e-02   +0.825   85.0%
+       ref    model   -0.0000  37.5740  +39.0290  36.94743  1.73e-01   +1.250   93.4%
+     model      ref   -0.0000  34.9159  -33.4487  33.69750  1.57e-01   +1.275   95.9%
+       ref      ref   +0.0000   2.0228   -0.0029   0.00369  1.96e-05   -0.000    0.4%  <- must reproduce the reference
+     model prior/1.551   -0.0000  35.7184  -35.7095  34.52551  1.52e-01   +1.325   96.1%  <- the covariance GAIN fixed alone, exact
+
+  by L1 (e): both model 7.56925; a1 from the reference -> 36.94743; p_off from the reference -> 33.69750; both -> 0.00369
+  The 'ref/ref' row is a closure check, not a result: it must come back at the reference. If it does not, the chain is broken and no attribution holds.
+  WHAT THE SINGLE SWAPS ARE, and what they cannot say. Each row's deviation from ref/ref is exactly one error array: ref/model isolates the p_off error, model/ref the a1 error, model/model both. But
+  a1*E + prior = plane_mean(a3*E) holds by construction on BOTH sides, so the two coefficients are complementary halves of one decomposition and a reference half paired with a model half breaks a cancellation
+  the reference itself relies on -- measured on the reference side as a1*E rms against plane_mean(P_z) rms below. So a single swap being worse does NOT indict that coefficient, and 'whichever swap helps most'
+  is not an available reading. What the rows DO give is the size of each error's uncompensated effect and how much the two errors cancel when both are present.
+  Plane-averaged 1-D only; no lateral 3-D error is in any of it.
+  uncompensated: p_off error alone 36.94743 e, a1 error alone 33.69750 e, both together 7.56925 e -> the two coefficient errors cancel 4.7-fold in L1.
+  IS THE DIAGNOSIS A REPAIR LIST? No, and this is the exact number rather than a bound. Dividing prior by its own best gain 1.551 -- the single change that removes 85.9% of its rms error -- gives charge L1 34.52551 e against the baseline's 7.56925 e,
+  a factor of 4.56. Fixing the covariance gain ALONE makes the bound charge WORSE, because it removes a compensation the wrong a1 currently relies on. The two halves have to move together.
+  The two halves are NOT equally tractable, though, and the binding constraint is a1: prior's error is 85.9% removable by one scalar, so a joint change has a cheap well-specified handle on that half, while
+  a1's is 7.2% removable by any scalar and 77.7% pure cavity, so its half has no scalar handle at all and needs the cavity or the grid it is computed on.
+  That cancellation is partly structural, not an independent finding: the model's own closure satisfies the same identity with its own fields, and the model's bound-charge total is close to the reference,
+  so the two errors are largely forced to oppose. It is reported as a magnitude, not read as a correlation between independent errors.
+
+[cross-check, attributes nothing] the polarization integral. -cumsum(RHOB)*dz recovers W_B P, not P, so it is set against W_B*plane_mean(P_z):
+    rms of the difference 1.9835e-05 against a W_B P rms of 1.4789e-03, correlation +0.999910
+    (the mean is removed from BOTH because the integration constant is undetermined here -- that constant is precisely why this cannot attribute anything, and it is why it is a cross-check only.)
+
+  arrays saved to bound_coeff_decompose_arrays.npz
+DONE

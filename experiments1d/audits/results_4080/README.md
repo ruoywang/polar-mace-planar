@@ -709,3 +709,45 @@ That cancellation is largely structural — the model's own closure satisfies
 `a1*E + prior = plane_mean(a3*E)` with its own fields and its bound-charge total
 is close to the reference, so the two errors are substantially forced to oppose —
 and it is recorded as a magnitude, not as a finding about independent errors.
+
+## Re-run at 99ee87f: the covariance-gain-alone row, measured
+
+`bcd_99ee87f.log`. mace 99ee87f, pb 9b3b9ba, executed file sha256
+7b7327ce6974c18d1db2b11af03947939ee4776c017419cce975003085966517, IDENTICAL to
+the commit. Every earlier number reproduces to the digit.
+
+The new row replaces the bound with an evaluation:
+
+|  a1 | p_off | int&#124;.&#124; | gap | L1 | shift | resid |
+|---|---|---|---|---|---|---|
+| model | model (baseline) | 8.5965 | +5.5832 | 7.56925 | +0.825 | 85.0% |
+| model | prior / 1.551 | 35.7184 | **-35.7095** | **34.52551** | +1.325 | 96.1% |
+| model | ref | 34.9159 | -33.4487 | 33.69750 | +1.275 | 95.9% |
+| ref | ref | 2.0228 | -0.0029 | 0.00369 | -0.000 | 0.4% |
+
+**L1 34.52551 e against the baseline's 7.56925 e, a factor of 4.56.** This lands
+inside the 28.5-38.9 e window predicted from the triangle inequality, at about
+58% of the way across it, and inside the predicted 3.8-5.1x range.
+
+Worth recording that the bound was the right instrument and a point estimate
+would not have been. Assuming the rescaling residual shared the direction of the
+a1 error gave a point estimate of 28.9 e; the measured value is 34.53 e, so that
+estimate would have been 16% low and would have sat exactly on the lower edge of
+its own interval. The bound gave the sign immediately and cheaply and contained
+the answer; the point estimate would have been published as a number and been
+wrong.
+
+Two details beyond the headline factor. The coupling gap does not merely grow, it
+**flips sign and grows 6.4-fold**, from +5.5832 eV to -35.7095 eV, so this is an
+overshoot past the reference rather than a further shortfall. And the gain-only
+fix is slightly worse than substituting the reference `p_off` outright — L1
+34.52551 against 33.69750 — because dividing by 1.551 removes 85.9% of the rms
+error and the remaining 14.1% pushes a little further in L1 than the full
+substitution does.
+
+So: fixing the covariance gain alone makes the bound charge 4.56x worse in charge
+L1 and flips the coupling gap. The diagnosis is not a repair list and not a
+repair order. The two halves must move together, and they are not equally
+tractable — prior's error is 85.9% removable by one scalar, a1's is 7.2%
+removable by any scalar and 77.7% pure cavity, so a1 is the binding constraint
+and needs the cavity or the grid it is computed on.
