@@ -122,28 +122,22 @@ def _have(sid):
             and os.path.exists(f"{d}/log.out"))
 
 
+# STEP 5 NEEDS NO OUTCAR. The trapezoid needs the DFT label, dN and the two
+# Fermi levels, and all four are in the xyz for every frame -- the xyz energy
+# matches the OUTCAR sigma->0 label to all printed digits and its Fermi
+# carries MORE digits than the OUTCAR line (-3.8745365801 against -3.8745).
+# So the pair set is limited by the xyz, not by the DFT payload, which is 200
+# pairs spanning all three splits on any machine. The workstation found this;
+# my earlier version read a one-sided directory listing as a pair census and
+# would have tested a one-parameter relation on the single point it was
+# derived from. Steps 1-3 genuinely do need OUTCAR and keep their own guard.
 _pairs_all = list(PAIRS_VAL)
-PAIRS_VAL = [k for k in _pairs_all if _have(k) and _have(600 + k)]
-_missing = [(k, "charged" if not _have(k) else "neutral")
-            for k in _pairs_all if k not in PAIRS_VAL]
-print(f"  DFT availability census: step 1 pair (1/601) "
-      f"{'present' if _have(1) and _have(601) else 'MISSING'}; "
-      f"complete val pairs {len(PAIRS_VAL)} of {len(_pairs_all)}")
-if _missing:
-    mc = [k for k, w in _missing if w == "charged"]
-    mn = [k for k, w in _missing if w == "neutral"]
-    print(f"    incomplete pairs: {len(_missing)} -- missing charged side for "
-          f"{mc if mc else 'none'}, missing neutral side for "
-          f"{mn if mn else 'none'}")
+print(f"  step 1-3 payload: sid1/sid601 OUTCAR+log.out "
+      f"{'present' if _have(1) and _have(601) else 'MISSING'}")
 if not (_have(1) and _have(601)):
-    raise SystemExit("  STOP: steps 1-4 need the sid1/sid601 pair and this "
-                     "machine does not hold it. Run where the payload is "
+    raise SystemExit("  STOP: steps 1-4 need the sid1/sid601 OUTCAR pair and "
+                     "this machine does not hold it. Run where the payload is "
                      "rather than substituting another pair.")
-if not PAIRS_VAL:
-    print(f"    -> STEP 5 WILL BE SKIPPED on this machine, and skipped is not "
-          f"'done with fewer pairs': 0 complete pairs means the table cannot "
-          f"be formed at all. Steps 1-4 still run and are self-contained.",
-          flush=True)
 
 device = torch_tools.init_device("cuda")
 torch_tools.set_default_dtype("float64")
@@ -200,7 +194,7 @@ TERMS = [
 ]
 
 
-def run(sid):
+def run(sid, feats=True):
     grab.clear()
     a = atoms_by_sid[sid]
     cfg = mace_data.config_from_atoms(a, key_specification=kspec)
@@ -233,7 +227,8 @@ def run(sid):
     t["_nat"] = nat
     t["_q"] = float(a.info.get("total_charge", 0.0))
     t["_fermi"] = float(a.info.get("Fermi", float("nan")))
-    t["_feats"] = {i: torch.cat(v, 0).clone() for i, v in grab.items()}
+    t["_feats"] = ({i: torch.cat(v, 0).clone() for i, v in grab.items()}
+                   if feats else {})
     return t
 
 
@@ -351,20 +346,8 @@ else:
           f"retraining it is not excluded. Its actual leverage is "
           f"d(inter_e) above.")
 
-print(f"\n=================== STEP 5: the validation pairs "
+print(f"\n=================== STEP 5: the charging pairs, OUTCAR-free "
       f"===================")
-if not PAIRS_VAL:
-    print(f"   SKIPPED: 0 of {len(_pairs_all)} val pairs are complete on this "
-          f"machine. Not a reduced table -- no table. The step-1 pair is the "
-          f"only complete one here and it is already reported above.")
-    for h in hooks:
-        h.remove()
-    print("\nDONE (steps 1-4 only)")
-    raise SystemExit(0)
-if len(PAIRS_VAL) < len(_pairs_all):
-    print(f"   SUBSET: {len(PAIRS_VAL)} of {len(_pairs_all)} pairs complete "
-          f"here; the bias and RMSE below cover only those and must be "
-          f"reported as a subset.")
 # A HYPOTHESIS TO TEST HERE, not a conclusion, and it came out of the one
 # pair the workstation ran. The four terms that cannot contribute to Delta E
 # are e0 (per-species, identical species) and inter_e (identical features, so
@@ -378,36 +361,62 @@ if len(PAIRS_VAL) < len(_pairs_all):
 # with dN spread over 0.8 to 1.3 can, because a varying dN makes the relation
 # a one-parameter prediction rather than a single number. The columns below
 # test it and the residual RMSE says how much it explains.
-_sp = {}
-for k in PAIRS_VAL:
-    _sp[k] = (split_by_sid.get(k, "?"), split_by_sid.get(600 + k, "?"))
-_allval = all(v == ("val", "val") for v in _sp.values())
-print(f"   pair set: {PAIRS_VAL}")
-print(f"   splits:   " + ", ".join(f"{k}:{a}/{b}" for k, (a, b) in _sp.items()))
-if _allval:
-    print(f"   -> these are the user's 20 validation pairs.")
-else:
-    print(f"   -> NOT the user's validation table: some or all of these pairs "
-          f"are TRAINING pairs. Evidence about a structural absence still "
-          f"counts here, but this table must not be reported as the "
-          f"validation result.")
-print(f"   {'pair':>6} {'q':>7} {'dN':>6} {'DFT dE':>11} {'model dE':>11} "
-      f"{'eps_D':>10} {'mu_bar.dN':>11} {'residual':>10}")
-rows = []
-for k in PAIRS_VAL:
-    mc, mn = run(k), run(600 + k)
+# every pair the xyz holds, both sides, regardless of the DFT payload
+PAIRS = [k for k in range(1, 201)
+         if k in atoms_by_sid and (600 + k) in atoms_by_sid]
+print(f"   pairs available from the xyz: {len(PAIRS)} of 200; splits "
+      f"{ {sp: sum(1 for k in PAIRS if split_by_sid[k] == sp) for sp in ('train','val','test')} }")
+print(f"   dN comes from |total_charge|, not from NELECT, which the xyz does "
+      f"not carry -- for integer frames they agree (sid 1: q -1.0, NELECT "
+      f"difference +1.0) and for the fractional ones dN from the charge is\n"
+      f"   what the integral needs rather than a stand-in for NELECT. The "
+      f"neutral frames' Fermi values carry fewer digits than the charged ones "
+      f"(-7.3736 against -3.8745365801), which floors the residual near "
+      f"1e-4 eV.")
+print(f"   {'pair':>6} {'split':>6} {'q':>8} {'dN':>6} {'DFT dE':>11} "
+      f"{'model dE':>11} {'eps_D':>10} {'mu_bar.dN':>11} {'residual':>10}")
+rows, failed = [], []
+for k in PAIRS:
+    try:
+        mc, mn = run(k, feats=False), run(600 + k, feats=False)
+    except Exception as exc:                       # noqa: BLE001
+        failed.append((k, type(exc).__name__))
+        continue
     de_m = mc["_total"] - mn["_total"]
     de_d = mc["_label"] - mn["_label"]
     dN = -mc["_q"]
     mu = 0.5 * (mc["_fermi"] + mn["_fermi"])
     res = (de_m - de_d) + mu * dN
     rows.append((k, mc["_q"], dN, de_d, de_m, de_m - de_d, mu * dN, res, mu,
-                 mc["_fermi"], mn["_fermi"]))
-    print(f"   {k:>6} {mc['_q']:+7.2f} {dN:+6.2f} {de_d:+11.6f} "
-          f"{de_m:+11.6f} {de_m-de_d:+10.6f} {mu*dN:+11.6f} {res:+10.6f}")
+                 mc["_fermi"], mn["_fermi"], split_by_sid[k]))
+    if len(rows) <= 12 or split_by_sid[k] == "val":
+        print(f"   {k:>6} {split_by_sid[k]:>6} {mc['_q']:+8.4f} {dN:+6.2f} "
+              f"{de_d:+11.6f} {de_m:+11.6f} {de_m-de_d:+10.6f} "
+              f"{mu*dN:+11.6f} {res:+10.6f}")
+if len(rows) > 12:
+    print(f"   ... (val rows all shown; of the {len(rows)} pairs the first 12 "
+          f"and every val row are printed, the rest are in the npz)")
+if failed:
+    print(f"   FORWARD FAILED on {len(failed)} pairs: {failed[:8]} -- baseline "
+          f"coverage was confirmed for all 200 but a successful forward for "
+          f"arbitrary sids was not, and these are the ones where it did not "
+          f"hold.")
 e = np.array([r[5] for r in rows])
 mu_dn = np.array([r[6] for r in rows])
 res = np.array([r[7] for r in rows])
+spl = np.array([r[11] for r in rows])
+print(f"\n   PER SPLIT -- the val block is the user's table; the others are "
+      f"reported because they exist, not to be averaged into it")
+print(f"   {'split':>7} {'pairs':>6} {'eps_D rmse':>11} {'eps_D bias':>11} "
+      f"{'resid rmse':>11} {'resid bias':>11} {'explained':>10}")
+for sp in ("val", "train", "test", "ALL"):
+    m = np.ones(len(rows), bool) if sp == "ALL" else (spl == sp)
+    if not m.any():
+        continue
+    er, rr = np.sqrt((e[m]**2).mean()), np.sqrt((res[m]**2).mean())
+    print(f"   {sp:>7} {int(m.sum()):6d} {er:11.6f} {e[m].mean():+11.6f} "
+          f"{rr:11.6f} {res[m].mean():+11.6f} "
+          f"{100*(1-rr/max(er,1e-30)):9.1f}%")
 print(f"   {'bias':>6} {'':>7} {'':>6} {'':>11} {'':>11} {e.mean():+10.6f} "
       f"{mu_dn.mean():+11.6f} {res.mean():+10.6f}")
 print(f"   {'RMSE':>6} {'':>7} {'':>6} {'':>11} {'':>11} "
@@ -442,11 +451,12 @@ print(f"   Only the trapezoid is expected to work if the missing quantity is "
       f"an integral of the chemical potential over the electron count; an "
       f"endpoint working equally well would mean it is something else.",
       flush=True)
-print(f"\n   eV per pair. The sid1/sid601 value above ({dE_m-dE_d:+.4f}) sits "
-      f"at percentile "
-      f"{100.0*float((e < (dE_m-dE_d)).mean()):.0f} of these 20, so the first "
-      f"pair is {'representative' if abs((dE_m-dE_d)-e.mean()) < e.std() else 'NOT representative'}"
-      f" of the group.")
+print(f"\n   eV per pair. The sid1/sid601 value ({dE_m-dE_d:+.4f}) sits at "
+      f"percentile {100.0*float((e < (dE_m-dE_d)).mean()):.0f} of the "
+      f"{len(rows)} pairs, so the pair the relation was derived from is "
+      f"{'representative' if abs((dE_m-dE_d)-e.mean()) < e.std() else 'NOT representative'}"
+      f" of the group -- which matters because a one-parameter relation fitted "
+      f"on one point has to be judged on the others.")
 np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
                       "charging_reconcile.npz"),
          pair=np.array([r[0] for r in rows]), q=np.array([r[1] for r in rows]),
