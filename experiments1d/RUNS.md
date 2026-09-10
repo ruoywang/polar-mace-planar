@@ -1539,3 +1539,88 @@ constant, which is the weak part of the formulation:
   a1 E and p_off must each be reported alongside their sum, since separating
   them is the whole purpose and only the sum is currently known to be well
   behaved.
+
+## 2026-09-10  three corrections from the user, and the design that replaces mine
+code ead0a4a. The user rejected the polarization-integral test I proposed and
+replaced it. All three corrections are accepted; two of them retract things I
+had written into the entry above and into the report to the user.
+
+CORRECTION 1 -- the 52-fold cancellation does NOT point at p_off. Withdrawn.
+The prior in the code is ALREADY a covariance, read straight out of
+closure_from_fields:
+
+  prior = plane_mean(a3_scr * ez_scr) - plane_mean(a3_scr) * plane_mean(ez_scr)
+
+Its job is to repair the average-first-then-multiply error, so
+
+  a1 * E + prior = plane_mean(a3 * E)
+
+BY CONSTRUCTION. The two terms are therefore SUPPOSED to cancel strongly, and
+the size of the cancellation says the covariance is comparable to the mean
+product -- a statement about lateral inhomogeneity, not a defect. The
+arithmetic (7.2847, 7.3768, 0.14266) stands; the attribution does not. Noting
+also that the covariance is built from the SCREENED VACUUM field ez/eps3 out
+of phi_sol, while a1 in the solver multiplies the self-consistent smoothed
+total field -- that pairing is a heuristic (E_total is approximately E_vac/eps
+and is not known before the solve), and it is a separate candidate from
+"p_off is wrong".
+
+CORRECTION 2 -- integrating RHOB gives W_B P, not P. The charge is the
+divergence of the SMOOTHED polarization, n_b = -V * WB @ D @ P, so the
+integral of the plane-averaged RHOB recovers W_B P and cannot be set against
+an unsmoothed a1*E + p_off. Fixing the constant in the vacuum does not remove
+that difference. My proposed test was wrong on this point, and both of the
+guards the workstation added to it are moot because the constant no longer
+carries any argument: the integral is demoted to a cross-check that attributes
+nothing.
+
+CORRECTION 3 -- the branch conclusion must stay narrow. What is supported:
+the model's bound charge has close to the right TOTAL but a clearly wrong
+SHAPE, and swapping in the DFT total potential alone does not repair it. What
+is NOT supported and which I over-claimed: that the generation of the total
+potential is excluded. Also recorded: the top few frequencies contributing
+0.00000 excluded only that band of the potential DIFFERENCE; grid error in the
+cavity and in the a1 construction is still open.
+
+THE DESIGN THAT REPLACES MINE, in the user's three steps. The point is that
+one result cannot fix two unknowns -- P = a1*E + p_off with P and E known
+still admits many pairs -- so the two coefficients need an INDEPENDENT
+reference, and the DFT fields can supply it:
+
+  1. Compute the 3-D polarization from the DFT native density and the DFT
+     total potential through the published path and confirm it reproduces
+     RHOB. No DFT re-solve. A failure means the 3-D response, the cavity or
+     the parameters are wrong and nothing downstream is readable.
+  2. From those same fields take A_ref = plane_mean(a3) and
+     prior_ref = plane_mean(a3 E_z) - A_ref plane_mean(E_z). These are the
+     CORRECT a1 and p_off, and exactly so: plane-averaging the 3-D
+     construction gives n_b = -V WB_1d D plane_mean(P_z), the lateral
+     derivatives dropping out, so the 1-D reduction is EXACT when the two
+     coefficients take these values.
+  3. On one grid, one sign convention and one smoothing, compare the model's
+     a1, its prior and its learned delta_p separately, and check that
+     together they give the right polarization and the right charge.
+
+That is what separates a wrong mean response from a wrong covariance
+background from a correction that failed to repair the difference.
+
+Six gates, three of them the identities the design rests on: the covariance
+making the 1-D product exact; the 1-D operator on plane_mean(P_z) equalling
+the plane average of the 3-D charge (correction 2 made numerical); the 1-D
+driving field equalling the plane average of the 3-D one; the two cells
+agreeing; p_off = prior + delta_p as captured; and the script's own 1-D chain
+reproducing the model's bound charge. The ref/ref cell of the 2x2 is a closure
+check that must return the reference, not a result.
+
+Two extras inside the user's scope: a1's error split into its pure cavity part
+resp_unit*(plane_mean(s_diel)_model - plane_mean(s_diel)_ref) with the
+remainder attributable to the saturation heuristic; and delta_p projected onto
+the correction it was supposed to supply, prior_ref - prior_model, so "did the
+learned correction point the right way" is a number. Plus the share of the
+reference coefficients' spectral energy above the model closure grid's Nyquist
+(the model's coefficients come from 100x100x300 and carry no mode above 150),
+which is the grid error correction 3 leaves open.
+
+Dispatched to the 4090; heavier than the last two, since the cavity and the
+full 3-D polarization are built on the native 168x168x500 grid, so LS6 is the
+fallback if it does not fit in 24 GB. RESULT PENDING.
