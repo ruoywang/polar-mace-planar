@@ -200,11 +200,40 @@ parameters: part A's recomputed cavity is bit-identical to the one the model
 actually used (max, mean and 99th-percentile difference all exactly 0.000e+00,
 against a call-to-call floor also exactly 0.000e+00), so the model side is
 self-consistent and the difference is not in how the model builds its cavity
-from its own n_e. Inside the mask both densities sit 3 or more orders below
-NC_K = 0.015 at every percentile up to the 99th (model 5.689e-04, DFT
-1.219e-04; maxima 4.174e-03 and 4.563e-04), the swap moves the plateau by
-under 6e-09, and the plateaus still differ by 0.0556. So the plateau difference
+from its own n_e. Inside the mask both densities sit below NC_K = 0.015 at
+every percentile, the swap moves the plateau by under 6e-09, and the plateaus
+still differ by 0.0556. So the plateau difference
 is not carried by n_e inside the mask. Where it is carried is open; the
 parameter line shows non-locality keys in use (I_NLOC_SOL, LNLDIEL, LNLION)
 and part B's spread is consistent with a non-local pipeline, which is the next
 thing to examine rather than a conclusion.
+
+
+### Correction to the part D margin above
+
+An earlier revision of the paragraph above said both densities sit "3 or more
+orders below NC_K = 0.015 at every percentile up to the 99th". That is wrong,
+and it overstated the margin at exactly the percentiles where the margin
+matters. The actual ratios of NC_K = 0.015 to the measured percentile, charged
+frame:
+
+| percentile | model | ratio to NC_K | DFT | ratio to NC_K |
+|---|---|---|---|---|
+| 50th | 7.203e-08 | 2.1e+05 x | 1.612e-08 | 9.3e+05 x |
+| 75th | 2.506e-06 | 5986 x | 1.536e-06 | 9766 x |
+| 95th | 5.080e-05 | 295 x | 2.208e-05 | 679 x |
+| 99th | 5.689e-04 | **26 x** | 1.219e-04 | 123 x |
+| max | 4.174e-03 | **3.6 x** | 4.563e-04 | 33 x |
+
+Neutral frame: model 99th 4.374e-04 (34x) and max 5.509e-03 (**2.7x**); DFT
+99th 9.930e-05 (151x) and max 3.813e-04 (39x).
+
+So "3 or more orders" holds only up to about the 75th percentile. At the 99th
+the model density is 26x below the threshold and at its maximum only 3.6x below
+(2.7x on the neutral frame). The claim that both densities are "deep below
+threshold throughout the mask" is therefore too strong in the upper tail, which
+is the part of the distribution a threshold argument depends on. What the
+measurement supports is narrower: the swap moves the plateau by under 6e-09
+while the plateaus differ by 0.0556, so the density inside the mask does not
+carry the difference — that stands on the swap result directly and does not
+need the threshold-margin argument at all.
