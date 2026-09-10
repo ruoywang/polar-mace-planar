@@ -2430,3 +2430,150 @@ sign-flipping bias is what the remaining error actually looks like, and it is
 now the thing to explain. It was visible before this experiment and this
 experiment only sharpened it, since a uniform-sign correction is exactly what
 cannot address it.
+
+## 2026-09-10  charging_reconcile.py -- the charging error is a missing mu integral
+code 1a8a942 (executed 5b1db5b for steps 1-4, then all 200 pairs after the
+leak fix; e07f7f7 did not run at all, see the defects below). Workstation,
+provenance IDENTICAL on every run that produced numbers.
+
+WHAT THIS CORRECTED FIRST. My A/B cache called E_model - node_energy the
+"solvent remainder". It is not: the assembly puts the SOLUTE electrostatic
+energy, the optional electron energy and the boundary/dipole corrections in
+that same difference. And +5.635 eV is not a solvent number -- it is the error
+in the whole system's charged-minus-neutral energy for the sid1/sid601 pair,
+and the explicit part changes its electron distribution when charge is added.
+
+THE HEADLINE IS NOT 5.635 eV. The model captures 7.6% of the DFT charging
+energy on that pair: -0.465482 against -6.100577, a FACTOR OF 13.1. "+5.635
+missing" reads as a correction to something roughly right; it is not roughly
+right.
+
+MEASURED FRAMING: NELECT 661 against 660, so this is an electron-ADDITION
+energy; the label is energy(sigma->0) from the OUTCAR with NO reservoir term,
+so canonical rather than grand canonical; E-fermi moves -7.3736 -> -3.8745.
+
+STEP 4 KILLED THE A/B REFIT BEFORE IT RAN. Readout input features identical
+between the two states at 1.9e-16 relative, d(inter_e) exactly +0.000000 eV.
+The descriptor is CHARGE-BLIND, so the energy head contributes equally to both
+states and cancels exactly in Delta E -- retraining it cannot move a paired
+charging energy whatever the target. Both A/B jobs were cancelled unrun. The
+workstation's framing before the measurement was the right one: the test was
+not asking whether the features happen to agree but whether charge enters the
+descriptor at all.
+
+THE TEN TERMS, closure PASS at 4.320e-12, and there are TWO kinds of zero:
+  electron energy (optional)      +0.000000   not enabled
+  external field . dipole         +0.000000   not enabled
+  e0 (atomic, per-species)        +0.000000   cancels: identical species
+  energy head (inter_e)           +0.000000   cancels: identical features
+  solute electrostatic            +2.893386
+  1D solvent compensation         -1.669968
+  slab dipole correction          -2.609291
+  cavity energy                   +0.049728
+  3D solvent energy               -0.164936
+  baseline coupling E_bl          +1.035598
+The six live terms sum to -0.465 while their absolute values sum to 8.423 --
+an 18.1-fold cancellation -- and the missing 5.635 is 1.95x the largest single
+live term. So the error is located in a GROUP OF SIX and no term is indicted
+by its size.
+
+THE DFT SIDE, by its own formula and not mapped onto the model's. dA_corr
+-2.636389 against d(slab dipole correction) -2.609291 agrees to 1.03% -- a
+CANDIDATE correspondence, not an identification; if real, that term is
+essentially right and the six narrow to five. dA_cav -0.006904 against
+d(cavity) +0.049728 is a NEGATIVE result worth stating: small in absolute
+terms but OPPOSITE in sign, so the model's cavity term does not track the
+DFT's across charging. Internal check: dA_corr = dEcorr + dEcorr_band to 1e-6
+(+105.571730 - 108.208118), but those are two ~100 eV terms cancelling
+40-fold and neither is quotable alone.
+
+THE RELATION, over all 200 pairs. Four terms cannot contribute to Delta E, so
+the model has NO channel for the added electron's own energy -- no integral of
+mu dN. Crediting the trapezoid mean of the two Fermi levels times dN:
+  split  pairs  eps_D rmse  eps_D bias  resid rmse  resid bias  explained
+    val     20    5.621861   +5.570253    0.321732   -0.166124      94.3%
+  train    160    5.717653   +5.676327    0.354029   -0.164801      93.8%
+   test     20    6.054751   +6.034449    0.262612   -0.045151      95.7%
+    ALL    200    5.742802   +5.701532    0.342807   -0.152969      94.0%
+  slope +1.0251, correlation +0.8951
+  ENDPOINT CONTROLS: charged 2.0644 (bias +1.9674), neutral 2.3118 (bias
+  -2.2734), trapezoid 0.3428 (bias -0.1530) -- 6.0x and 6.7x worse.
+The endpoint controls are the result: the missing quantity is an INTEGRAL over
+electron count, not a single chemical potential. And pair 1 sits at percentile
+49, so the pair the relation was identified from is representative rather than
+the outlier a one-point fit invites.
+
+READ 94% WITH ITS DENOMINATOR -- the workstation's caution and it changes what
+may be claimed. eps_Delta is nearly a pure offset: rmse 5.7428 against bias
+5.7015, so its own std is only 0.6872 eV. By measure over the 200:
+  RMS ratio            94.0%
+  offset removed       97.3%   (bias +5.7015 -> -0.1530)  <- STRUCTURAL
+  variance about mean  80.1%
+  std reduction        55.4%   (spread 0.6872 -> 0.3068)  <- FRAME BY FRAME
+The relation does two things and only one is 94%: it identifies and removes a
+missing ~5.7 eV TERM, 97.3% of the offset, which is the structural claim and
+is strongly supported; of the frame-to-frame VARIATION it removes about half.
+"94% explained" would be read as the remainder being 6% of what it was, and
+frame by frame it is about 45% of the spread. Both numbers travel together.
+
+TWO RESIDUAL FEATURES THAT ARE SYSTEMATIC AT n = 200, not scatter: the slope
+is 1.0251, 2.5% above unity, and the residual bias is -0.153 eV with the range
+-1.074 to +0.458, skewed negative. So the missing term is the chemical-
+potential integral to within a few per cent AND there is a systematic
+remainder beyond it.
+
+NO SPLIT EFFECT (94.3 / 93.8 / 95.7), which supports the structural reading
+over a learned one: a term that is ABSENT rather than mis-learned should not
+care about the split.
+
+AND THE 19-PAIR SUBSET WAS OPTIMISTIC, in the direction its own report
+flagged: correlation +0.968 there against +0.8951 on all 200, residual RMSE
+0.229 against 0.343.
+
+DEFECTS FOUND IN MY OWN SCRIPTS THIS ROUND, all by the workstation:
+  no availability guard -- dft_terms opened OUTCAR directly, so a machine with
+  a partial payload would print four steps and then throw inside the fifth
+  loop. The exact pattern lateral_bound_swap grew a selector for two rounds
+  earlier, not carried over. SECOND instance of a fix failing to propagate to
+  the next script, after sid 201 in FRAMES.
+  a one-sided directory listing read as a PAIR CENSUS, twice and in opposite
+  directions: once all charged sides present and neutral absent, once the
+  reverse. The intersection on that machine is {1}, the pair the relation was
+  derived from, so the run I dispatched would have tested a one-parameter
+  relation on its own fitting point.
+  step 5 did not need OUTCAR at all. The label, dN and both Fermi levels are
+  in the xyz for all 800 frames, the xyz energy matches the OUTCAR sigma->0 to
+  all printed digits and its Fermi carries MORE digits (-3.8745365801 against
+  -3.8745), so the test was never payload-limited: 200 pairs across all three
+  splits on either machine, which also removed the train/val labelling problem
+  instead of managing it. My step-1 residual of -0.0110 eV was itself computed
+  at the coarser Fermi precision.
+  e07f7f7 DID NOT RUN: `_bk = PB.PB1DBackend.solve_graph` with no
+  `import mace.modules.pb1d_backend as PB`. The _evict patch brought the
+  reference and left the import behind. Fixed at 1a8a942.
+
+THE LEAK WAS REAL AND MY DIAGNOSIS OF IT WAS DIFFERENT FROM THE FIRST
+CANDIDATE. RSS grew 1.98 -> 8.09 GB over 38 forwards, ~161 MB each, GPU flat.
+The workstation's candidate (_grid_for's unbounded _grids) is REFUTED: the
+cells are identical across frames -- 1 distinct Lattice string over 60 train
+frames -- so that key never varies. The actual sources: self._bl_ram
+[sample_id] at ~24 MB a sample bounded only at MACE_PB1D_PRELOAD_MAX=512, and
+baseline_cache.npy being mmap'd so every sample's row faults in pages that
+count in RSS and are never dropped. Both grow strictly with distinct samples,
+which is the monotone-no-plateau signature. MACE_PB1D_NO_PRELOAD=1 plus
+per-pair eviction took it from 160 to 11 MB/forward, 14.5x -- reduced, not
+removed, and the in-script RSS reporting is what made that readable at pair 20
+instead of at a kill.
+NOT A MISUSE OF THE CACHE BY ITS AUTHOR: 24 MB a sample bounded at 512 is a
+deliberate design for TRAINING, where the same samples recur every epoch. A
+one-pass audit over 400 distinct samples is the case it was never meant for,
+so any future cohort-wide audit needs the same flag.
+
+AND THE WORKSTATION'S KILLS ARE NOT ABOUT MEMORY. Across four kills there,
+every background task reaching about 90 seconds was killed with "low memory"
+whatever its RSS, while foreground runs under `timeout 570` completed every
+time -- including this 400-forward one at 5.94 GB with 254.7 GB available,
+after the same run had been killed in the background at 3.2 GB. Two of the
+four had no real growth, one did, this one did not. The mitigation there is
+the foreground, not a smaller job, so chunking for that machine's benefit is
+the wrong remedy.
