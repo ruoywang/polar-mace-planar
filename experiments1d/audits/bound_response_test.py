@@ -41,14 +41,28 @@ potential is wrong", which is a sharper question than extending the basis or
 retraining, and any later fix is still to be judged on the aggregate charge,
 potential and energy.
 
-Two things are measured rather than assumed. The solver's phi is in the
-ELECTRON-ENERGY convention (the backend's rho = -(n_b/volume) exists to
-convert it), the same convention as the stored PHI files, so the DFT potential
-goes in as the plane-averaged PHI_raw WITHOUT negation -- and the script checks
-that by requiring the model's own potential to reproduce the model's own bound
-charge. And because n_b = B @ phi + nb_off is linear in phi, a constant offset
-would matter unless B annihilates constants; |B @ 1| is therefore printed, so
-the reference-zero question is settled by measurement instead of argument.
+Three things are measured rather than assumed.
+
+The convention. The solver's phi is in the ELECTRON-ENERGY convention -- the
+backend's rho = -(n_b/volume) and rho = -(n_ion/volume) exist to convert it,
+and ion_potential_2x2 measured physical = -out["phi"] at 6.5e-19 against
+2.5e-03 for the flip -- which is the SAME convention as the stored PHI files,
+where physical = -PHI_raw was likewise measured. So the DFT potential enters
+B @ phi as the plane-averaged PHI_raw with NO negation. That is not taken on
+trust: the relative sign of the two profiles is measured here by correlating
+them (mean removed, since a constant reference difference is not a sign), and
+the bound charge is reported for BOTH signs so nothing hinges on the choice.
+
+The reference zero. n_b = B @ phi + nb_off is linear in phi, so a constant
+offset would matter unless B annihilates constants. B = V * WB @ D @ diag(a1)
+@ D @ WB ends in a derivative acting on a smoothed constant, so it should
+annihilate them exactly; |B @ 1| against |B @ phi| is printed to settle that
+by measurement rather than by reading the formula.
+
+Whether the test has any room to act. If the model's total potential were
+already close to the DFT one, swapping it could not change the bound charge
+much and the test would be near-vacuous. The difference between the two
+driving potentials is therefore reported alongside the result.
 """
 import math
 import os
@@ -207,21 +221,42 @@ rb_ref = fresample((-(rb_raw.to(device)) / Vd).mean(dim=(0, 1)), nz_s)
 del phi_raw, rb_raw
 phi_score = -(kw["cvhar_z"] - kw["cvhar_z"].mean())
 
-# ---- gate and the two convention/reference measurements ---------------
+# ---- gates and the three measurements --------------------------------
 rb_model = fresample(cap["rho_bound_z"], nz_s)
 g = float((rho_b_of(cap["phi_tot"]) - rb_model).abs().max())
-print(f"\n  GATES")
+print(f"\n  GATES AND MEASURED CONVENTIONS")
 print(f"   [{'PASS' if g < 1e-12 else 'FAIL'}] the model's own potential "
       f"reproduces the model's own bound charge through B and nb_off: max abs "
-      f"{g:.3e} e/A^3  (this also confirms the electron-energy convention)")
+      f"{g:.3e} e/A^3 -- the response really is n_b = B @ phi + nb_off")
 ones = torch.ones_like(cap["phi_tot"])
 bo = float((B @ ones).abs().max())
 scale = float((B @ cap["phi_tot"]).abs().max())
 print(f"   [reference zero] max |B @ 1| {bo:.3e} against max |B @ phi| "
-      f"{scale:.3e}, ratio {bo/max(scale,1e-30):.2e} -- if this is tiny the "
-      f"bound channel is insensitive to a constant offset in phi and the "
-      f"reference zero cannot affect the comparison", flush=True)
-if g >= 1e-12:
+      f"{scale:.3e}, ratio {bo/max(scale,1e-30):.2e} -- tiny means the bound "
+      f"channel cannot see a constant offset in phi, so the electrolyte "
+      f"reference zero cannot affect this comparison at all")
+
+
+def corr(a, b):
+    a = a - a.mean(); b = b - b.mean()
+    return float((a * b).sum() / max(float(a.norm() * b.norm()), 1e-30))
+
+
+cp, cm = corr(phi_dft, cap["phi_tot"]), corr(-phi_dft, cap["phi_tot"])
+sgn_ok = cp > 0.5 and cm < -0.5
+print(f"   [{'PASS' if sgn_ok else 'FAIL'}] relative sign measured by "
+      f"correlation with the model's own total potential (mean removed): "
+      f"+PHI_raw {cp:+.4f}, -PHI_raw {cm:+.4f} -- +PHI_raw is the solver's "
+      f"convention, as the separation shows; both are reported below anyway")
+d0 = cap["phi_tot"] - phi_dft
+d0c = d0 - d0.mean()
+print(f"   [room to act] the two driving potentials differ by: L1 "
+      f"{float(d0.abs().sum() * dz):.4f}, max {float(d0.abs().max()):.4f}, "
+      f"rms {float(d0.pow(2).mean().sqrt()):.5f} eV; with the constant "
+      f"removed rms {float(d0c.pow(2).mean().sqrt()):.5f} eV (constant "
+      f"{float(d0.mean()):+.4f}) -- a near-zero rms would make the swap "
+      f"vacuous", flush=True)
+if g >= 1e-12 or not sgn_ok:
     print(f"   A GATE FAILED -- no reading offered.", flush=True)
 
 
@@ -249,16 +284,23 @@ def metrics(p, lbl):
 mref = metrics(rb_ref, "DFT reference RHOB")
 mA = metrics(rho_b_of(cap["phi_tot"]), "model response, model phi")
 mB = metrics(rho_b_of(phi_dft), "model response, DFT phi")
+mF = metrics(rho_b_of(-phi_dft), "  (control: DFT phi, flipped)")
 print(f"\n[RESULT] bound channel, response held fixed, driving potential "
       f"swapped, no re-solve")
 print(f"  {'case':>28} {'net (e)':>9} {'int|.|':>8} {'cross':>9} "
       f"{'gap':>9} {'L1':>9} {'max dev':>9} {'shift':>8} {'resid':>7}")
-for m in (mref, mA, mB):
+for m in (mref, mA, mB, mF):
     f = "  <-- shift at scan edge" if m["edge"] else ""
     print(f"  {m['lbl']:>28} {m['net']:+9.4f} {m['absq']:8.4f} "
           f"{m['cross']:+9.4f} {m['gap']:+9.4f} {m['l1']:9.5f} "
           f"{m['mx']:9.2e} {m['shift']:+8.3f} {100*m['resid']:6.1f}%{f}",
           flush=True)
+print(f"\n  CROSS-CHECK against the accepted whole-system run: the bound "
+      f"channel's coupling gap there was +0.5371 eV for this same baseline "
+      f"(derived as total minus ionic, since cross couplings add).\n  This "
+      f"run's baseline gap is {mA['gap']:+.4f} eV, difference "
+      f"{mA['gap'] - 0.5371:+.4f} eV -- the same quantity computed a second "
+      f"way, so a mismatch would mean one of the two is wrong.")
 print(f"\n  swapping the driving potential: coupling gap {mA['gap']:+.4f} -> "
       f"{mB['gap']:+.4f} eV, charge L1 {mA['l1']:.5f} -> {mB['l1']:.5f} e, "
       f"max deviation {mA['mx']:.3e} -> {mB['mx']:.3e}, displacement "
@@ -274,6 +316,7 @@ np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
          z=np.arange(nz_s) * dz, rho_b_ref=rb_ref.cpu().numpy(),
          rho_b_model_phi=rho_b_of(cap["phi_tot"]).cpu().numpy(),
          rho_b_dft_phi=rho_b_of(phi_dft).cpu().numpy(),
+         rho_b_dft_phi_flipped=rho_b_of(-phi_dft).cpu().numpy(),
          phi_model=cap["phi_tot"].cpu().numpy(),
          phi_dft=phi_dft.cpu().numpy(), phi_score=phi_score.cpu().numpy())
 print(f"\n  arrays saved to bound_response_test_arrays.npz", flush=True)
