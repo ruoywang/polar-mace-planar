@@ -1,0 +1,10 @@
+PROVENANCE mace=890eb3e pb=9b3b9ba sha256=6975b5347f6caaf1126e813ab36159d8efc438ab231f3e153c49778ac40d609b; MACE_CAVSRC=model, instrumented
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  ENVELOPE SOURCE: the model's own cavity (baseline column)
+  channels in play: ['env_b', 's_ion', 's_diel', 'env^0.5']  (q_tot -1.000, ion channel live)
+
+===== NiN44 q=-1.00 =====  reference lateral: cross -2.2417  self +0.6829  |q| 2.5398 e
+  [self-check] rebuilt-vs-exported residual: max abs 0.000e+00, relative 0.000e+00 -- OK
+  [ORIGINAL COEFFICIENTS, envelope = model] cross -0.9350 (0.4171 x ref)  self +0.6118 (0.8959 x)  |q| 1.7805 (0.7010 x)
+  design matrix: 80000 x 22356 float32 = 7.15 GB
+   [NiN44 q=-1.00] build 0/207

@@ -237,3 +237,60 @@ measurement supports is narrower: the swap moves the plateau by under 6e-09
 while the plateaus differ by 0.0556, so the density inside the mask does not
 carry the difference — that stands on the swap result directly and does not
 need the threshold-margin argument at all.
+
+## Dispatched job: cavity_substitution_2x2 — KILLED TWICE, and not for the stated reason
+
+mace 890eb3e, pb 9b3b9ba, executed file sha256
+6975b5347f6caaf1126e813ab36159d8efc438ab231f3e153c49778ac40d609b, verified
+IDENTICAL to the commit. `MACE_CAVSRC=model` reached the same point both times
+and was stopped by the harness with "the system is running low on memory".
+
+The second attempt carried a 5-second sampler. **The machine was never low on
+memory.** Twenty samples over 100 seconds, ending at the kill:
+
+| quantity | value |
+|---|---|
+| process RSS | 1.54 GB, flat and unchanging across all 20 samples |
+| host MemAvailable | 241.9 GB minimum, and RISING at the kill (254.19 -> 254.78 GB) |
+| GPU | 10619 MiB steady, of 24564 MiB |
+| host total | 251 GB, 1 GB swap, unused |
+
+Nothing was growing on either the host or the card. No CUDA OOM, no traceback,
+no Python error. There is no cgroup limit in play: `memory.max` and
+`memory.high` on this session scope both read `max`.
+
+The one number that is large is `memory.current` for the session scope, 99.6 GB,
+which tracks the 104 GB of `buff/cache` this session has accumulated from
+repeatedly reading the 257 MB ASCII DFT field files. That memory is reclaimable
+page cache, which is why `MemAvailable` stayed at 254 GB. A monitor that reads
+`memory.current` rather than `MemAvailable` would see 99.6 GB and conclude the
+session is consuming a lot, and that is the only quantity measured here that is
+consistent with the kill message. Stated as the measurement plus the one
+hypothesis it fits, not as a diagnosis.
+
+This is consistent with the peer session's report that the same machinery ran
+to completion on Lonestar6 as `joint_subspace_solve` — 111 minutes, three
+frames, three bases, no host-memory problem. It is not the script.
+
+### What the incomplete run did establish
+
+  [self-check] rebuilt-vs-exported residual: max abs 0.000e+00, relative 0.000e+00 -- OK
+  ENVELOPE SOURCE: the model's own cavity (baseline column)
+  channels in play: ['env_b', 's_ion', 's_diel', 'env^0.5']  (q_tot -1.000, ion channel live)
+  reference lateral: cross -2.2417  self +0.6829  |q| 2.5398 e
+  [ORIGINAL COEFFICIENTS, envelope = model] cross -0.9350 (0.4171 x ref)  self +0.6118 (0.8959 x)  |q| 1.7805 (0.7010 x)
+  design matrix: 80000 x 22356 float32 = 7.15 GB
+
+The self-check passing means the original-coefficient machinery reproduces the
+model's own exported residual exactly, so that column is validated even though
+the 2x2 was never completed. One of the four cells exists; the other three and
+the whole `MACE_CAVSRC=dft` column do not.
+
+The -2.2417 here against envelope_alignment's -2.2434 is not a discrepancy: this
+script's reference lateral is RHOB + RHOION together while T2's row is the bound
+channel alone, and the ionic lateral term appears on both sides at the same size
+(+0.0017 eV on the reference, +0.0016 eV on the model).
+
+Nothing was modified to get past this — NPTS was not lowered, nothing was
+chunked, the script was not touched. Completing the run needs a decision about
+how to launch it that is the user's to make, not something to work around.
