@@ -1,0 +1,28 @@
+PROVENANCE mace=940549c pb=9b3b9ba sha256(bound_response_test.py)=4b8337d4424f0a8985722f564d266ff656aa178e1c5405f87c37e815c3c2ac5d (IDENTICAL to committed 940549c)
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+=================== NiN44 q=-1.00 ===================
+  one full model call; solve grid nz_s 600. Bound response held fixed: a1 and p_off from the captured baseline. Only the DRIVING potential changes. No re-solve.
+
+  GATES AND MEASURED CONVENTIONS
+   [PASS] the model's own potential reproduces the model's own bound charge through B and nb_off: max abs 0.000e+00 e/A^3 -- the response really is n_b = B @ phi + nb_off
+   [reference zero] max |B @ 1| 1.219e-10 against max |B @ phi| 4.128e+03, ratio 2.95e-14 -- tiny means the bound channel cannot see a constant offset in phi, so the electrolyte reference zero cannot affect this comparison at all
+   [PASS] relative sign measured by correlation with the model's own total potential (mean removed): +PHI_raw +0.9995, -PHI_raw -0.9995 -- +PHI_raw is the solver's convention, as the separation shows; both are reported below anyway
+   [room to act] the two driving potentials differ by: L1 2.7322, max 0.2915, rms 0.11093 eV; with the constant removed rms 0.10304 eV (constant +0.0411) -- a near-zero rms would make the swap vacuous
+
+[RESULT] bound channel, response held fixed, driving potential swapped, no re-solve
+                          case   net (e)   int|.|     cross       gap        L1   max dev    shift   resid
+            DFT reference RHOB   +0.0000   2.0193   -1.0857   +0.0000   0.00000  0.00e+00   -0.000    0.0%
+     model response, model phi   +0.0000   2.0302   -0.5487   +0.5370   0.80003  2.38e-03   +0.050   48.7%
+       model response, DFT phi   +0.0000   8.5965   +4.4975   +5.5832   7.56925  2.05e-02   +0.825   85.0%
+    (control: DFT phi, flipped)   -0.0000 207.4935 +240.1045 +241.1903 208.82518  9.50e-01   +1.300   94.4%
+
+  CROSS-CHECK against the accepted whole-system run: the bound channel's coupling gap there was +0.5371 eV for this same baseline (derived as total minus ionic, since cross couplings add).
+  This run's baseline gap is +0.5370 eV, difference -0.0001 eV -- the same quantity computed a second way, so a mismatch would mean one of the two is wrong.
+
+  swapping the driving potential: coupling gap +0.5370 -> +5.5832 eV, charge L1 0.80003 -> 7.56925 e, max deviation 2.381e-03 -> 2.054e-02, displacement +0.050 -> +0.825 A, profile error 48.7% -> 85.0%
+  (a visible recovery makes the generation of the total potential the priority; staying clearly wrong makes the bound RESPONSE itself the
+   priority -- cavity, 1-D closure and the learned correction. This is the plane-averaged 1-D channel only; the lateral 3-D error is not
+   in any of these numbers.)
+
+  arrays saved to bound_response_test_arrays.npz
+DONE

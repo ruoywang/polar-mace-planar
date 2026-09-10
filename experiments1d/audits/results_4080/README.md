@@ -343,3 +343,70 @@ numbers. What is measured is that the ionic channel improved 10.6-fold in
 isolation and the sum did not improve at all. Separating the bound channel's
 self-consistent response from the ionic improvement needs the bound channel
 scored on its own, which this run does not do.
+
+## Dispatched job: bound_response_test (mace HEAD 940549c)
+
+`bndresp_940549c.log`. mace 940549c, pb 9b3b9ba, executed file sha256
+4b8337d4424f0a8985722f564d266ff656aa178e1c5405f87c37e815c3c2ac5d, IDENTICAL to
+the commit. Ran in about 10 s. Peak RSS 2.0 GB, MemAvailable never below
+242.5 GB. `bound_response_test_arrays.npz` written.
+
+Gates all PASS. `|B @ 1|` = 1.219e-10 against `|B @ phi|` = 4.128e+03, ratio
+2.95e-14, so B annihilates constants and the electrolyte reference zero cannot
+reach the bound charge — as predicted. Sign measured, not assumed: +PHI_raw
+correlates +0.9995 and -PHI_raw -0.9995, a clean separation. Room to act: the
+two driving potentials differ by rms 0.11093 eV, 0.10304 with the constant
+removed. Cross-check passes: this run's baseline bound coupling gap is +0.5370 eV
+against +0.5371 from the whole-system run by the total-minus-ionic route, a
+difference of -0.0001 eV.
+
+| case | net (e) | int&#124;.&#124; | cross | gap | L1 | max dev | shift | resid |
+|---|---|---|---|---|---|---|---|---|
+| DFT reference RHOB | +0.0000 | 2.0193 | -1.0857 | +0.0000 | 0.00000 | 0.00e+00 | -0.000 | 0.0% |
+| model response, model phi | +0.0000 | 2.0302 | -0.5487 | +0.5370 | 0.80003 | 2.38e-03 | +0.050 | 48.7% |
+| model response, DFT phi | +0.0000 | 8.5965 | +4.4975 | +5.5832 | 7.56925 | 2.05e-02 | +0.825 | 85.0% |
+| control: DFT phi, flipped | -0.0000 | 207.4935 | +240.1045 | +241.1903 | 208.82518 | 9.50e-01 | +1.300 | 94.4% |
+
+No row's displacement sits at the ±2.0 A scan edge.
+
+### The table cannot answer the question it was built for
+
+The bound charge is a near-total cancellation of two large terms, and only the
+model's own self-consistent potential produces the cancellation. Recovered
+exactly from the saved arrays by linearity — `rho(phi) = -(B@phi + C)/V`, so
+`C/V = -(rho(phi_dft) + rho(-phi_dft))/2` and `B@phi_dft/V =
+-(rho(phi_dft) - rho(-phi_dft))/2`; the reconstruction residual is 3e-17:
+
+| term, sum&#124;.&#124; over z in density units | value |
+|---|---|
+| offset `nb_off/V` | 7.2847 |
+| `B@phi_model/V` | 7.3768 |
+| `B@phi_dft/V` | 7.3006 |
+| result, model phi | 0.14266 |
+| result, DFT phi | 0.60407 |
+
+The baseline result is 1.93% of the term magnitude that produces it, a 103-fold
+cancellation. `B@phi_dft` differs from `B@phi_model` by 1.03% in aggregate
+magnitude, and that 1% perturbation takes the residue from 1.93% to 8.28% of the
+term magnitude — which is the reported 9.5-fold L1 degradation. Spectrally the
+two potentials are identical to within 1% below half-Nyquist (band ratios 1.00,
+0.99, 0.99) and differ by 1.81x only in the top half, which is exactly the band
+a double-derivative operator amplifies.
+
+So a large degradation under substitution is what breaking a finely tuned
+cancellation looks like whether the response is right or wrong, and the
+dichotomy has a third branch neither of us anticipated: feeding a foreign
+potential into a linear response that was converged with its own potential is
+not a clean single-factor intervention. Here "no re-solve" is what makes the
+comparison ill-posed rather than what keeps it controlled.
+
+### The flipped-sign control measures only the offset
+
+`rho(-phi_dft) = (B@phi_dft - C)/V`, and since `B@phi_dft ≈ -C` pointwise this
+is approximately `-2C/V`. Measured: the control's sum&#124;.&#124; is 14.5805
+against 2 x 7.2847 = 14.5693 for twice the offset, agreeing to 0.07%. So that
+row's int&#124;.&#124; of 207.49 and cross of +240.10 are twice the offset term
+and carry no information about the bound response at all.
+
+No reading of the priority question is offered from this table, and nothing
+here bears on the lateral 3-D error, which appears in none of these numbers.
