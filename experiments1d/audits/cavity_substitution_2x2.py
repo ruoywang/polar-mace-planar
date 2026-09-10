@@ -63,9 +63,12 @@ EPS_SQ = 1.0e-3
 GCE44 = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/1-44_GCE"
 GCE88 = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/2-88_GCE"
 NEU = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single") + "/5-44_neutral_withsolv"
+# Frames restricted to the two the plan uses. The copied script carried sid
+# 201 (NiN88) as well; I had restricted BASES and forgotten FRAMES, which
+# would have surfaced as an hour of wasted runtime on a frame the design does
+# not include and which the standing constraints exclude anyway.
 FRAMES = [(1, f"{GCE44}/cal_1", "NiN44 q=-1.00", 80000),
-          (601, f"{NEU}/cal_1", "neutral", 80000),
-          (201, f"{GCE88}/cal_1", "NiN88 q=-1.00", 45000)]
+          (601, f"{NEU}/cal_1", "neutral", 80000)]
 # BASES is set per frame inside the loop (the ion channel is gated there)
 WTS = ["1", "|phi|", "phi^2", "near"]
 
@@ -284,6 +287,8 @@ for sid, dftdir, tag, NPTS in FRAMES:
     rms_deep_ref = math.sqrt(float((y[deep] ** 2).mean()))
 
     nat = len(a); K1 = nat * len(sigmas) * 9
+    print(f"  design matrix: {NPTS} x {NCH * K1} float32 = "
+          f"{NPTS * NCH * K1 * 4 / 1e9:.2f} GB", flush=True)
     A = torch.zeros(NPTS, NCH * K1, dtype=torch.float32, device=device)
     gvec = torch.zeros(NCH * K1, dtype=torch.float64, device=device)
     beobj = model._pb1d_backend
@@ -500,6 +505,8 @@ for r in summary:
     print(f"{r[0]:>15} {r[1]:>11} {r[2]:12.3f} {r[3]:8.3f} {r[4]:7.3f} "
           f"{r[5]:7.3f} {r[6]:7.3f} {r[7]:7.3f} {r[8]:7.3f} "
           f"{'PASS' if r[9] else 'FAIL':>8}")
+print(f"peak GPU memory this run: "
+      f"{torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
 print("DONE  four conditions: cross within 5%, self within 15%, |q| within "
       "20%, point rms <= 1.5x the plain fit. A PASS is constructive for that "
       "basis and frame; a FAIL speaks for this 8-vector family only. On "
