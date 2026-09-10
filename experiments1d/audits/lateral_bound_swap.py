@@ -323,10 +323,12 @@ for sid, dftdir, tag in FRAMES:
     rows.append((tag, nat, err0, err1, err1 - err0, dE, e3d, e3d_new,
                  c_old, c_new, s_old, s_new, mut_old, mut_new, c_lat, c_nat,
                  trunc, g_id, g_pm, g_x5, corr_b, shd, shape))
-    print(f"  {tag:>16}: err {err0:+9.3f} -> {err1:+9.3f} meV/atom "
-          f"(dE {dE:+.4f} eV over {nat} atoms), truncated power "
-          f"{100*trunc:.1f}%, corr(model, DFT lateral) {corr_b:+.4f}",
-          flush=True)
+    print(f"  {tag:>16}: err {err0:+9.3f} -> {err1:+9.3f} meV/atom, |err| "
+          f"{abs(err0):.3f} -> {abs(err1):.3f} "
+          f"({'BETTER' if abs(err1) < abs(err0) else 'WORSE'} "
+          f"{abs(err1)/max(abs(err0),1e-30):.2f}x), dE {dE:+.4f} eV over "
+          f"{nat} atoms, truncated power {100*trunc:.1f}%, "
+          f"corr(model, DFT lateral) {corr_b:+.4f}", flush=True)
     del d_b, d_i, dl_old, dl_new, lat_m, rho1, phi
     torch.cuda.empty_cache()
 
@@ -344,17 +346,42 @@ print(f"   [{'PASS' if gx5 < 1e-9 else 'FAIL'}] the 1-D/3-D cross term stays "
       f"-- so comp and E_bl are genuinely unaffected")
 
 print(f"\n[RESULT] the only table: final total energy error, meV/atom")
+# the SIGNED change err1-err0 is NOT the improvement: it only coincides with
+# one when the error is positive. Frames whose error is negative are made
+# worse by a negative change, so the actual improvement is the change in
+# |err| and each row carries its own verdict.
 print(f"  {'frame':>16} {'atoms':>6} {'original':>10} {'substituted':>12} "
-      f"{'improvement':>12}")
+      f"{'|err| old':>10} {'|err| new':>10} {'d|err|':>9} {'verdict':>8} "
+      f"{'factor':>7}")
 for r in rows:
+    d = abs(r[3]) - abs(r[2])
     print(f"  {r[0]:>16} {r[1]:6d} {r[2]:+10.3f} {r[3]:+12.3f} "
-          f"{r[4]:+12.3f}")
+          f"{abs(r[2]):10.3f} {abs(r[3]):10.3f} {d:+9.3f} "
+          f"{'BETTER' if d < 0 else 'WORSE':>8} "
+          f"{abs(r[3])/max(abs(r[2]),1e-30):7.3f}")
 chg = [r for r in rows if r[0] != "neutral"]
-if chg:
-    m0 = sum(abs(r[2]) for r in chg) / len(chg)
-    m1 = sum(abs(r[3]) for r in chg) / len(chg)
-    print(f"  {'charged mean |err|':>16} {'':>6} {m0:10.3f} {m1:12.3f} "
-          f"{m1-m0:+12.3f}")
+
+
+def blk(sel, lbl):
+    if not sel:
+        return
+    m0 = sum(abs(r[2]) for r in sel) / len(sel)
+    m1 = sum(abs(r[3]) for r in sel) / len(sel)
+    print(f"  {lbl:>16} {len(sel):6d} {'':>10} {'':>12} {m0:10.3f} "
+          f"{m1:10.3f} {m1-m0:+9.3f} "
+          f"{'BETTER' if m1 < m0 else 'WORSE':>8} {m1/max(m0,1e-30):7.3f}"
+          f"   ({100*(m0-m1)/max(m0,1e-30):+.1f}% recovered)")
+
+
+blk(chg, "ALL charged")
+blk([r for r in chg if r[0].startswith("NiN44")], "  NiN44 only")
+blk([r for r in chg if r[0].startswith("NiN88")], "  NiN88 only")
+print(f"  A per-cell split is printed because an aggregate over cells hides a "
+      f"sign difference between them, and the sign is the finding: dE per atom "
+      f"is a similar DOWNWARD shift on every charged frame, so it helps\n  "
+      f"whichever cell over-predicts and hurts whichever under-predicts. A "
+      f"near-uniform shift cannot repair a bias whose sign differs between "
+      f"cells.")
 
 print(f"\n[SUPPORTING] the energy pieces that produced it (eV)")
 print(f"  {'frame':>16} {'E_3d old':>9} {'E_3d new':>9} {'cross old':>10} "
