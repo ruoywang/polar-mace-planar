@@ -1621,6 +1621,139 @@ reference coefficients' spectral energy above the model closure grid's Nyquist
 (the model's coefficients come from 100x100x300 and carry no mode above 150),
 which is the grid error correction 3 leaves open.
 
-Dispatched to the 4090; heavier than the last two, since the cavity and the
-full 3-D polarization are built on the native 168x168x500 grid, so LS6 is the
-fallback if it does not fit in 24 GB. RESULT PENDING.
+Ran on the 4090, 12 s, peak GPU 1377 MiB of 24564, peak RSS 1.20 GB, no
+kill. First run at ead0a4a, re-run at 0ac7b09 after three fixes; every number
+reproduced to the digit. Provenance certified, sha256 IDENTICAL to the commit.
+All gates PASS.
+
+THE BIG ONE, STEP 1: the published 3-D construction REPRODUCES the DFT bound
+charge on this frame. From the DFT native density and the DFT total potential:
+net +0.000000 e against +0.000000, int|.| 2.0229 against 2.0193 e, L1 0.00365
+e = 0.18% of the reference int|.|, correlation +0.999991. So the 3-D response,
+the cavity recipe and the parameters are right, and the entire bound-channel
+error lives in the 1-D REDUCTION. That is the largest narrowing this chain has
+produced.
+
+The substantive identity gate also passes: the 1-D operator on
+plane_mean(P_z) equals the plane average of the 3-D charge to 6.939e-18
+against a profile max of 2.933e-03, and the 1-D driving field equals the plane
+average of the 3-D one to 9.770e-14 against 3.054e+01. So the reduction is
+exact when the two coefficients take their reference values, as designed.
+
+STEP 3a AND 3a-2 -- and the split is the result, because it says the two
+coefficients fail in DIFFERENT ways:
+
+  quantity                          ref rms   model rms    err rms   rel    corr
+  a1    (mean response)          2.8973e-01  2.8167e-01 2.3947e-02 0.083 +0.9935
+  prior (covariance background)  2.4731e-02  3.8408e-02 1.3765e-02 0.557 +0.9987
+  p_off = prior + delta_p        2.4731e-02  3.7477e-02 1.2850e-02 0.520 +0.9985
+
+  quantity                       best scale    err rms  after rescale  removed
+  a1    (mean response)              0.9692 2.3947e-02     2.2216e-02     7.2%
+  prior (covariance background)      1.5510 1.3765e-02     1.9411e-03    85.9%
+  p_off = prior + delta_p            1.5132 1.2850e-02     2.0037e-03    84.4%
+
+  a1's error is SHAPE. Its best single gain is 0.9692, within 3% of unity, and
+  it removes only 7.2% -- no scalar fixes it. 77.7% of that error in rms is
+  the pure cavity part, resp_unit*(plane_mean(s_diel)_model - _ref), and a
+  cavity that plateaus at the wrong value and turns on in the wrong place is
+  exactly a shape error.
+
+  prior's error is GAIN. It is 1.5510x TOO LARGE -- over-supplied, the
+  opposite of the natural guess -- and that one number removes 85.9% of the
+  error, so its shape is essentially right.
+
+STEP 3b -- the learned correction points the right way and is about fourteen
+times too weak. needed rms 1.3765e-02, supplied 9.6013e-04, projection
++0.0668, correlation +0.9553, and it removes 6.6% of the gap as it stands.
+Rescaled by 13.72x it would remove 71.0%. The rescale residual is the number
+that matters, not the correlation: two profiles both localised at the
+dielectric interface correlate highly whatever their detail, so +0.9553 alone
+was confoundable. It survives the test -- but 71.0% against prior's own 85.9%
+says the shape is right in the main and not in the detail, so a gain change on
+that head buys most of the correction and not all of it.
+
+Coherent picture of p_off: the covariance background is 1.55x over-supplied,
+the learned correction is aimed correctly at reducing it and is under-powered,
+and it moves the effective gain only from 1.5510 to 1.5132 -- 7% of the excess.
+
+THE PLATEAU, now with direct evidence and with its limits stated.
+plane_mean(s_diel) max is 0.9447081 on the model's grid against 0.9999851 on
+the DFT native grid, same recipe and same parameters. On its own that line
+establishes nothing; it is the earlier density tail test -- same plateau for
+both densities in both directions, moving it by under 6e-09 -- that excludes
+density and leaves the grid the cavity is built on. Three limits, all from the
+workstation and all written in rather than smoothed over: the two grids differ
+LATERALLY as well (100x100 against 168x168) and plane_mean averages
+laterally, so a z effect is not separated from a lateral one; "resolution"
+here means the grid the cavity is built on, including the density it is a
+nonlinear function of, not the resolution of the plane average; and STEP 3c's
+result below does NOT rule out a grid explanation, because representable and
+correctly computed are different claims for a nonlinear function of a
+grid-resolved density.
+
+STEP 3c -- grid REACH is closed, negatively. The share of the reference
+coefficients' spectral energy above the model closure grid's cut is 0.00% for
+A_ref and 0.00% for prior_ref, so the 300-in-z grid can represent the
+reference coefficients entirely. Grid reach is not the a1 error. Read together
+with the plateau: the grid can carry the right answer and still compute the
+wrong one.
+
+STEP 3d, THE 2x2 -- its intended reading is unavailable, and this is the third
+single-factor intervention in the chain defeated by a coupling identity.
+
+        a1    p_off   int|.|       gap        L1    shift   resid
+         -        -   2.0193   +0.0000   0.00000   -0.000    0.0%
+     model    model   8.5965   +5.5832   7.56925   +0.825   85.0%
+       ref    model  37.5740  +39.0290  36.94743   +1.250   93.4%
+     model      ref  34.9159  -33.4487  33.69750   +1.275   95.9%
+       ref      ref   2.0228   -0.0029   0.00369   -0.000    0.4%
+
+The closure check passes: ref/ref returns to the reference at L1 0.00369 e.
+But BOTH single swaps are 3.5 to 3.9 times WORSE than the baseline while both
+together give 0.00369, so neither names a faulty coefficient. The reason is
+measurable on the reference side alone: a1*E has rms 2.4447e-02 and prior_ref
+2.4731e-02 against a sum of 1.6706e-03, a 14.6-fold cancellation, because
+a1*E + prior = plane_mean(a3*E) holds by construction on BOTH sides. The two
+coefficients are complementary halves of one decomposition, and a reference
+half paired with a model half breaks a cancellation the reference itself
+relies on. Named as a pattern, since it is now the third instance after the
+staged potential swap and the density tail swap: when the two things being
+separated satisfy an exact identity together, substituting one of them is not
+a controlled intervention.
+
+What the rows DO give, since each row's deviation from ref/ref is exactly one
+error array: the p_off error alone costs 36.94743 e of L1, the a1 error alone
+33.69750 e, both together 7.56925 e -- the two coefficient errors cancel about
+4.7-fold. Reported as a magnitude and NOT as a finding about independent
+errors: the model's own closure satisfies the same identity with its own
+fields and its bound-charge total is close to the reference, which largely
+forces the two errors to oppose.
+
+CONSEQUENCE THAT MUST TRAVEL WITH THE DIAGNOSIS -- it is not a repair list.
+Rescaling prior by 1/1.551 = 0.645 would cover 85.9% of its rms gap, which
+moves the result most of the way from the baseline's L1 of 7.57 e toward the
+(model a1, ref p_off) row's 33.70 e. So fixing the covariance gain ALONE is
+expected to make the bound charge substantially WORSE, because it removes a
+compensation the wrong a1 currently relies on. The two have to be addressed
+together, and any change still gets judged on aggregate charge, potential and
+energy.
+
+THREE CORRECTIONS TO MY OWN SCRIPT, all found by the workstation:
+  the covariance gate's 1e-18 absolute threshold was unachievable -- one
+  float64 epsilon on terms of order 0.2 is 4.28e-17 and the measured 1.279e-17
+  is 0.30 epsilon. Now relative. The workstation was right to ignore a gate
+  whose number contradicts its own label rather than obey it. The gate was
+  also weaker than either of us said: prior_ref is DEFINED as
+  Pz_ref - A_ref*Ez_ref, so it holds by construction and can only measure
+  round-off.
+  the polarization cross-check carried a sign error. rho_b = +WB D P, so the
+  running integral is +W_B P; the minus made the two arrays exact negatives,
+  caught from a ratio of 1.99986 at correlation -0.999910. Corrected they
+  agree to a relative rms of 1.34%, which confirms n_b = -V WB D P.
+  and my "about 0.01%" for that agreement was wrong by a factor of 149: 0.01%
+  was the correlation DEFICIT 1-corr = 9.0e-05, while the relative rms
+  difference is 1.9835e-05/1.4789e-03 = 1.34%. For nearly parallel arrays the
+  relative difference goes as sqrt(2(1-corr)), and sqrt(2*9.0e-05) = 1.34e-02
+  exactly. A correlation is never a relative error -- it is a relative error
+  squared and halved. Same family as the difference-of-norms slip.
