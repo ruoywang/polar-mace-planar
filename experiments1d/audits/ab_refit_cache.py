@@ -300,20 +300,44 @@ for n, (sid, split, atoms) in enumerate(frames):
         torch.cuda.empty_cache()
 
     # ---- readout inputs, and the gate that the capture is faithful ----
+    # composition, read out of models.py rather than assumed:
+    #   node_inter_es = scale_shift( sum_j readout_j(feats_j) )   [per atom]
+    #   node_energy   = node_e0 + node_inter_es
+    #   total_energy  = node_energy.sum() + the solvent terms
+    # so the gate must apply scale_shift and add e0, and e0 is obtained
+    # INDEPENDENTLY from atomic_energies_fn rather than by subtraction.
     feats = {}
     for idx, t in grab["feats"]:
         feats[idx] = t if idx not in feats else torch.cat([feats[idx], t], 0)
     with torch.no_grad():
-        chk = 0.0
+        heads = (b["head"][b["batch"]] if "head" in b.to_dict()
+                 else torch.zeros_like(b["batch"]))
+        ar = torch.arange(nat, device=device)
+        per_atom = torch.zeros(nat, dtype=torch.float64, device=device)
         for idx, t in sorted(feats.items()):
             ro = model.readouts[idx] if idx >= 0 else model.embedding_readout
-            o = ro(t.to(device=device, dtype=torch.float64), None)
-            chk += float(o[:, 0].sum() if o.dim() > 1 else o.sum())
-    g_feat.append(abs(chk - node_e))
+            o = ro(t.to(device=device, dtype=torch.float64), heads)
+            per_atom = per_atom + (o[ar, heads] if o.dim() > 1
+                                   else o).to(torch.float64)
+        ss = model.scale_shift(per_atom, heads)
+        e0v = model.atomic_energies_fn(b["node_attrs"])
+        e0a = (e0v[ar, heads] if e0v.dim() > 1 else e0v).to(torch.float64)
+        e0_sum = float(e0a.sum()); inter_e = float(ss.sum())
+    g_feat.append(abs((e0_sum + inter_e) - node_e))
+    if n == 0:
+        print(f"  [composition, first frame] e0_sum {e0_sum:+.6f} + inter_e "
+              f"{inter_e:+.6f} = {e0_sum+inter_e:+.6f} against node_energy "
+              f"{node_e:+.6f}; scale "
+              f"{float(torch.atleast_1d(model.scale_shift.scale)[0]):.6f}, "
+              f"shift {float(torch.atleast_1d(model.scale_shift.shift)[0]):.6f}"
+              f" (both BUFFERS, never trainable); solvent remainder "
+              f"E_model - node_energy = {e_model-node_e:+.6f} eV", flush=True)
     recs.append(dict(sid=sid, split=split, group=group(sid), nat=nat,
                      solv=solv, e_dft=e_dft, e_model=e_model, node_e=node_e,
+                     e0_sum=e0_sum, inter_e=inter_e,
+                     remainder=e_model - node_e,
                      e3d_a=e3d_a, e3d_b=e3d_b, dE=dE, ecav=ecav, ebl=ebl,
-                     comp=comp,
+                     comp=comp, heads=heads.detach().cpu().numpy(),
                      feats={k: v.numpy() for k, v in feats.items()}))
     if (n + 1) % 25 == 0 or n == len(frames) - 1:
         el = time.time() - t0
@@ -324,9 +348,10 @@ for n, (sid, split, atoms) in enumerate(frames):
 print(f"\n[GATES]")
 gf = max(g_feat) if g_feat else float("nan")
 ge = max(g_e3d) if g_e3d else float("nan")
-print(f"   [{'PASS' if gf < 1e-6 else 'FAIL'}] captured readout inputs "
-      f"reproduce the model's own node_energy sum: worst |diff| {gf:.3e} eV "
-      f"over {len(g_feat)} frames")
+print(f"   [{'PASS' if gf < 1e-6 else 'FAIL'}] captured readout inputs, put "
+      f"through scale_shift and added to an independently recomputed e0, "
+      f"reproduce the model's own node_energy: worst |diff| {gf:.3e} eV over "
+      f"{len(g_feat)} frames")
 print(f"   [{'PASS' if ge < 1e-6 else 'FAIL'}] E_3d^A recomputed through THE "
       f"Coulomb function equals solvent3d_energy_g: worst |diff| {ge:.3e} eV "
       f"over {len(g_e3d)} solvated frames")
@@ -337,6 +362,8 @@ if not (gf < 1e-6 and ge < 1e-6):
 path = os.path.join(OUT, "ab_refit_cache.pt")
 torch.save(dict(recs=recs, n_readouts=n_ro,
                 has_embedding=emb is not None,
+                scale=float(torch.atleast_1d(model.scale_shift.scale)[0]),
+                shift=float(torch.atleast_1d(model.scale_shift.shift)[0]),
                 gate_feat=gf, gate_e3d=ge), path)
 sz = os.path.getsize(path) / 1e9
 print(f"\n  cache written: {path} ({sz:.2f} GB, {len(recs)} frames)")
