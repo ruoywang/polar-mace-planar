@@ -495,6 +495,89 @@ for nm, kk in (("cross gap", "cross"), ("self gap", "self"),
     g0, g1 = b_[kk] - r0[kk], s_[kk] - r0[kk]
     print(f"    {nm:>16}: {g0:+.4f} -> {g1:+.4f} eV "
           f"({'BETTER' if abs(g1) < abs(g0) else 'worse'})")
+# ======================================================================
+# WHY THE POTENTIAL WORSENS IN EVERY BAND WHILE THE CHARGE IMPROVES IN MOST
+#
+# Neither branch the band table was built to distinguish fits: the charge
+# improves in four of five bands INCLUDING the lowest, and the potential
+# worsens in all five. So this is not the 1/k^2 weighting trade, and something
+# else has to account for it.
+#
+# The workstation's candidate, and it is decidable from what is already here.
+# The model's total potential is
+#
+#   phi = phi_sol_model + l0_inv(solvent charge + q_sol)
+#
+# so the error against the DFT total potential splits exactly into a part this
+# intervention MOVES and a part it cannot touch:
+#
+#   phi - phi_DFT = [phi_sol_model - phi_sol_DFT + l0_inv(q_sol difference)]
+#                   + l0_inv(solvent charge error)
+#                     ^ the only term P_off* changes
+#
+# The bracket is FIXED across the two cases. If the solvent-charge term had
+# been partly cancelling it, reducing the solvent charge error removes the
+# cancellation and worsens the potential everywhere at once -- exactly the
+# observed pattern, and a compensation between the solvent and solute channels
+# rather than between charge and potential at different k. That is plausible
+# on its own terms because the model was TRAINED against the total potential,
+# so training had every reason to tune the solvent response to absorb a
+# solute-side error.
+#
+# The decisive consequence, if it holds: |bracket| is a FLOOR on the potential
+# error that no improvement of the solvent charge can go below, and the
+# baseline's apparent accuracy would then depend on an error cancellation
+# rather than on being right.
+#
+# Two things make this a measurement rather than a story. The bracket must
+# come out IDENTICAL for both cases, since the solute side is untouched -- that
+# is a machine-precision gate on the whole decomposition. And the sign of
+# l0_inv is fixed by that same gate rather than assumed, since the wrong sign
+# makes the bracket case-dependent.
+# ======================================================================
+rt_b = base["rb"] + base["ri"]
+rt_s = star["rb"] + star["ri"]
+pe_b, pe_s = base["phi"] - phi_ref_, star["phi"] - phi_ref_
+best_s, best_e = None, None
+for sg in (+1.0, -1.0):
+    fb = pe_b - sg * phi_of(rt_b - rt_ref_)
+    fs = pe_s - sg * phi_of(rt_s - rt_ref_)
+    e = float((fb - fs).abs().max())
+    print(f"  [convention] l0_inv sign {sg:+.0f}: the fixed bracket differs "
+          f"between the two cases by max abs {e:.3e} eV")
+    if best_e is None or e < best_e:
+        best_s, best_e = sg, e
+fix_b = pe_b - best_s * phi_of(rt_b - rt_ref_)
+fix_s = pe_s - best_s * phi_of(rt_s - rt_ref_)
+sol_b = best_s * phi_of(rt_b - rt_ref_)
+sol_s = best_s * phi_of(rt_s - rt_ref_)
+gF = best_e / max(float(fix_b.abs().max()), 1e-30)
+print(f"\n[SOLVENT VERSUS SOLUTE COMPENSATION IN THE POTENTIAL]")
+print(f"   [{'PASS' if gF < 1e-9 else 'FAIL'}] the untouched bracket is "
+      f"identical for both cases at sign {best_s:+.0f}: max abs difference "
+      f"{best_e:.3e} eV, {gF:.2e} of its own max -- so the split is exact and "
+      f"the sign is measured, not assumed")
+print(f"   {'quantity':>40} {'rms (eV)':>10}")
+print(f"   {'fixed bracket (solute side, untouched)':>40} "
+      f"{float(fix_b.pow(2).mean().sqrt()):10.5f}")
+for lbl, sv, pv in (("baseline", sol_b, pe_b), ("P_off*", sol_s, pe_s)):
+    print(f"   {f'{lbl}: solvent-charge term':>40} "
+          f"{float(sv.pow(2).mean().sqrt()):10.5f}")
+    print(f"   {f'{lbl}: TOTAL potential error':>40} "
+          f"{float(pv.pow(2).mean().sqrt()):10.5f}   "
+          f"correlation(solvent term, bracket) {corr(sv, fix_b):+.4f}")
+fl = float(fix_b.pow(2).mean().sqrt())
+print(f"\n   READING. A NEGATIVE correlation means the solvent term was "
+      f"cancelling the fixed bracket, and then reducing the solvent charge "
+      f"error necessarily worsens the potential -- the degradation would be "
+      f"the\n   removal of a compensation, not damage done by P_off*. In that "
+      f"case {fl:.5f} eV is a FLOOR on the potential error that no solvent-side "
+      f"improvement can beat, the baseline's {float(pe_b.pow(2).mean().sqrt()):.5f} "
+      f"eV\n   sits below its own floor only by cancellation, and the thing to "
+      f"fix is the solute side -- phi_sol and the q_sol/G0 bookkeeping -- not "
+      f"the compensation. A correlation near zero or positive refutes this and "
+      f"puts\n   the degradation back on the intervention.", flush=True)
+
 print(f"\n  MIXED IS NOT A PASS. The stop rule names aggregate charge, the "
       f"POTENTIAL, cross energy and the full self-energy including the "
       f"bound-ion mutual term. If the potential or the mutual term goes the\n"
