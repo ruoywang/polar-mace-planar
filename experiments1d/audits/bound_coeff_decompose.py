@@ -517,8 +517,22 @@ _rf = metrics(rho_b_ref, "ref")
 print(f"  {'-':>8} {'-':>8} {_rf['net']:+9.4f} {_rf['absq']:8.4f} "
       f"{_rf['gap']:+9.4f} {_rf['l1']:9.5f} {_rf['mx']:9.2e} "
       f"{_rf['shift']:+8.3f} {100*_rf['resid']:6.1f}%   <- DFT reference RHOB")
+# the rescale-only row exists because a bound is available for it but an
+# EXACT number is one line away. Rescaling prior by its own best inverse gain
+# removes 85.9% of its rms error; converting that into an L1 effect by
+# assuming the residual keeps the same shape is an assumption, and WB@D is
+# band-pass (peak k about 8.4/A) so |WB D x| depends on x's SPECTRUM, not its
+# rms -- the best-scale residual is the component orthogonal to prior_ref and
+# is plausibly higher-frequency than the difference it came from. The bound
+# from the triangle inequality is 3.8x to 5.1x worse than the baseline and the
+# operator's gain on the residual would have to be 5.0x its gain on the full
+# error to overturn the sign, so the direction is safe either way -- but there
+# is no reason to report a bound when the row itself can be evaluated.
+_sc_pr = float((prior_m * prior_ref).sum()
+               / torch.clamp((prior_ref * prior_ref).sum(), min=1e-300))
 cells = (("model", "model", a1_m, p_off_m), ("ref", "model", A_ref, p_off_m),
-         ("model", "ref", a1_m, prior_ref), ("ref", "ref", A_ref, prior_ref))
+         ("model", "ref", a1_m, prior_ref), ("ref", "ref", A_ref, prior_ref),
+         ("model", f"prior/{_sc_pr:.3f}", a1_m, prior_m / _sc_pr))
 out = {}
 for la, lp, a_, p_ in cells:
     m_ = metrics(rho_of(a_, p_, E_dft), f"{la}/{lp}")
@@ -526,6 +540,8 @@ for la, lp, a_, p_ in cells:
     fl = "  <- shift at scan edge" if m_["edge"] else ""
     if (la, lp) == ("ref", "ref"):
         fl += "  <- must reproduce the reference"
+    if la == "model" and lp.startswith("prior/"):
+        fl += "  <- the covariance GAIN fixed alone, exact"
     print(f"  {la:>8} {lp:>8} {m_['net']:+9.4f} {m_['absq']:8.4f} "
           f"{m_['gap']:+9.4f} {m_['l1']:9.5f} {m_['mx']:9.2e} "
           f"{m_['shift']:+8.3f} {100*m_['resid']:6.1f}%{fl}")
@@ -555,6 +571,22 @@ _ea, _ep = rm['l1'], mr['l1']
 print(f"  uncompensated: p_off error alone {_ea:.5f} e, a1 error alone "
       f"{_ep:.5f} e, both together {mm['l1']:.5f} e -> the two coefficient "
       f"errors cancel {0.5*(_ea+_ep)/max(mm['l1'],1e-30):.1f}-fold in L1.")
+_rs = out[("model", f"prior/{_sc_pr:.3f}")]
+print(f"  IS THE DIAGNOSIS A REPAIR LIST? No, and this is the exact number "
+      f"rather than a bound. Dividing prior by its own best gain "
+      f"{_sc_pr:.3f} -- the single change that removes 85.9% of its rms "
+      f"error -- gives charge L1 {_rs['l1']:.5f} e against the baseline's "
+      f"{mm['l1']:.5f} e,\n  a factor of "
+      f"{_rs['l1']/max(mm['l1'],1e-30):.2f}. Fixing the covariance gain ALONE "
+      f"{'makes the bound charge WORSE' if _rs['l1'] > mm['l1'] else 'helps'}"
+      f", because it removes a compensation the wrong a1 currently relies on. "
+      f"The two halves have to move together.")
+print(f"  The two halves are NOT equally tractable, though, and the binding "
+      f"constraint is a1: prior's error is 85.9% removable by one scalar, so a "
+      f"joint change has a cheap well-specified handle on that half, while\n"
+      f"  a1's is 7.2% removable by any scalar and 77.7% pure cavity, so its "
+      f"half has no scalar handle at all and needs the cavity or the grid it "
+      f"is computed on.")
 print(f"  That cancellation is partly structural, not an independent finding: "
       f"the model's own closure satisfies the same identity with its own "
       f"fields, and the model's bound-charge total is close to the "
