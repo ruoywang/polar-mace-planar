@@ -2141,10 +2141,12 @@ THE TERM THE USER IDENTIFIED AS NEVER CHECKED IS THE LARGE ONE:
   solute potential: cvhar_model rms 3.43934, cvhar_DFT 3.48212; difference rms
     0.12710 eV
   solute dipole: model -6.74120, DFT -6.16258 (300 grid) and -6.16260 (native
-    500); MODEL ERROR +0.57862 e A
+    500); MODEL MINUS REFERENCE = -0.57862 e A, i.e. the model's dipole is
+    more negative by that amount (the workstation wrote +0.57862; the
+    magnitude is right and the sign as stated here is model - reference)
 That solute dipole error is about 12x the solvent dipole error the previous
 round was optimising (-0.04943 e A after P_off*). And the result table's dipole
-column difference, -0.9439 against -0.3653, is exactly -0.57862 -- so the
+column difference, -0.9439 against -0.3653, is exactly -0.57860 -- so the
 feedback term is carrying the solute dipole error, and the two measurements are
 consistent. The electron COUNT matches to 1e-4 while the profile differs at
 6.985 rms, so this is a shape error in the predicted density, not a charge
