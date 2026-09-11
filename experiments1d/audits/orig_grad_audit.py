@@ -104,7 +104,7 @@ args = tools.build_default_arg_parser().parse_args(argv)
 # key specification and the default head; element_charge_residual_scale feeds
 # the model constructor, and we load the model from its pickle.
 from mace.data.utils import KeySpecification, update_keyspec_from_kwargs
-from mace.tools.scripts_utils import prepare_default_head
+from mace.tools.multihead_tools import prepare_default_head
 args.key_specification = KeySpecification()
 update_keyspec_from_kwargs(args.key_specification, vars(args))
 if args.heads is None:
