@@ -2577,3 +2577,120 @@ after the same run had been killed in the background at 3.2 GB. Two of the
 four had no real growth, one did, this one did not. The mitigation there is
 the foreground, not a smaller job, so chunking for that machine's benefit is
 the wrong remedy.
+
+## 2026-09-10  charge_branch_fit.py -- the residual is a per-electron constant
+code 164df9f. Workstation, cache reuse, provenance IDENTICAL, test SEALED.
+
+THE FRAMING THE USER CORRECTED FIRST, and it is what makes the result mean
+anything. mu = dE/dN, so int mu dN IS the whole charging energy and already
+contains what the existing electrostatic and solvent terms contribute -- it is
+not an extra additive term and adding it on top would double-count. The
+apparent 94% was close to a tautology: eps_Delta = dE_model - int mu dN and
+dE_model is only 7.6% of the truth, so eps_Delta is about -int mu dN whatever
+the model does, and the trapezoid beating the endpoints 6-fold is a fact about
+numerical integration. The "missing int mu dN term" reading is WITHDRAWN.
+So the target became the residual dE_correction = dE_DFT - dE_existing, which
+cannot double-count by construction.
+
+CONVENTIONS, settled from source and settings rather than from a field name,
+which is where the previous round overreached:
+  0 of 800 INCARs set EFERMI_ref or any const-pot tag; its default in
+  solvation.F is 0; L_const_pot is (EFERMI_ref < 0) hence FALSE; the OUTCAR
+  prints EFERMI_ref = 0.000000;
+  Ecorr_sol = A_corr - Ecorr_band - q_sol*EFERMI_ref IS added into TOTEN
+  (electron_all.F:456, electron.F:590), so the solvation free energy is inside
+  the label while the reservoir term, present in the formula, is identically
+  zero;
+  the label is energy(sigma->0), exactly VASP's ISMEAR=1 extrapolation of the
+  printed TOTEN, ratio 1/3 to 3e-9;
+  the stored Fermi is the raw OUTCAR E-fermi, and the reference zero is the
+  RIGHT vacuum, pinned at +2.3e-4 and +2.0e-5 eV in the two states with a
+  spread of 3.6e-6, so mu is on a unified scale across a pair to 2.2e-4 eV.
+  The LEFT vacuum moves 3.46 eV, which is the slab responding to the charge.
+
+[RESULT] val pairs, eV, each rung judged against the ROW ABOVE
+                   form      rmse      bias  mean-removed   all three better?
+        (no correction)    5.6219   -5.5703        0.7600   -
+                   a*dN    0.1569   -0.0430        0.1509   YES
+          a*dN + b*dN^2    0.1572   -0.0406        0.1519   NO: rmse and
+                                                            mean-removed worse
+     (a + w.h)*dN ridge    0.1000   -0.0041        0.0999   yes, but on a
+                                                            contaminated score
+  mu_bar*dN (CONTROL)      0.3217   +0.1661        0.2755   (extra information)
+
+ESTABLISHED: a per-electron energy baseline is the first thing missing and it
+is decisive -- ONE fitted parameter removes 99.2% of the bias and 80.1% of the
+frame-to-frame spread. The fitted constant is a = -5.2885 eV per electron
+against a mean mu_bar of -5.4425, so 0.154 eV less negative: close enough to
+be the same physics, far enough that "the constant IS the mean chemical
+potential" is not what the data says.
+
+REFUTED: charging curvature. b*dN^2 fails on two of three metrics, and this is
+the SHARP result rather than a weak one, because the quadratic is the EXACT
+functional form if the missing quantity were a trapezoid of a chemical
+potential linear in N. Its failure to appear is a refutation, not an absence
+of evidence.
+
+THE CONTROL LOST, which is what proves the earlier "oracle"/"upper bound"
+label was wrong: mu_bar*dN uses the true DFT Fermi levels of BOTH states and
+still reaches only 0.3217 and 0.2755 against one fitted constant's 0.1569 and
+0.1509. Rescaling does not rescue it -- measured scale 0.9723 gives 0.2779 and
+0.2778, so rescaling helps the rmse and leaves the spread alone, and the
+constant is still 1.84x better in spread. The 200-pair correlation of 0.8951
+caps what any rescaling can do.
+
+WHY A CONSTANT BEATS THE TRUE CHEMICAL POTENTIAL, stated through the direct
+measurement after an earlier route was shown unsound:
+  corr((mu_bar - a)*dN, dE_model) = +0.4253, so the model's EXISTING terms
+  already track part of mu's variation and crediting the full integral
+  over-corrects -- the user's definitional point, visible in the data;
+  spreads (mu_bar-a)*dN 0.2096 and dE_model 0.3020 would give 0.3676 if
+  independent, against a measured row-1 residual spread of 0.2159, so the
+  cancellation cuts it 41%.
+THE UNSOUND ROUTE, recorded because the conclusion survived it: arguing this
+through the control's residual by treating Q = dE_DFT - mu_bar*dN as small is
+wrong. Q's spread is 0.1837, which is 0.61 of dE_model's in SPREAD and 0.37 in
+VARIANCE -- the two are not the same statement and this chain keeps swapping
+them -- with corr(Q, dE_model) = +0.2735 and a mean of -0.5671 eV. The
+control's residual lands near spread(dE_model) only because those two offset.
+Right answer, wrong route.
+
+UNSETTLED: whether the correction depends on configuration. Row 3 cannot be
+decided on val BY CONSTRUCTION under the user's protocol, and the seal is
+therefore the only clean evidence available about it.
+  with alpha by CV inside train: alpha 1e-06 at the grid edge, val rmse
+  0.1083, bootstrap of (row1 - row3) median +0.0488, CI [-0.0127, +0.1128] --
+  includes zero;
+  with alpha selected on val: alpha 1, val rmse 0.1000, CI [+0.0020, +0.1120]
+  -- excludes zero.
+The verdict FLIPPED on the selection, not on evidence. The lower bound moved
++0.0147 to land at +0.0020, which is 3.5% of the median, and the penalty
+bought 5.3 of row 3's 36.3-point margin over row 1 -- the other 31.0 were
+already there at the smallest penalty. So the ridge is not what makes row 3
+look good; it is what pushed a marginal interval across zero.
+
+THE SHUFFLE CONTROL AND THE BOOTSTRAP ANSWER DIFFERENT NULLS and must not be
+read as agreeing. Shuffled features give 0.7408, far WORSE than row 1's
+0.1569, so the shuffle null is "these 1153 features are noise" and its failure
+mode is overfitting damage. Beating it establishes only that the features are
+not noise; whether they beat knowing the electron count ALONE is a different
+question that only the bootstrap addresses.
+
+WHICH ROWS ARE CLEAN, since this decides what the seal is for: rows 1, 2 and 4
+were fitted on train alone (or not fitted at all), so their val scores are
+held-out estimates. ONLY row 3 had anything selected on val. So opening the
+seal for form 1 adds precision to a number that is already clean, while for
+form 3 it is the entire remaining evidence. One caveat that survives either
+way: choosing WHICH FORM to deploy on val scores is itself a 3-way selection,
+so the winner's val score is mildly optimistic even for form 1 -- much smaller
+than row 3's ten-value penalty scan stacked on top, not zero.
+
+FOUR DEFECTS OF MINE, all caught by the workstation before anything was
+reported: a verdict line printing "excludes zero, so the gain is real" four
+lines below its own caveat that the val score was selection-contaminated, when
+the CI is computed on those same contaminated points; a table cell carrying a
+verdict against no-correction and a parenthetical against the row above at
+once, so the cell contradicted itself; the unsound route above; and the
+oracle/upper-bound label on what is only a control.
+
+TEST REMAINS SEALED. 20 pairs, not scored, KIT_FINAL_FORM unset.
