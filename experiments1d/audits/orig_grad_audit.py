@@ -462,6 +462,110 @@ for nm, keep in ARMS:
 model.load_state_dict(W0)
 optimizer.load_state_dict(copy.deepcopy(O0))
 set_terms(set(ALL_W))
+print(f"\n   NOTE: these arms change the gradient on EVERY parameter, not only the "
+      f"head, so they do not isolate the head. The 'everything else' arm is the "
+      f"control that shows it: its gradient on the head is exactly zero and "
+      f"max|dw| on the head is 0, yet the paired dE still moves, so most of a "
+      f"single step's effect comes from the rest of the model. The head's own "
+      f"contribution is isolated below.")
+
+print("\n" + "=" * 78)
+print("PRIORITY 2b -- ONE step in which ONLY THE HEAD is allowed to move")
+print("   full-model clipping is applied exactly as training does, and then the")
+print("   non-head gradients are set to None so Adam skips those tensors. The")
+print("   change in the paired dE is then attributable to the head alone.")
+print(f"\n   {'arm':>17} {'|eps| after':>12} {'change':>10} "
+      f"{'max|dw| head':>13} {'d(paired dE)':>13}")
+for nm, keep in ARMS:
+    model.load_state_dict(W0)
+    optimizer.load_state_dict(copy.deepcopy(O0))
+    set_terms(keep)
+    wb = {k: v.detach().clone() for k, v in head.state_dict().items()}
+    for s in BATCH:
+        model.zero_grad(set_to_none=True)
+        out = model(BATCH[s].to_dict(), training=True,
+                    compute_force=output_args["forces"], compute_virials=False,
+                    compute_stress=False)
+        (loss_fn(pred=out, ref=BATCH[s]) / len(BATCH)).backward()
+        _evict()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.clip_grad)
+    for prm in model.parameters():
+        if id(prm) not in head_ids:
+            prm.grad = None
+    optimizer.step()
+    aft = live_paired()
+    mdw = max(float((head.state_dict()[k] - wb[k]).abs().max()) for k in wb)
+    print(f"   {nm:>17} {np.abs(aft - de_dft).mean():12.4f} "
+          f"{np.abs(aft - de_dft).mean() - np.abs(base - de_dft).mean():+10.4f} "
+          f"{mdw:13.3e} {(aft - base).mean():+13.3e}")
+model.load_state_dict(W0)
+optimizer.load_state_dict(copy.deepcopy(O0))
+set_terms(set(ALL_W))
+
+print("\n" + "=" * 78)
+print("MECHANISM -- why is the force gradient nearly anti-parallel to d_pair?")
+print("   Tested, not asserted. Two reference directions on the cached inputs:")
+print("     u_diff = grad of the PAIRED difference  sum_pairs (le_c - le_n)")
+print("     u_sum  = grad of the COMMON level       sum_frames le")
+print("   If both loss terms' gradients live mostly along one output-scale")
+print("   direction, the sign alone decides who wins, and the install check's")
+print("   finding -- that fixing the pair wrecks the forces -- would be the same")
+print("   fact seen from the other side.")
+
+
+def dir_of(scalar_fn):
+    model.zero_grad(set_to_none=True)
+    scalar_fn().backward()
+    v = head_vec(lambda q: (q.grad.detach() if q.grad is not None
+                            else torch.zeros_like(q))).clone()
+    model.zero_grad(set_to_none=True)
+    return v
+
+
+u_diff = dir_of(lambda: cached_dle().sum())
+u_sum = dir_of(lambda: torch.stack(
+    [head(node_attrs=None, node_feats=CA[s]["node_feats"].to(device),
+          edge_attrs=None, edge_feats=None, edge_index=None,
+          field_feats=CA[s]["field_feats"].to(device),
+          charges_0=CA[s]["charges_0"].to(device),
+          charges_induced=CA[s]["charges_induced"].to(device)).sum()
+     for p_ in PAIRS for s in p_]).sum())
+
+
+def cosv(a, b):
+    na, nb = float(a.norm()), float(b.norm())
+    return float(a @ b) / max(na * nb, 1e-300)
+
+
+print(f"\n   ||u_diff|| {float(u_diff.norm()):.4e}   ||u_sum|| "
+      f"{float(u_sum.norm()):.4e}   cos(u_diff,u_sum) "
+      f"{cosv(u_diff, u_sum):+.4f}")
+print(f"   cos(d_pair, u_diff) {cosv(d_pair, u_diff):+.4f}   "
+      f"cos(d_pair, u_sum) {cosv(d_pair, u_sum):+.4f}")
+print(f"\n   {'arm':>17} {'cos(g,u_diff)':>14} {'cos(g,u_sum)':>13} "
+      f"{'cos(-g,d_pair)':>15}")
+for nm, _ in ARMS:
+    g = res1[nm]["gh"]
+    if float(g.norm()) == 0.0:
+        print(f"   {nm:>17} {'--':>14} {'--':>13} {'--':>15}")
+        continue
+    print(f"   {nm:>17} {cosv(g, u_diff):+14.4f} {cosv(g, u_sum):+13.4f} "
+          f"{res1[nm]['cos']:+15.4f}")
+
+print(f"\n   per-tensor share of each arm's head gradient (norm fraction)")
+names = [k for k, _ in head.named_parameters()]
+sizes = [q.numel() for q in head.parameters()]
+offs = np.cumsum([0] + sizes)
+print(f"   {'tensor':>28} " + " ".join(f"{nm[:11]:>12}" for nm, _ in ARMS[:3]))
+for j, nmt in enumerate(names):
+    row = []
+    for nm, _ in ARMS[:3]:
+        g = res1[nm]["gh"]
+        tot = float(g.norm())
+        row.append(float(g[offs[j]:offs[j + 1]].norm()) / max(tot, 1e-300))
+    if max(row) > 0.02:
+        print(f"   {nmt:>28} " + " ".join(f"{v:12.4f}" for v in row))
+
 print(f"\n   'change' negative means one step of the ORIGINAL optimiser reduced "
       f"the paired error. The head-only Adam needed thousands of steps to reach "
       f"0.1359 eV, so a single step is expected to be small; what matters is "
