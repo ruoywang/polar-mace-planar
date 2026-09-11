@@ -98,6 +98,17 @@ argv = ["--config", CFG, "--name", NAME, "--seed", "123",
         "--checkpoints_dir", "checkpoints", "--results_dir", "results",
         "--device", "cuda"]
 args = tools.build_default_arg_parser().parse_args(argv)
+# run_train mutates args between parsing and building the loss/optimizer. I
+# listed every `args.X =` in run() before line 1286 and the only ones that
+# apply here (foundation_model is None, so that whole branch is dead) are the
+# key specification and the default head; element_charge_residual_scale feeds
+# the model constructor, and we load the model from its pickle.
+from mace.data.utils import KeySpecification, update_keyspec_from_kwargs
+from mace.tools.scripts_utils import prepare_default_head
+args.key_specification = KeySpecification()
+update_keyspec_from_kwargs(args.key_specification, vars(args))
+if args.heads is None:
+    args.heads = prepare_default_head(args)
 print("=" * 78)
 print(f"config  {CFG}   loss={args.loss}  optimizer={args.optimizer}  "
       f"amsgrad={args.amsgrad}")
