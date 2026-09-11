@@ -87,6 +87,16 @@ def find_ckpt(run):
                  key=lambda p: int(p.rsplit("epoch-", 1)[1].split(".")[0]))
     return pts[-1] if pts else None
 
+# The pickled model carries a PB1DBackend whose __setstate__ re-runs __init__,
+# and that __init__ opens RELATIVE paths taken from the training config --
+# './cal1_train.json', './cache', './data/baseline_cache'. Unpickling therefore
+# fails with FileNotFoundError unless the process cwd is the run directory
+# (measured: job 3430198 died this way in 76 s on a GPU node, so it is not a
+# device problem). Chdir here rather than relying on the job script, and note
+# that the probe itself writes nothing -- only the solver's own cache under the
+# run's ./cache is touched, which is the run's own.
+os.chdir(RUN)
+
 device = torch_tools.init_device(os.environ.get("KIT_DEVICE", "cuda"))
 mpath = find_model(RUN)
 model = torch.load(f=mpath, map_location=device).to(device)
