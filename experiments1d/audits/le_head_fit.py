@@ -576,8 +576,11 @@ for step in range(STEPS + 1):
             print(f"   step {step:5d}  train rmse {tr:8.4f}  val rmse "
                   f"{vr:8.4f} eV   [{time.time() - t0:5.1f} s]", flush=True)
 
-print(f"   best val rmse {best[0]:.4f} eV at step {best[2]}")
-head.load_state_dict(best[1])
+w_final = {k: v.detach().clone() for k, v in head.state_dict().items()}
+print(f"   fixed schedule: the pre-declared endpoint, step {STEPS}")
+print(f"   val-selected  : best val rmse {best[0]:.4f} eV at step {best[2]}; "
+      f"val chose the number of steps, so this is a model-selection score, "
+      f"not an independent validation number")
 
 print("\n   DID THE OPTIMISER ACTUALLY MOVE THE WEIGHTS?")
 tot_mv, nz = 0.0, 0
@@ -596,21 +599,84 @@ if nz == 0:
 
 print("\n" + "=" * 78)
 print("AFTER TRAINING")
+head.load_state_dict(w_final)
 with torch.no_grad():
-    p1TR, p1VA = paired_pred(BTR), paired_pred(BVA)
-report("current head", p0TR, p0VA)
-report("a*dN refit", a_fit * dnTR, a_fit * dnVA)
-report("head trained alone", p1TR, p1VA)
+    pfTR, pfVA = paired_pred(BTR), paired_pred(BVA)
+head.load_state_dict(best[1])
+with torch.no_grad():
+    pbTR, pbVA = paired_pred(BTR), paired_pred(BVA)
 
-print("\n   per-pair val errors, trained head vs a*dN refit")
-print(f"   {'pair':>6} {'dN':>7} {'target':>9} {'head':>9} {'a*dN':>9} "
-      f"{'err_head':>9} {'err_a':>9}")
+ROWS = [("current head", p0TR, p0VA, "no fit"),
+        ("a*dN refit (train only)", a_fit * dnTR, a_fit * dnVA, "train"),
+        (f"a*dN a={A_CONST}", A_CONST * dnTR, A_CONST * dnVA, "none"),
+        (f"head, fixed step {STEPS}", pfTR, pfVA, "train"),
+        ("head, val-selected step", pbTR, pbVA, "train+val")]
+
+
+def stats(p, y):
+    e = (p - y).detach()
+    r = float((e ** 2).mean() ** 0.5)
+    b = float(e.mean())
+    m = float(((e - e.mean()) ** 2).mean() ** 0.5)
+    return r, b, m
+
+
+print(f"\n   {'model':>26} {'fitted on':>10} | {'train rmse':>10} "
+      f"{'bias':>8} {'mean-rem':>9} | {'val rmse':>9} {'bias':>8} "
+      f"{'mean-rem':>9}   (eV)")
+tab = {}
+for nm, pt, pv, fon in ROWS:
+    rt, bt, mt = stats(pt, yTR)
+    rv, bv, mv = stats(pv, yVA)
+    tab[nm] = (rt, bt, mt, rv, bv, mv)
+    print(f"   {nm:>26} {fon:>10} | {rt:10.4f} {bt:+8.4f} {mt:9.4f} | "
+          f"{rv:9.4f} {bv:+8.4f} {mv:9.4f}")
+
+# The question the mean-removed column answers, stated rather than left to the
+# reader: an advantage that lives only in the bias means the head has matched a
+# per-electron CONSTANT, not learned per-pair structure. On the 3-pair smoke
+# the head's val rmse was 3.3x better than a*dN while its mean-removed error
+# was WORSE (0.0700 against 0.0660) -- the advantage was bias only.
+a_nm = "a*dN refit (train only)"
+for hn in (f"head, fixed step {STEPS}", "head, val-selected step"):
+    ha, aa = tab[hn], tab[a_nm]
+    print(f"\n   {hn} vs {a_nm}, on val:")
+    print(f"     rmse         {ha[3]:.4f} vs {aa[3]:.4f}  "
+          f"({aa[3] / max(ha[3], 1e-30):.2f}x)")
+    print(f"     |bias|       {abs(ha[4]):.4f} vs {abs(aa[4]):.4f}  "
+          f"({abs(aa[4]) / max(abs(ha[4]), 1e-30):.2f}x)")
+    print(f"     mean-removed {ha[5]:.4f} vs {aa[5]:.4f}  "
+          f"({aa[5] / max(ha[5], 1e-30):.2f}x)  <- the per-pair structure")
+    if ha[5] >= aa[5]:
+        print(f"     READ: the head is NOT better than a per-electron constant "
+              f"on the per-pair part; its whole advantage is bias.")
+    else:
+        print(f"     READ: the head beats the constant on the per-pair part by "
+              f"{100.0 * (1 - ha[5] / aa[5]):.1f}%, so it carries structure a "
+              f"constant cannot.")
+
+print(f"\n   per-pair val errors")
+print(f"   {'pair':>6} {'dN':>7} {'target':>9} {'head_fix':>9} {'head_val':>9} "
+      f"{'a*dN':>9} | {'e_fix':>9} {'e_val':>9} {'e_a':>9}")
 for i, (sc, sn) in enumerate(VA):
     print(f"   {sc:>6} {float(dnVA[i]):+7.3f} {float(yVA[i]):+9.4f} "
-          f"{float(p1VA[i]):+9.4f} {a_fit * float(dnVA[i]):+9.4f} "
-          f"{float(p1VA[i] - yVA[i]):+9.4f} "
+          f"{float(pfVA[i]):+9.4f} {float(pbVA[i]):+9.4f} "
+          f"{a_fit * float(dnVA[i]):+9.4f} | "
+          f"{float(pfVA[i] - yVA[i]):+9.4f} {float(pbVA[i] - yVA[i]):+9.4f} "
           f"{a_fit * float(dnVA[i]) - float(yVA[i]):+9.4f}")
-print("\nNOTE: only the PAIRED difference was fitted, so the absolute level of "
-      "the head is unidentified by this objective and the fitted head is not a "
-      "drop-in for the full model. Energy and force of the full model are a "
-      "separate, later step by design.")
+
+# save both weight sets so the follow-on absolute-energy and force check can
+# install them without refitting
+FITTED = os.environ.get("KIT_FITTED",
+                        os.path.join(os.path.dirname(CACHE), "head_fitted.pt"))
+torch.save({"final": w_final, "valbest": best[1], "step_final": STEPS,
+            "step_valbest": best[2], "a_fit": a_fit,
+            "pairs_train": TR, "pairs_val": VA}, FITTED)
+print(f"\n   fitted head weights saved: {FITTED}")
+print("\nNOTE: only the PAIRED difference was fitted. Any term that is EQUAL in "
+      "the two states -- a structure function C(R) of the geometry -- cancels "
+      "exactly in Delta E and is therefore invisible to this objective, while "
+      "it can still move the absolute energies and the forces. So a drop in "
+      "the paired error does not license installing this head: the charged and "
+      "neutral absolute energies and the forces are a separate check, run only "
+      "if the paired error drops on the full set.")
