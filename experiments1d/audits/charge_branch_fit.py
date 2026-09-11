@@ -374,9 +374,21 @@ for _ in range(2000):
     diffs.append(np.sqrt((v1[i] ** 2).mean()) - np.sqrt((v3[i] ** 2).mean()))
 d_lo, d_md, d_hi = np.percentile(diffs, [2.5, 50, 97.5])
 print(f"   bootstrap of the DIFFERENCE (row1 - row3): median {d_md:+.4f}, "
-      f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}] -- "
-      f"{'excludes zero, so the gain is real' if d_lo > 0 else 'INCLUDES ZERO, so the gain is NOT ESTABLISHED'}")
-print(f"   This is the comparison that decides row 3, not the shuffle control.")
+      f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}]"
+      f"{' (excludes zero)' if d_lo > 0 else ' (INCLUDES ZERO)'}")
+print(f"   BUT THIS INTERVAL CANNOT SETTLE ROW 3, and reading it as if it "
+      f"could would contradict the caveat four lines above. The penalty was "
+      f"chosen ON VAL and this CI is computed on the SAME val points, so it\n"
+      f"   inherits the selection contamination in full: scanning "
+      f"{len(ALPHAS)} penalties against {len(iva)} points and then asking "
+      f"those points whether the winner is significant is circular. Only the "
+      f"SEALED TEST can settle it.")
+if d_lo > 0:
+    print(f"   And the margin is as thin as 'excludes zero' gets: the lower "
+          f"bound is {100*d_lo/max(d_md,1e-30):.1f}% of the median.")
+print(f"   Note also where row 3's advantage comes from: it is already present "
+      f"at the smallest penalty on the grid, so the ridge is not what makes "
+      f"row 3 look good -- at most it moves a marginal interval across zero.")
 _edge = a3 <= min(ALPHAS) * 1.0001
 print(f"   RIDGE BIT? alpha {a3:g} "
       f"{'sits at the smallest value on the grid, so essentially NO penalty was applied and the ridge did NOT turn the under-determined fit into a regularised model -- saying with ridge would overstate it' if _edge else 'is interior to the grid, so the penalty is doing real work'}")
@@ -433,24 +445,30 @@ print(f"   (these spreads are over all {len(y)} pairs; the table above is "
 
 print(f"\n[THE THREE METRICS THE USER ASKED FOR, val pairs, eV]")
 print(f"  {'form':>26} {'rmse':>9} {'bias':>9} {'mean-removed':>13} "
-      f"{'all three better?':>18}")
+      f"{'all three better than ROW ABOVE?':>28}")
 _base = (float(np.sqrt((y[iva] ** 2).mean())), float(y[iva].mean()),
          float(y[iva].std()))
 print(f"  {'(no correction)':>26} {_base[0]:9.4f} {_base[1]:+9.4f} "
-      f"{_base[2]:13.4f} {'-':>18}")
-_prev = None
+      f"{_base[2]:13.4f} {'-':>28}")
+# ONE baseline for this column, named in the header: the ROW ABOVE. The
+# user's ladder is stepwise -- does adding the next term improve things
+# FURTHER -- so the row above is the meaningful comparison. An earlier version
+# printed a verdict against no-correction and a parenthetical against the row
+# above in the same cell, which made the cell contradict itself.
+_prev = _base
 for nm, rr in (("a*dN", r1), ("a*dN + b*dN^2", y - LAD[1][1] @ np.linalg.lstsq(
         LAD[1][1][tr], y[tr], rcond=None)[0]), ("(a + w.h)*dN ridge", r3)):
     m = (float(np.sqrt((rr[iva] ** 2).mean())), float(rr[iva].mean()),
          float(rr[iva].std()))
-    ok = (m[0] < _base[0] and abs(m[1]) < abs(_base[1]) and m[2] < _base[2])
-    step = ("" if _prev is None else
-            ("  (better than the previous row on all three)"
-             if (m[0] < _prev[0] and abs(m[1]) < abs(_prev[1])
-                 and m[2] < _prev[2]) else
-             "  (NOT better than the previous row on all three)"))
+    w3b = [m[0] < _prev[0], abs(m[1]) < abs(_prev[1]), m[2] < _prev[2]]
+    tag = ("YES" if all(w3b) else
+           "no: " + ", ".join(n for n, g in
+                              zip(("rmse", "bias", "mean-rm"), w3b) if not g)
+           + " not improved")
+    note = ("   <- on the selection-contaminated val score"
+            if nm.endswith("ridge") else "")
     print(f"  {nm:>26} {m[0]:9.4f} {m[1]:+9.4f} {m[2]:13.4f} "
-          f"{('yes' if ok else 'no'):>18}{step}")
+          f"{tag:>28}{note}")
     _prev = m
 print(f"  The ladder is read stepwise: a*dN improving means a per-electron "
       f"energy baseline is the first thing missing; b*dN^2 improving further "
