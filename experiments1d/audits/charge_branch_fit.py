@@ -344,8 +344,14 @@ sh = np.array(sh)
 print(f"   {'3  with features SHUFFLED x20':>34} {sh.mean():10.4f} "
       f"{'':>11}  (min {sh.min():.4f}, max {sh.max():.4f})")
 print(f"   -> real features beat shuffled by "
-      f"{100*(1-np.sqrt((r3[iva]**2).mean())/sh.mean()):.1f}%; if that is near "
-      f"zero the structure dependence is fitting noise.")
+      f"{100*(1-np.sqrt((r3[iva]**2).mean())/sh.mean()):.1f}%.")
+print(f"   THE TWO CONTROLS ANSWER DIFFERENT NULLS and must not be read as "
+      f"agreeing. The shuffle null is 'these 1153 features are noise', and its "
+      f"failure mode is overfitting DAMAGE -- shuffled lands far WORSE than\n"
+      f"   row 1, not level with it -- so beating it establishes only that the "
+      f"features are not noise. Whether they beat knowing the electron count "
+      f"ALONE is a different question and only the paired bootstrap below "
+      f"answers it.")
 
 # bootstrap the val score so the margin is read against its own resolution
 def boot(rr, n=2000):
@@ -369,7 +375,11 @@ for _ in range(2000):
 d_lo, d_md, d_hi = np.percentile(diffs, [2.5, 50, 97.5])
 print(f"   bootstrap of the DIFFERENCE (row1 - row3): median {d_md:+.4f}, "
       f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}] -- "
-      f"{'excludes zero, so the gain is real' if d_lo > 0 else 'INCLUDES ZERO, so the gain is not established'}")
+      f"{'excludes zero, so the gain is real' if d_lo > 0 else 'INCLUDES ZERO, so the gain is NOT ESTABLISHED'}")
+print(f"   This is the comparison that decides row 3, not the shuffle control.")
+_edge = a3 <= min(ALPHAS) * 1.0001
+print(f"   RIDGE BIT? alpha {a3:g} "
+      f"{'sits at the smallest value on the grid, so essentially NO penalty was applied and the ridge did NOT turn the under-determined fit into a regularised model -- saying with ridge would overstate it' if _edge else 'is interior to the grid, so the penalty is doing real work'}")
 
 # the Fermi control's best linear rescaling, MEASURED rather than estimated
 Xo = (mu_bar * dN)[:, None]
@@ -384,6 +394,42 @@ print(f"   so rescaling the Fermi-based control "
       f"{'does not rescue it' if ro[iva].std() > r1[iva].std() else 'rescues it'}: "
       f"one fitted constant per electron is still "
       f"{ro[iva].std()/max(r1[iva].std(),1e-30):.2f}x better in spread.")
+
+# WHY a fitted constant beats a control built from the true chemical potential.
+# An earlier version of this reading argued it through row 4's residual by
+# treating Q = dE_DFT - mu_bar*dN as small. Q is NOT small -- its spread is a
+# substantial fraction of dE_model's and it is itself correlated with
+# dE_model, so that route reached the right answer for the wrong reason. The
+# direct statement is both cleaner and the one actually measured:
+a1c = float(np.linalg.lstsq(dN[:, None], y, rcond=None)[0][0])
+resid1_all = y - a1c * dN
+uA = (mu_bar - a1c) * dN
+cAB = float(np.corrcoef(uA, de_mod)[0, 1])
+ind = math.sqrt(uA.std() ** 2 + de_mod.std() ** 2)
+Q = de_dft - mu_bar * dN
+print(f"\n[WHY A CONSTANT BEATS THE CHEMICAL POTENTIAL] over all "
+      f"{len(y)} pairs")
+print(f"   corr((mu_bar - a)*dN, dE_model) {cAB:+.4f}  -- positive, so the "
+      f"model's EXISTING terms already track part of mu's variation, and "
+      f"crediting the full integral over-corrects")
+print(f"   spreads: (mu_bar-a)*dN {uA.std():.4f}, dE_model {de_mod.std():.4f}; "
+      f"independent they would give {ind:.4f}, measured row-1 residual "
+      f"{resid1_all.std():.4f} -> the cancellation cuts it "
+      f"{100*(1-resid1_all.std()/max(ind,1e-30)):.0f}%")
+print(f"   and the quadrature term Q = dE_DFT - mu_bar*dN is NOT negligible: "
+      f"spread {Q.std():.4f} = {Q.std()/max(de_mod.std(),1e-30):.2f} of "
+      f"dE_model's in SPREAD ({(Q.std()/max(de_mod.std(),1e-30))**2:.2f} in "
+      f"variance), mean {Q.mean():+.4f} eV,\n   corr with dE_model "
+      f"{float(np.corrcoef(Q, de_mod)[0,1]):+.4f}. So any reading that routes "
+      f"through row 4's residual by calling Q small is unsound even where its "
+      f"conclusion survives.")
+print(f"   the fitted constant itself: a = {a1c:+.4f} eV per electron against "
+      f"a mean mu_bar of {mu_bar.mean():+.4f} -- "
+      f"{abs(a1c-mu_bar.mean()):.4f} eV less negative, close and NOT equal, "
+      f"which is its own small fact to explain.")
+print(f"   (these spreads are over all {len(y)} pairs; the table above is "
+      f"scored on the val pairs alone and is tighter. Different samples, not "
+      f"a discrepancy.)")
 
 print(f"\n[THE THREE METRICS THE USER ASKED FOR, val pairs, eV]")
 print(f"  {'form':>26} {'rmse':>9} {'bias':>9} {'mean-removed':>13} "
