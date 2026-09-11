@@ -180,6 +180,20 @@ if len(eps_sorted) >= 2:
           f"{len(went_down)} of {len(common)}")
     for n, x, y in went_down[:8]:
         print(f"     {n:>58} {x} -> {y}")
+    hn = sorted(n for n in common if "local_electron_energy" in n)
+    print(f"   local_electron_energy tensors, step count at each checkpoint "
+          f"(the model-wide minimum is NOT the test -- a head tensor going "
+          f"backwards is):")
+    for n in hn[:4] + (["..."] if len(hn) > 8 else []) + hn[-4:] if hn else []:
+        if n == "...":
+            print(f"     ... {len(hn) - 8} more")
+            continue
+        print(f"     {n:>58} " + "  ".join(
+            f"ep{e}:{tbl[e].get(n, '-')}" for e in eps_sorted))
+    hdn = [n for n in hn if tbl[eps_sorted[-1]].get(n, 0)
+           < tbl[eps_sorted[0]].get(n, 0)]
+    print(f"   head tensors whose count DECREASED: {len(hdn)} of {len(hn)}"
+          + ("" if not hdn else f"  -> {hdn[:3]}"))
     if went_down:
         print(f"   -> a decrease cannot come from 'received gradients less "
               f"often'. The resume job (3430182) rebuilt the optimizer and "
@@ -557,6 +571,7 @@ def force_rmse():
 
 f_before = force_rmse()
 ARMS2 = ARMS + [("zero grad, Adam history", None)]
+DW = {}
 for nm, keep in ARMS2:
     model.load_state_dict(W0)
     optimizer.load_state_dict(copy.deepcopy(O0))
@@ -582,12 +597,40 @@ for nm, keep in ARMS2:
     cdw = (float(dw @ d_pair_n) / max(float(dw.norm()), 1e-300)
            if float(dw.norm()) > 0 else 0.0)
     f_after = force_rmse()
+    DW[nm] = dw.clone()
     print(f"   {nm:>17} {np.abs(aft - DE_DFT).mean():12.4f} "
           f"{np.abs(aft - DE_DFT).mean() - np.abs(base - DE_DFT).mean():+10.4f} "
-          f"{mdw:10.3e} {cdw:+15.4f} {f_before:14.4f} {f_after:13.4f}")
+          f"{mdw:10.3e} {cdw:+15.4f} {f_before:14.6e} {f_after:13.6e}")
 model.load_state_dict(W0)
 optimizer.load_state_dict(copy.deepcopy(O0))
 set_terms(set(ALL_W))
+# A similar max|dw| does NOT mean the update vectors are close. Compare them as
+# vectors, using what was already computed -- no extra job needed. Note also
+# that the zero-gradient control still applies WEIGHT DECAY through the
+# optimizer, so it is "history plus decay", not pure momentum.
+z = DW.get("zero grad, Adam history")
+if z is not None:
+    print(f"\n   HOW DIFFERENT ARE THE UPDATE VECTORS FROM THE CONTROL?")
+    print(f"   the control keeps weight decay as well as the Adam moments, so "
+          f"it is history-plus-decay, not pure momentum")
+    print(f"   {'arm':>17} {'||dw||':>11} {'||dw-dw_ctl||':>14} "
+          f"{'relative':>10} {'cos(dw,dw_ctl)':>15}")
+    for nm, _ in ARMS2:
+        d = DW.get(nm)
+        if d is None or float(d.norm()) == 0.0:
+            continue
+        rel = float((d - z).norm()) / max(float(d.norm()), 1e-300)
+        print(f"   {nm:>17} {float(d.norm()):11.4e} "
+              f"{float((d - z).norm()):14.4e} {rel:10.4f} "
+              f"{cosv(d, z):+15.4f}")
+
+print(f"\n   CRITERION (relaxed per the user): a force term that BLOCKS an "
+      f"energy-driven improvement in order to hold its own accuracy is also "
+      f"competition. An unchanged force rmse at four decimals means the "
+      f"display cannot resolve the change, not that nothing moved -- so the "
+      f"force column is printed in full precision below.")
+for nm, _ in ARMS2:
+    pass
 print(f"\n   CRITERION: energy-only lowers |eps|, energy+forces does not, AND "
       f"the force rmse falls. All three are needed before calling this an "
       f"energy-versus-force competition.")
