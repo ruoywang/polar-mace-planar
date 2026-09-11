@@ -248,14 +248,30 @@ for sc, sn in PAIRS:
 
     print(f"\n   ABLATION GATE -- the captured sum must equal what the channel "
           f"puts into the total energy")
+    # THE TOLERANCE IS DERIVED, NOT PICKED. The check differences two total
+    # energies of order 1e4 eV to recover a term of order 1 eV, so the floor is
+    # set by cancellation, not by the size of the term: a relative tolerance
+    # against |le| of 1e-10 is unreachable and failed this gate spuriously on
+    # job 3430202 at 5.1e-10 (same class of error as the earlier 1e-18
+    # threshold on a quantity of order 0.2). What the gate must actually assert
+    # is that the discrepancy is negligible against the quantities to be
+    # interpreted: d(le) is order 1e-2 eV and eps_Delta order 1 eV, so an
+    # absolute 1e-6 eV is already three to six orders below any physical
+    # effect here. Both the absolute discrepancy and the cancellation scale are
+    # printed so the margin is visible rather than asserted.
+    TOL_EV = 1e-6
     ok = True
     for r, tag in ((rc, "charged"), (rn, "neutral")):
         cs = float(r["le"].sum())
         de = r["e_on"] - r["e_off"]
-        rel = abs(cs - de) / max(abs(cs), 1e-30)
-        ok &= rel < 1e-10
-        print(f"     {tag:>8}: captured sum {cs:+.9f} eV, energy with minus "
-              f"without {de:+.9f} eV, relative {rel:.3e}")
+        dis = abs(cs - de)
+        ok &= dis < TOL_EV
+        print(f"     {tag:>8}: captured {cs:+.9f} eV, energy on minus off "
+              f"{de:+.9f} eV, |discrepancy| {dis:.3e} eV "
+              f"(total energy {r['e_on']:.3f} eV, so the cancellation is "
+              f"{dis / max(abs(r['e_on']), 1e-30):.2e} relative to it)")
+    print(f"     tolerance {TOL_EV:.0e} eV, set from the size of the paired "
+          f"quantity rather than from |le|")
     if not ok:
         print(f"     GATE FAILED -- the captured tensor is not the term that "
               f"enters the energy; nothing below is interpretable")
@@ -289,6 +305,8 @@ for sc, sn in PAIRS:
     print(f"     le(neutral)            {len_:+.6f} eV")
     print(f"     d(le)                  {dle:+.6f} eV    <- can this channel "
           f"move the pair at all?")
+    print(f"     |d(le)| vs gate slack  {abs(dle) / TOL_EV:.3e}x the tolerance, "
+          f"so the gate's residual cannot account for it")
     print(f"     Delta E model          {de_model:+.6f} eV")
     print(f"     Delta E DFT            {de_label:+.6f} eV")
     print(f"     eps_Delta              {eps:+.6f} eV    <- the gap d(le) "
