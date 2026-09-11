@@ -2703,4 +2703,46 @@ verdict against no-correction and a parenthetical against the row above at
 once, so the cell contradicted itself; the unsound route above; and the
 oracle/upper-bound label on what is only a control.
 
-TEST REMAINS SEALED. 20 pairs, not scored, KIT_FINAL_FORM unset.
+### FINAL COMPARISON, test set opened once, both forms
+LS6 job 3430107, code 56cda73, provenance IDENTICAL, 6m58s, 400 forwards with
+MACE_PB1D_NO_PRELOAD (RSS 5.81 GB at pair 200, no kill).
+
+Opening the test set once does NOT mean evaluating one model -- the user's
+point, and it dissolved the false dilemma of form 1 against form 3. Both were
+frozen before the test set was touched: form 1's coefficient, and form 3's
+alpha = 1, its train-fitted standardisation and its weights.
+
+                       form      rmse      bias  mean-removed
+               form 1  a*dN    0.1507   -0.1057        0.1074
+       form 3  (a + w.h)*dN    0.1557   -0.0557        0.1454
+            form 3 - form 1   +0.0050   -0.0500       +0.0380
+  form 3 closer on 10 of 20 pairs -- exactly a coin flip
+
+FORM 3'S ADVANTAGE DOES NOT SURVIVE. It is 3.3% worse in rmse and 35% worse in
+mean-removed error, better only in bias. On val it was 36% BETTER in rmse
+(0.1000 against 0.1569); on test it is 3.3% worse. So the val margin was the
+selection, and this is exactly what the held-back test was for. The per-pair
+column is what makes it unambiguous: 10 of 20 is a coin flip, so form 3 was
+not winning broadly and its val margin did not come from a real effect spread
+across the set.
+
+DECISION, per the reading fixed before the numbers were seen: KEEP FORM 1, and
+stop tuning against this test set. The structure features are NOT established
+to carry additional information. No further form will be proposed to reopen
+these pairs.
+
+FORM 1 ON TEST, the clean number, single coefficient a = -5.2745 eV per
+electron fitted on train alone:
+  residual before   rmse 6.0548   bias -6.0344   mean-removed 0.4954
+  residual after    rmse 0.1507   bias -0.1057   mean-removed 0.1074
+a 40-fold rmse reduction, 98.2% of the bias and 78.3% of the spread, on data
+that touched no fitting and no selection. Form 1's test rmse (0.1507) is
+slightly BETTER than its val rmse (0.1569), so it generalises; its bias is
+larger on test and its spread smaller, both within what 20-pair samples give.
+
+WHAT THIS DOES AND DOES NOT SETTLE. It answers the practical question: a
+single uniform per-electron energy is enough, and making it configuration-
+dependent is not justified by this evidence. It does NOT separate how much of
+that constant absorbs density error from how much is electronic energy the
+model never represents explicitly -- a fitted coefficient cannot be
+apportioned that way, and nothing here attempts it.
