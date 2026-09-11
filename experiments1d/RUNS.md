@@ -4,6 +4,87 @@
 `git rev-parse HEAD` 写进 run 日志;本文件记录每个实验目录用的是哪个
 commit。新实验一律登记,旧实验按已知信息回填(未知处如实标注)。
 
+### the answer: the channel is charge-dependent but 121x too weak
+
+40 epochs finished (3430114 epochs 0-37, 3430182 epochs 37-39, both COMPLETED).
+Endpoint epoch 39: 10.33 meV/atom, 30.18 meV/A, 0.1317 eV, fermi 0.0843 eV.
+That endpoint is NOT comparable to gate_bl's 11.75 / 32.75 / 0.1227 -- 39
+epochs against 33, and gate_le's own 33->39 gain is 9%, so the two causes are
+not separable there. The only same-epoch comparison remains epoch 33.
+
+`le_channel_probe.py` on the finished model, 21 pairs, every one passing the
+ablation gate (|discrepancy| 2.7e-11 eV against a total energy of -1306 eV,
+tolerance 1e-6 eV derived from the size of the paired quantity).
+
+CORRECTION TO THE PARAMETER FIGURE. The channel holds 76545 TRAINABLE
+parameters, 7.98% of the model's 958718 -- not the 1.52% recorded above, which
+summed the checkpoint's whole state_dict and so counted buffers in both
+numerator and denominator (5110243 tensors against 958718 parameters; the
+channel's own 77825 against 76545, the 1280 difference being four output_mask
+buffers). The argument that "a 1.52% channel cannot move aggregate metrics" is
+withdrawn; it is also no longer needed, since the channel's output change is
+now measured directly.
+
+q_in IS CHARGE-DEPENDENT, which the earlier audit never tested:
+
+| channel input | shape | max abs diff | relative |
+|---|---|---|---|
+| charges_0 | (207, 54) | 2.07e-03 | 0.36% |
+| charges_induced | (207, 54) | 3.51e-01 | 56.0% |
+| field_feats | (207, 8) | 4.55 | 27.6% |
+| node_feats | (207, 576) | 6.94e-17 | 4.1e-16 |
+
+Exactly as the source predicted: charge reaches the channel through the field
+feedback (extensions.py:2562), so charges_induced moves 56% while charges_0,
+cloned at 2444 before that feedback, moves 0.36%. node_feats at 4.1e-16
+reproduces the earlier charge-blind result, so this channel is the only path by
+which charge information reaches the energy at all.
+
+BUT ITS RESPONSE IS TWO ORDERS TOO SMALL. 20 held-out val pairs:
+
+| quantity | value |
+|---|---|
+| eps_Delta mean / rmse | +4.8716 / 4.9295 eV |
+| d(le) mean / rmse | -0.0401 / 0.0405 eV |
+| d(le)/dN | -0.0382 eV/electron |
+| eps/dN needed | +4.6339 eV/electron |
+| share of the gap covered | -0.82% |
+
+The sign is right -- d(le) is negative, the direction the pair needs -- and it
+is uniform across every pair (-0.73% to -0.90%, 20 of 20), but the magnitude is
+1/121 of what is required.
+
+THE 12.5% IMPROVEMENT CANNOT BE CREDITED TO THE CHANNEL. On the same 20 pairs
+gate_bl gave eps rmse 5.621861 and bias +5.570253; gate_le gives 4.9295 and
++4.8716, i.e. 12.3% and 12.5% better. On sid1/601 alone Delta E model moved
+from -0.465482 to -1.203373, eps from +5.635 to +4.897, 13.1% better. But the
+channel's own contribution to that 0.7379 eV is 0.0415 eV, 5.6%; the other 94%
+came from the rest of the model, which differs by 6 epochs and a different
+random trajectory. Only the 0.82% is attributable.
+
+WHERE THE ERROR ACTUALLY SITS. Per-frame signed errors, 20 val pairs:
+
+| | mean | rms |
+|---|---|---|
+| charged frames | +17.67 meV/atom | 17.97 |
+| neutral frames | -5.87 meV/atom | 5.98 |
+
+Opposite signs in 20 of 20 pairs, and the charged state carries 3.0x the
+magnitude -- not the even split I estimated. This is why a paired error of
+4.87 eV = 23.5 meV/atom can hide behind an aggregate RMSE_E_per_atom of 10.33:
+the two states' errors cancel in the aggregate metric. (The identity
+err_charged - eps = err_neutral is definitional, not a finding, and is not
+offered as one.)
+
+READING. The architecture is not the obstacle: charge information is present in
+the channel's inputs at 56% relative amplitude, the channel consumes it, and
+the term it produces has the right sign. What is missing is any pressure in the
+loss to make the paired difference right -- the aggregate energy metric is
+already satisfied by errors that cancel between the two states. Turning the
+native channel on and training it for 40 epochs therefore does not fix the
+charging energy, and the a = -5.2745 eV/electron constant remains the only
+measured thing that does.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
