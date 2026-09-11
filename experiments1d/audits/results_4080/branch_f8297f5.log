@@ -1,0 +1,31 @@
+PROVENANCE mace=f8297f5 pb=9b3b9ba sha256(charge_branch_fit.py)=6368667cc9eca34ea087d312a1e97556e616d8dbc2d83d9ac8d8c7fe86d179e0 (IDENTICAL to committed f8297f5); FOREGROUND
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  200 pairs; caching pooled features and energies (start RSS 0.72 GB)
+   [gate] pooled features agree across the pair: relative 8.880e-17 -- a feature-only term contributes exactly zero to a paired difference
+   [25/200] RSS 2.05 GB
+   [50/200] RSS 2.61 GB
+   [75/200] RSS 3.17 GB
+   [100/200] RSS 3.73 GB
+   [125/200] RSS 4.28 GB
+   [150/200] RSS 4.84 GB
+   [175/200] RSS 5.40 GB
+   [200/200] RSS 5.96 GB
+  cache written: /home/rw28343/jobs/1-3DPB/claude/kitrun/run/charge_branch_cache.npz
+
+  target dE_correction = dE_DFT - dE_existing over 200 pairs: mean -5.7015, rmse 5.7428, spread 0.6872 eV; dN from 0.790 to 1.375
+  splits: train 160, val 20, test 20
+
+[RESULT] fitted on 160 TRAIN pairs, scored on 20 VAL pairs. Bias and spread are reported separately because they answer different questions.
+                   model  par   val bias   val rmse  val spread  bias removed  spread removed
+               (nothing)    0    -5.5703     5.6219      0.7600             -               -
+                 1  a*dN    1    -0.0430     0.1569      0.1509         99.2%           80.1%
+        2  a*dN + b*dN^2    2    -0.0406     0.1572      0.1519         99.3%           80.0%
+         3  (a + w.h)*dN 1153    +0.0254     0.1083      0.1053         99.5%           86.2%
+   4  mu_bar*dN (ORACLE)    -    +0.1661     0.3217      0.2755         97.0%           63.7%
+
+  Row 4 is NOT a model: it uses the DFT Fermi levels of BOTH states, so it bounds what a perfect charge-aware branch could reach and cannot be deployed. Row 2 is the honest parametric form of the same idea,
+  since mu linear in N makes the trapezoid exactly a quadratic. Row 3 asks whether the correction needs to know the structure or only the electron count.
+
+[READING] a correction that removes the BIAS but not the SPREAD is a constant per electron and does not make the energy easier to learn frame by frame. One that removes both is what the user asked for.
+  And if row 3 beats row 2 materially, the missing quantity depends on the structure and not only on how many electrons were added.
+DONE

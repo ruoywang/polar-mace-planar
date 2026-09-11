@@ -1557,6 +1557,10 @@ no real growth behind them, one did, and this one did not.
 
 ### Result: the trapezoid holds on 200 pairs
 
+> **The reading in this section is WITHDRAWN. The relation is near-tautological
+> and is not evidence about the model — see "Correction: the int mu dN framing
+> is dead" below. The NUMBERS stand; what they were taken to mean does not.**
+
 | split | pairs | eps_D rmse | eps_D bias | resid rmse | resid bias | explained (RMS) |
 |---|---|---|---|---|---|---|
 | val | 20 | 5.621861 | +5.570253 | 0.321732 | -0.166124 | 94.3% |
@@ -1608,3 +1612,79 @@ integral to within a few per cent, with a systematic remainder beyond it.
 
 No split effect: val 94.3%, train 93.8%, test 95.7%. The val block is the user's
 table.
+
+## Correction: the "missing int mu dN term" framing is dead
+
+The user refuted it and the refutation is decisive, so the reading recorded two
+sections above is withdrawn. `mu = dE/dN`, so `int mu dN` **is** the whole
+charging energy — it is not an additive term the model is missing, and adding it
+on top of the existing electrostatic and solvent terms would double-count them.
+
+Worse, the relation was close to a tautology. `eps_Delta = dE_model - int mu dN`,
+and `dE_model` is only 7.6% of the truth, so `eps_Delta` is approximately
+`-int mu dN` **whatever the model does**. The 6-fold advantage of the trapezoid
+over the endpoints is a fact about quadrature, not about the model: the Fermi
+level swings 3.5 eV across a pair, so an endpoint rule is wrong by about half
+that per electron — 1.75 eV — against the measured endpoint biases of +1.9674
+and -2.2734. That is the arithmetic of a one-point quadrature rule and nothing
+else.
+
+My "94% needs its denominator" caution was at the edge of this and did not reach
+the root. What survives is narrow: the missing quantity tracks a
+chemical-potential integral. That is not evidence of an independent missing
+energy term.
+
+## Residual branch fit (mace f8297f5), and it kills the framing twice over
+
+`branch_f8297f5.log`. mace f8297f5, pb 9b3b9ba, executed file sha256
+6368667cc9eca34ea087d312a1e97556e616d8dbc2d83d9ac8d8c7fe86d179e0, IDENTICAL to
+the commit. Run in the FOREGROUND, 400 forwards, completed; RSS 0.72 to 5.96 GB
+at the same 11 MB per forward.
+
+Gate: pooled features agree across a pair to a relative 8.880e-17, so a
+feature-only term contributes exactly zero to a paired difference — step 4's
+result, re-confirmed on this pair set.
+
+Target `dE_correction = dE_DFT - dE_existing` over 200 pairs: mean -5.7015,
+rmse 5.7428, spread 0.6872 eV, dN from 0.790 to 1.375.
+
+| model | par | val bias | val rmse | val spread | bias removed | spread removed |
+|---|---|---|---|---|---|---|
+| (nothing) | 0 | -5.5703 | 5.6219 | 0.7600 | — | — |
+| **1  a*dN** | **1** | **-0.0430** | **0.1569** | **0.1509** | **99.2%** | **80.1%** |
+| 2  a*dN + b*dN^2 | 2 | -0.0406 | 0.1572 | 0.1519 | 99.3% | 80.0% |
+| 3  (a + w.h)*dN | 1153 | +0.0254 | 0.1083 | 0.1053 | 99.5% | 86.2% |
+| 4  mu_bar*dN (ORACLE) | — | +0.1661 | 0.3217 | 0.2755 | 97.0% | 63.7% |
+
+**A single fitted constant per electron beats the oracle two to one.** Row 1 has
+ONE parameter and reaches val rmse 0.1569 and 80.1% of the spread; row 4 uses
+the true DFT Fermi levels of BOTH states and reaches 0.3217 and 63.7%. The
+actual chemical-potential integral describes the missing quantity WORSE than a
+single constant does.
+
+That comparison survives the obvious objection that row 1 has a free parameter
+and row 4 has none. The best spread any linear rescaling of `mu_bar*dN` could
+reach is `eps_spread * sqrt(1 - corr^2)` = 0.6872 * sqrt(1 - 0.8951^2) =
+**0.3064 eV**, against the unscaled oracle's 0.3068 — rescaling buys nothing,
+because the correlation of 0.8951 caps it. Row 1's val spread of 0.1509 is about
+**2.0x better than the best scaled oracle can be**. (Estimated from the 200-pair
+correlation, not measured on the 20 val pairs.)
+
+**The quadratic term buys nothing**: row 2 is 0.1572 against row 1's 0.1569,
+slightly worse. If the missing quantity were the trapezoid integral of a
+chemical potential linear in N, the quadratic is exactly the right form and it
+would show. It does not.
+
+**Row 3's margin is weak evidence.** A 31% rmse reduction over row 1 sounds
+decisive, but it is 1153 fitted parameters against 160 training pairs — more
+parameters than data, so the fit is whatever minimum-norm solution the solver
+returns — scored on 20 val points, where the relative standard error of an rmse
+is about 1/sqrt(2n) = 16%. A 31% gain at that resolution is roughly two standard
+errors. It is suggestive that the correction depends on structure and not only
+on electron count, and it is not yet established; a bootstrap or leave-one-out
+over the val pairs would settle it and costs no forwards, since the script
+caches to `charge_branch_cache.npz`.
+
+**What the table does establish**: the missing correction is, to 99.2% of its
+bias and 80.1% of its frame-to-frame spread, **a constant per electron** —
+one number, fitted, no chemical potential required.
