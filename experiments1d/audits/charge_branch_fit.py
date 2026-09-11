@@ -244,6 +244,118 @@ print(f"\n  Row 4 is NOT a model: it uses the DFT Fermi levels of BOTH states, "
       f"  since mu linear in N makes the trapezoid exactly a quadratic. Row 3 "
       f"asks whether the correction needs to know the structure or only the "
       f"electron count.")
+# ======================================================================
+# MODEL SELECTION -- row 3 as printed above is not a model. 1153 parameters
+# against 160 training pairs is under-determined, so lstsq returns whatever
+# minimum-norm vector it likes, and the score sits on 20 val points where the
+# relative standard error of an rmse is 1/sqrt(2n) = 15.8%. A 31% gain is
+# about two standard errors. Three things settle it, all from the cache:
+#   ridge with the penalty chosen by K-fold CV inside TRAIN, so row 3 becomes
+#   a real model rather than a min-norm artefact;
+#   a bootstrap CI on the val scores, so the margin is read against its own
+#   resolution instead of at face value;
+#   and a SHUFFLE control -- the same fit with the features permuted across
+#   pairs. If shuffled features buy a similar gain, the gain is fitting noise
+#   and nothing about structure.
+# The oracle also gets its best linear rescaling MEASURED here rather than
+# estimated from the 200-pair correlation.
+# ======================================================================
+rng = np.random.default_rng(0)
+itr = np.where(tr)[0]
+iva = np.where(va)[0]
+
+
+def ridge_fit(X, yy, idx, alpha):
+    A = X[idx]
+    G = A.T @ A + alpha * np.eye(A.shape[1])
+    return np.linalg.solve(G, A.T @ yy[idx])
+
+
+def kfold_alpha(X, yy, idx, alphas, k=5):
+    perm = rng.permutation(len(idx))
+    folds = np.array_split(perm, k)
+    best, ba = None, None
+    for al in alphas:
+        err = []
+        for f in range(k):
+            te = idx[folds[f]]
+            trn = idx[np.concatenate([folds[j] for j in range(k) if j != f])]
+            w = ridge_fit(X, yy, trn, al)
+            err.append(((X[te] @ w - yy[te]) ** 2).mean())
+        m = float(np.mean(err))
+        if best is None or m < best:
+            best, ba = m, al
+    return ba
+
+
+ALPHAS = [1e-6, 1e-4, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4]
+X3 = LAD[2][1]
+a3 = kfold_alpha(X3, y, itr, ALPHAS)
+w3 = ridge_fit(X3, y, itr, a3)
+r3 = y - X3 @ w3
+X1 = LAD[0][1]
+w1 = ridge_fit(X1, y, itr, 1e-8)
+r1 = y - X1 @ w1
+print(f"\n[MODEL SELECTION] row 3 with ridge, penalty chosen by 5-fold CV "
+      f"inside TRAIN: alpha {a3:g}")
+print(f"   {'variant':>34} {'val rmse':>10} {'val spread':>11}")
+print(f"   {'1  a*dN (reference)':>34} {np.sqrt((r1[iva]**2).mean()):10.4f} "
+      f"{r1[iva].std():11.4f}")
+print(f"   {'3  (a + w.h)*dN, ridge':>34} {np.sqrt((r3[iva]**2).mean()):10.4f} "
+      f"{r3[iva].std():11.4f}")
+
+# shuffle control: permute the feature block across pairs, keep dN intact
+sh = []
+for _ in range(20):
+    q = rng.permutation(len(y))
+    Xs = np.concatenate([dN[:, None], hs[q] * dN[:, None]], 1)
+    ws = ridge_fit(Xs, y, itr, a3)
+    rs = y - Xs @ ws
+    sh.append(np.sqrt((rs[iva] ** 2).mean()))
+sh = np.array(sh)
+print(f"   {'3  with features SHUFFLED x20':>34} {sh.mean():10.4f} "
+      f"{'':>11}  (min {sh.min():.4f}, max {sh.max():.4f})")
+print(f"   -> real features beat shuffled by "
+      f"{100*(1-np.sqrt((r3[iva]**2).mean())/sh.mean()):.1f}%; if that is near "
+      f"zero the structure dependence is fitting noise.")
+
+# bootstrap the val score so the margin is read against its own resolution
+def boot(rr, n=2000):
+    v = rr[iva]
+    out = [np.sqrt((v[rng.integers(0, len(v), len(v))] ** 2).mean())
+           for _ in range(n)]
+    return np.percentile(out, [2.5, 50, 97.5])
+
+
+for nm, rr in (("1  a*dN", r1), ("3  ridge", r3)):
+    lo, md, hi = boot(rr)
+    print(f"   bootstrap val rmse {nm:>12}: median {md:.4f}, 95% CI "
+          f"[{lo:.4f}, {hi:.4f}]")
+# PAIRED bootstrap: both models must be scored on the SAME resample, or the
+# difference picks up two independent sampling noises instead of one
+v1, v3 = r1[iva], r3[iva]
+diffs = []
+for _ in range(2000):
+    i = rng.integers(0, len(iva), len(iva))
+    diffs.append(np.sqrt((v1[i] ** 2).mean()) - np.sqrt((v3[i] ** 2).mean()))
+d_lo, d_md, d_hi = np.percentile(diffs, [2.5, 50, 97.5])
+print(f"   bootstrap of the DIFFERENCE (row1 - row3): median {d_md:+.4f}, "
+      f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}] -- "
+      f"{'excludes zero, so the gain is real' if d_lo > 0 else 'INCLUDES ZERO, so the gain is not established'}")
+
+# the oracle's best linear rescaling, MEASURED rather than estimated
+Xo = (mu_bar * dN)[:, None]
+wo = ridge_fit(Xo, y, itr, 1e-8)
+ro = y - Xo @ wo
+print(f"\n   oracle rescaled, scale {float(wo[0]):.4f} fitted on train: val "
+      f"rmse {np.sqrt((ro[iva]**2).mean()):.4f}, spread {ro[iva].std():.4f} "
+      f"-- against the unscaled oracle's {np.sqrt((r_or[iva]**2).mean()):.4f} "
+      f"and {r_or[iva].std():.4f}")
+print(f"   so rescaling the true chemical-potential integral "
+      f"{'does not rescue it' if ro[iva].std() > r1[iva].std() else 'rescues it'}: "
+      f"one fitted constant per electron is still "
+      f"{ro[iva].std()/max(r1[iva].std(),1e-30):.2f}x better in spread.")
+
 print(f"\n[READING] a correction that removes the BIAS but not the SPREAD is a "
       f"constant per electron and does not make the energy easier to learn "
       f"frame by frame. One that removes both is what the user asked for.\n"
