@@ -1765,3 +1765,69 @@ than the mean mu_bar — close, and not equal.
 (My spreads above are over all 200 pairs; the script's table is scored on the
 20 val pairs, which are tighter — row 1 spread 0.1509 there against 0.2159 over
 the 200. Not a discrepancy, different samples.)
+
+## Re-run at 90da07f: row 3's verdict FLIPPED, and the flip is selection
+
+`branch_90da07f.log`. mace 90da07f, pb 9b3b9ba, executed sha256
+dc32a2a855130c704915733b37613c1120546e7dc948b9f3286bebabc5fee8ad, IDENTICAL.
+Cache reuse. `KIT_FINAL_FORM` deliberately NOT set — test stays sealed.
+
+The protocol change moved the ridge penalty from CV-inside-train to selection on
+val. With that:
+
+| | previous run (alpha by CV in train) | this run (alpha selected on val) |
+|---|---|---|
+| chosen alpha | 1e-06 (grid edge) | 1 (interior) |
+| row 3 val rmse | 0.1083 | 0.1000 |
+| bootstrap of (row1 - row3) | median +0.0488, CI **[-0.0127, +0.1128]** | median +0.0573, CI **[+0.0020, +0.1120]** |
+| verdict printed | not established | "excludes zero, so the gain is real" |
+
+**The verdict flipped, and the only thing that changed is that alpha was tuned
+on the very set the interval is computed on.** Row 3's rmse improved 0.1083 to
+0.1000 — 7.7% — and that moved the CI's lower bound by +0.0147, from -0.0127 to
++0.0020. The lower bound is now 3.5% of the median. That is as marginal as
+"excludes zero" gets, and it was bought by scanning ten alphas against the same
+20 points.
+
+So the printed line "excludes zero, so the gain is real" should not stand. The
+script already says the val rmse is selection-contaminated and seals test for
+exactly this reason — but the bootstrap CI is computed on the same contaminated
+val set and inherits the contamination, and that is not flagged. **Row 3 remains
+unestablished; only the sealed test can settle it.** Note also that most of row
+3's margin over row 1 (0.1569 to 0.1083) was already there at alpha 1e-06 with
+no penalty, so the ridge is not what makes row 3 look good — it is what pushed a
+marginal interval across zero.
+
+### The three metrics, val pairs, eV
+
+| form | rmse | bias | mean-removed | better than the row above on all three? |
+|---|---|---|---|---|
+| (no correction) | 5.6219 | -5.5703 | 0.7600 | — |
+| a*dN | 0.1569 | -0.0430 | 0.1509 | **yes** |
+| a*dN + b*dN^2 | 0.1572 | -0.0406 | 0.1519 | **no** — rmse and mean-removed both worse, only the bias improves |
+| (a + w.h)*dN ridge | 0.1000 | -0.0041 | 0.0999 | yes, but on a selection-contaminated val score |
+
+Read stepwise: a per-electron baseline is the first thing missing and it is
+decisive. Charging curvature is NOT needed — `b*dN^2` fails the stepwise test on
+two of three metrics, which matters because the quadratic is the exact form if
+the missing quantity were a trapezoid of a chemical potential linear in N. The
+configuration term improves all three over the rung below, but that comparison
+is the contaminated one.
+
+One presentation defect: the script's own column reads `yes  (NOT better than
+the previous row on all three)` in a single cell headed "all three better?" —
+the bare "yes" is against no-correction and the parenthetical is against the row
+above, so the cell contradicts itself. Same class as the earlier gate whose
+number contradicted its label.
+
+### Accepted corrections to my own wording
+
+Q's spread is **0.61** of dE_model's, not "a third" — a third is the VARIANCE
+ratio, 0.37. I wrote "a third the size ... in spread", which is exactly the
+spread/variance swap this chain has been caught by repeatedly. The peer caught
+it and both figures are now recorded.
+
+The Fermi trapezoid is relabelled a CONTROL, not an oracle and not an upper
+bound: it uses extra reference information, the trapezoid only approximates the
+integral, and nothing guarantees it beats a fitted model. The measurement is
+what shows that — it lost, 1.84x in spread.

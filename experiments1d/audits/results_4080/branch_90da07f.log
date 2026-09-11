@@ -1,0 +1,61 @@
+PROVENANCE mace=90da07f pb=9b3b9ba sha256=dc32a2a855130c704915733b37613c1120546e7dc948b9f3286bebabc5fee8ad; cache reuse; KIT_FINAL_FORM deliberately NOT set
+cuequivariance or cuequivariance_torch is not available. Cuequivariance acceleration will be disabled.
+  reusing /home/rw28343/jobs/1-3DPB/claude/kitrun/run/charge_branch_cache.npz: 200 pairs
+
+  target dE_correction = dE_DFT - dE_existing over 200 pairs: mean -5.7015, rmse 5.7428, spread 0.6872 eV; dN from 0.790 to 1.375
+  splits: train 160, val 20, test 20
+
+[RESULT] fitted on 160 TRAIN pairs, scored on 20 VAL pairs. Bias and spread are reported separately because they answer different questions.
+                   model  par   val bias   val rmse  val spread  bias removed  spread removed
+               (nothing)    0    -5.5703     5.6219      0.7600             -               -
+                 1  a*dN    1    -0.0430     0.1569      0.1509         99.2%           80.1%
+        2  a*dN + b*dN^2    2    -0.0406     0.1572      0.1519         99.3%           80.0%
+         3  (a + w.h)*dN 1153    +0.0254     0.1083      0.1053         99.5%           86.2%
+  4  mu_bar*dN (control)    -    +0.1661     0.3217      0.2755         97.0%           63.7%
+
+  Row 4 is a CONTROL using extra reference information, the DFT Fermi levels of both states. It is not an oracle and not an upper bound -- the trapezoid only approximates the integral and nothing
+  guarantees it beats a fitted model; it is here to show whether that extra information helps at all. Row 2 is the honest parametric form of the same idea,
+  since mu linear in N makes the trapezoid exactly a quadratic. Row 3 asks whether the correction needs to know the structure or only the electron count.
+
+  ridge penalty selected ON VAL for the feature form: alpha 1; val rmse across the grid 1e-06:0.1083, 0.0001:0.1083, 0.01:0.1081, 0.1:0.1064, 1:0.1000, 10:0.2856, 100:1.9785, 1000:4.6597, 10000:5.4916, 100000:5.6153
+  feature dimension 1153 against 160 training pairs, so regularisation is required rather than optional.
+
+[MODEL SELECTION] row 3 with ridge, penalty chosen ON VAL (alpha 1), so its val score is SELECTION-CONTAMINATED and is a model-choice number, not a clean estimate. TEST stays sealed.
+                              variant   val rmse  val spread
+                  1  a*dN (reference)     0.1569      0.1509
+               3  (a + w.h)*dN, ridge     0.1000      0.0999
+        3  with features SHUFFLED x20     0.7408              (min 0.3879, max 1.1690)
+   -> real features beat shuffled by 86.5%.
+   THE TWO CONTROLS ANSWER DIFFERENT NULLS and must not be read as agreeing. The shuffle null is 'these 1153 features are noise', and its failure mode is overfitting DAMAGE -- shuffled lands far WORSE than
+   row 1, not level with it -- so beating it establishes only that the features are not noise. Whether they beat knowing the electron count ALONE is a different question and only the paired bootstrap below answers it.
+   bootstrap val rmse      1  a*dN: median 0.1562, 95% CI [0.1145, 0.2000]
+   bootstrap val rmse     3  ridge: median 0.0989, 95% CI [0.0692, 0.1288]
+   bootstrap of the DIFFERENCE (row1 - row3): median +0.0573, 95% CI [+0.0020, +0.1120] -- excludes zero, so the gain is real
+   This is the comparison that decides row 3, not the shuffle control.
+   RIDGE BIT? alpha 1 is interior to the grid, so the penalty is doing real work
+
+   Fermi control rescaled, scale 0.9723 fitted on train: val rmse 0.2779, spread 0.2778 -- against the unscaled control's 0.3217 and 0.2755
+   so rescaling the Fermi-based control does not rescue it: one fitted constant per electron is still 1.84x better in spread.
+
+[WHY A CONSTANT BEATS THE CHEMICAL POTENTIAL] over all 200 pairs
+   corr((mu_bar - a)*dN, dE_model) +0.4253  -- positive, so the model's EXISTING terms already track part of mu's variation, and crediting the full integral over-corrects
+   spreads: (mu_bar-a)*dN 0.2091, dE_model 0.3012; independent they would give 0.3667, measured row-1 residual 0.2153 -> the cancellation cuts it 41%
+   and the quadrature term Q = dE_DFT - mu_bar*dN is NOT negligible: spread 0.1832 = 0.61 of dE_model's in SPREAD (0.37 in variance), mean -0.5671 eV,
+   corr with dE_model +0.2735. So any reading that routes through row 4's residual by calling Q small is unsound even where its conclusion survives.
+   the fitted constant itself: a = -5.2885 eV per electron against a mean mu_bar of -5.4425 -- 0.1540 eV less negative, close and NOT equal, which is its own small fact to explain.
+   (these spreads are over all 200 pairs; the table above is scored on the val pairs alone and is tighter. Different samples, not a discrepancy.)
+
+[THE THREE METRICS THE USER ASKED FOR, val pairs, eV]
+                        form      rmse      bias  mean-removed  all three better?
+             (no correction)    5.6219   -5.5703        0.7600                  -
+                        a*dN    0.1569   -0.0430        0.1509                yes
+               a*dN + b*dN^2    0.1572   -0.0406        0.1519                yes  (NOT better than the previous row on all three)
+          (a + w.h)*dN ridge    0.1000   -0.0041        0.0999                yes  (better than the previous row on all three)
+  The ladder is read stepwise: a*dN improving means a per-electron energy baseline is the first thing missing; b*dN^2 improving further means charging curvature is also needed; h improving further means
+  the correction depends on the configuration. What this says is which EXPRESSION is effective enough -- the fitted coefficients are not thereby identified as independent physical terms.
+
+  TEST IS SEALED: 20 pairs held back and not scored. Set KIT_FINAL_FORM=1|2|3 to open it, once, after the form is chosen.
+
+[READING] a correction that removes the BIAS but not the SPREAD is a constant per electron and does not make the energy easier to learn frame by frame. One that removes both is what the user asked for.
+  And if row 3 beats row 2 materially, the missing quantity depends on the structure and not only on how many electrons were added.
+DONE
