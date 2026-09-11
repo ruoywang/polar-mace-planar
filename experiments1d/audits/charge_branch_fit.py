@@ -48,9 +48,15 @@ all fitted by least squares on the TRAIN pairs and scored on VAL:
   3  (a + w.h)*dN             feature-modulated, h the pooled readout features:
                               a per-structure per-electron energy, which is
                               what a charge-aware branch would actually be
-  4  mu_bar*dN                NOT A MODEL -- it uses the DFT Fermi levels of
-                              both states, so it is an ORACLE and bounds what
-                              a perfect charge-aware branch could reach
+  4  mu_bar*dN                A CONTROL that uses extra reference information
+                              (the DFT Fermi levels of both states). It is NOT
+                              an oracle and NOT an upper bound: the trapezoid
+                              is only an approximation to the integral, and
+                              nothing guarantees it beats a fitted residual
+                              model. Reported to see whether the extra
+                              information helps at all -- and in the first
+                              pass it LOST, which is itself the proof that
+                              calling it a bound was wrong.
 
 Reported on val: residual bias AND residual spread separately, because the
 last round showed those two answer different questions and only reporting the
@@ -234,13 +240,16 @@ for nm, X in LAD:
           f"{100*(1-abs(r[va].mean())/max(abs(b0),1e-30)):12.1f}% "
           f"{100*(1-r[va].std()/max(s0,1e-30)):14.1f}%")
 r_or = y - mu_bar * dN
-print(f"  {'4  mu_bar*dN (ORACLE)':>22} {'-':>4} {r_or[va].mean():+10.4f} "
+print(f"  {'4  mu_bar*dN (control)':>22} {'-':>4} {r_or[va].mean():+10.4f} "
       f"{np.sqrt((r_or[va]**2).mean()):10.4f} {r_or[va].std():11.4f} "
       f"{100*(1-abs(r_or[va].mean())/max(abs(b0),1e-30)):12.1f}% "
       f"{100*(1-r_or[va].std()/max(s0,1e-30)):14.1f}%")
-print(f"\n  Row 4 is NOT a model: it uses the DFT Fermi levels of BOTH states, "
-      f"so it bounds what a perfect charge-aware branch could reach and cannot "
-      f"be deployed. Row 2 is the honest parametric form of the same idea,\n"
+print(f"\n  Row 4 is a CONTROL using extra reference information, the DFT "
+      f"Fermi levels of both states. It is not an oracle and not an upper "
+      f"bound -- the trapezoid only approximates the integral and nothing\n  "
+      f"guarantees it beats a fitted model; it is here to show whether that "
+      f"extra information helps at all. Row 2 is the honest parametric form "
+      f"of the same idea,\n"
       f"  since mu linear in N makes the trapezoid exactly a quadratic. Row 3 "
       f"asks whether the correction needs to know the structure or only the "
       f"electron count.")
@@ -257,7 +266,7 @@ print(f"\n  Row 4 is NOT a model: it uses the DFT Fermi levels of BOTH states, "
 #   and a SHUFFLE control -- the same fit with the features permuted across
 #   pairs. If shuffled features buy a similar gain, the gain is fitting noise
 #   and nothing about structure.
-# The oracle also gets its best linear rescaling MEASURED here rather than
+# The Fermi CONTROL also gets its best linear rescaling MEASURED here rather than
 # estimated from the 200-pair correlation.
 # ======================================================================
 rng = np.random.default_rng(0)
@@ -271,7 +280,9 @@ def ridge_fit(X, yy, idx, alpha):
     return np.linalg.solve(G, A.T @ yy[idx])
 
 
-def kfold_alpha(X, yy, idx, alphas, k=5):
+def kfold_alpha(X, yy, idx, alphas, k=5):   # retained, unused: the
+    """penalty is now chosen on VAL per the user's protocol, not by CV inside
+    TRAIN. Kept so the alternative protocol is one call away if wanted."""
     perm = rng.permutation(len(idx))
     folds = np.array_split(perm, k)
     best, ba = None, None
@@ -288,16 +299,33 @@ def kfold_alpha(X, yy, idx, alphas, k=5):
     return ba
 
 
-ALPHAS = [1e-6, 1e-4, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4]
+# THE USER'S PROTOCOL: fit on TRAIN, choose the ridge penalty on VAL, and
+# hold TEST back until a form is chosen. Selecting on val means the val score
+# is no longer an unbiased estimate of that form -- which is exactly why test
+# is sealed -- and the script says so rather than quietly reporting val as if
+# it were clean. KIT_FINAL_FORM breaks the seal, once, for a named form.
+ALPHAS = [1e-6, 1e-4, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4, 1e5]
 X3 = LAD[2][1]
-a3 = kfold_alpha(X3, y, itr, ALPHAS)
+_sel = []
+for al in ALPHAS:
+    w = ridge_fit(X3, y, itr, al)
+    r = y - X3 @ w
+    _sel.append((float(np.sqrt((r[iva] ** 2).mean())), al))
+_sel.sort()
+a3 = _sel[0][1]
+print(f"\n  ridge penalty selected ON VAL for the feature form: alpha "
+      f"{a3:g}; val rmse across the grid " +
+      ", ".join(f"{al:g}:{v:.4f}" for v, al in sorted(_sel, key=lambda t: t[1])))
+print(f"  feature dimension {X3.shape[1]} against {int(tr.sum())} training "
+      f"pairs, so regularisation is required rather than optional.")
 w3 = ridge_fit(X3, y, itr, a3)
 r3 = y - X3 @ w3
 X1 = LAD[0][1]
 w1 = ridge_fit(X1, y, itr, 1e-8)
 r1 = y - X1 @ w1
-print(f"\n[MODEL SELECTION] row 3 with ridge, penalty chosen by 5-fold CV "
-      f"inside TRAIN: alpha {a3:g}")
+print(f"\n[MODEL SELECTION] row 3 with ridge, penalty chosen ON VAL "
+      f"(alpha {a3:g}), so its val score is SELECTION-CONTAMINATED and is a "
+      f"model-choice number, not a clean estimate. TEST stays sealed.")
 print(f"   {'variant':>34} {'val rmse':>10} {'val spread':>11}")
 print(f"   {'1  a*dN (reference)':>34} {np.sqrt((r1[iva]**2).mean()):10.4f} "
       f"{r1[iva].std():11.4f}")
@@ -343,18 +371,62 @@ print(f"   bootstrap of the DIFFERENCE (row1 - row3): median {d_md:+.4f}, "
       f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}] -- "
       f"{'excludes zero, so the gain is real' if d_lo > 0 else 'INCLUDES ZERO, so the gain is not established'}")
 
-# the oracle's best linear rescaling, MEASURED rather than estimated
+# the Fermi control's best linear rescaling, MEASURED rather than estimated
 Xo = (mu_bar * dN)[:, None]
 wo = ridge_fit(Xo, y, itr, 1e-8)
 ro = y - Xo @ wo
-print(f"\n   oracle rescaled, scale {float(wo[0]):.4f} fitted on train: val "
+print(f"\n   Fermi control rescaled, scale {float(wo[0]):.4f} fitted on "
+      f"train: val "
       f"rmse {np.sqrt((ro[iva]**2).mean()):.4f}, spread {ro[iva].std():.4f} "
-      f"-- against the unscaled oracle's {np.sqrt((r_or[iva]**2).mean()):.4f} "
+      f"-- against the unscaled control's {np.sqrt((r_or[iva]**2).mean()):.4f} "
       f"and {r_or[iva].std():.4f}")
-print(f"   so rescaling the true chemical-potential integral "
+print(f"   so rescaling the Fermi-based control "
       f"{'does not rescue it' if ro[iva].std() > r1[iva].std() else 'rescues it'}: "
       f"one fitted constant per electron is still "
       f"{ro[iva].std()/max(r1[iva].std(),1e-30):.2f}x better in spread.")
+
+print(f"\n[THE THREE METRICS THE USER ASKED FOR, val pairs, eV]")
+print(f"  {'form':>26} {'rmse':>9} {'bias':>9} {'mean-removed':>13} "
+      f"{'all three better?':>18}")
+_base = (float(np.sqrt((y[iva] ** 2).mean())), float(y[iva].mean()),
+         float(y[iva].std()))
+print(f"  {'(no correction)':>26} {_base[0]:9.4f} {_base[1]:+9.4f} "
+      f"{_base[2]:13.4f} {'-':>18}")
+_prev = None
+for nm, rr in (("a*dN", r1), ("a*dN + b*dN^2", y - LAD[1][1] @ np.linalg.lstsq(
+        LAD[1][1][tr], y[tr], rcond=None)[0]), ("(a + w.h)*dN ridge", r3)):
+    m = (float(np.sqrt((rr[iva] ** 2).mean())), float(rr[iva].mean()),
+         float(rr[iva].std()))
+    ok = (m[0] < _base[0] and abs(m[1]) < abs(_base[1]) and m[2] < _base[2])
+    step = ("" if _prev is None else
+            ("  (better than the previous row on all three)"
+             if (m[0] < _prev[0] and abs(m[1]) < abs(_prev[1])
+                 and m[2] < _prev[2]) else
+             "  (NOT better than the previous row on all three)"))
+    print(f"  {nm:>26} {m[0]:9.4f} {m[1]:+9.4f} {m[2]:13.4f} "
+          f"{('yes' if ok else 'no'):>18}{step}")
+    _prev = m
+print(f"  The ladder is read stepwise: a*dN improving means a per-electron "
+      f"energy baseline is the first thing missing; b*dN^2 improving further "
+      f"means charging curvature is also needed; h improving further means\n"
+      f"  the correction depends on the configuration. What this says is which "
+      f"EXPRESSION is effective enough -- the fitted coefficients are not "
+      f"thereby identified as independent physical terms.")
+
+_final = os.environ.get("KIT_FINAL_FORM")
+if _final:
+    ite = np.where(spl == "test")[0]
+    pick = {"1": (LAD[0][1], 1e-8), "2": (LAD[1][1], 1e-8), "3": (X3, a3)}[_final]
+    w = ridge_fit(pick[0], y, itr, pick[1])
+    rf = y - pick[0] @ w
+    print(f"\n[SEALED TEST OPENED for form {_final}] {len(ite)} test pairs: "
+          f"rmse {np.sqrt((rf[ite]**2).mean()):.4f}, bias {rf[ite].mean():+.4f}"
+          f", mean-removed {rf[ite].std():.4f} eV. This is the clean estimate; "
+          f"it is valid once and only for this form.")
+else:
+    print(f"\n  TEST IS SEALED: {int((spl=='test').sum())} pairs held back and "
+          f"not scored. Set KIT_FINAL_FORM=1|2|3 to open it, once, after the "
+          f"form is chosen.")
 
 print(f"\n[READING] a correction that removes the BIAS but not the SPREAD is a "
       f"constant per electron and does not make the energy easier to learn "
