@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=3
 #SBATCH --cpus-per-task=16
 #SBATCH --time=03:00:00
-#SBATCH --partition=gpu-a100-dev,gpu-a100-small,gpu-a100
+#SBATCH --partition=gpu-a100
 #SBATCH --account=DMR24028
 set -uo pipefail
 BASE=/scratch/08384/tg876840/tmp/c-MACEsol
