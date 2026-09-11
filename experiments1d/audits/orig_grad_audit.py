@@ -470,6 +470,49 @@ for nm, _ in ARMS:
 print(f"   shares are SQUARED norm fractions, which are the additive ones")
 
 # --------------------------------------------------- clipping + one step -----
+# ---- does the PB stage actually reach the head's gradient? -----------------
+# An unexplained coincidence must not be left standing: the run that left
+# _pb1d_epoch at 0 produced head gradients identical to 5 significant figures
+# and the same energy-only loss 0.000170, even though an isolated forward
+# differs by 3.13 eV between the two stages. Either the stage does not reach
+# the head's gradient, or something (the on-disk phi cache at
+# solvent_pb_phi_cache_dir, which persists across processes, or the per-sample
+# result cache that `continue`s before the warm-up gate at extensions.py:1701)
+# makes these frames take the same path regardless. Measured here instead of
+# argued.
+print("\n" + "=" * 78)
+print("DOES THE PB STAGE REACH THE HEAD'S GRADIENT? (the coincidence, measured)")
+_keep_ep = int(model._pb1d_epoch)
+rows = []
+for tag, epv in (("warm-up path", 0), ("full-PB path", max(WARM + 5, EP))):
+    model._pb1d_epoch = epv
+    gh_e, gm_e, ls_e = accumulate({"energy_weight"})
+    e1 = fwd(FRAMES[0], True)["e"]
+    rows.append((tag, epv, ls_e, float(gh_e.norm()), -cosv(gh_e, d_pair), e1,
+                 gh_e.clone()))
+    print(f"   {tag:>14} (_pb1d_epoch {epv:>2}): energy loss {ls_e:.8f}, "
+          f"||g_head|| {float(gh_e.norm()):.4e}, cos(-g,d_pair) "
+          f"{-cosv(gh_e, d_pair):+.4f}, E(sid {FRAMES[0]}) {e1:.6f} eV")
+model._pb1d_epoch = _keep_ep
+dg = float((rows[0][6] - rows[1][6]).abs().max()) / max(
+    float(rows[1][6].abs().max()), 1e-300)
+print(f"   relative difference of the two head gradients: {dg:.3e}")
+print(f"   single-forward energies differ by "
+      f"{abs(rows[0][5] - rows[1][5]):.6f} eV")
+if dg < 1e-8 and abs(rows[0][5] - rows[1][5]) > 1e-6:
+    print(f"   READ: the stage changes a single forward but NOT the head's "
+          f"gradient in this loop, so these frames are taking the same path "
+          f"inside the gradient pass -- most likely the persistent phi cache "
+          f"under {args.solvent_pb_phi_cache_dir} short-circuits the warm-up "
+          f"gate for samples it already holds. The earlier epoch-39 gradient "
+          f"numbers are therefore NOT invalidated by defect 2; only the stage "
+          f"LABEL was wrong. Withdrawing that withdrawal.")
+elif dg >= 1e-8:
+    print(f"   READ: the stage DOES change the head's gradient, so the earlier "
+          f"numbers stay withdrawn and only this run's are usable.")
+else:
+    print(f"   READ: the stage changes neither, so it is immaterial here.")
+
 print("\n" + "=" * 78)
 print("PRIORITY 2 -- clipping, and one step in which ONLY the head moves")
 gh, gm, _ = accumulate(set(ALL_W))
