@@ -56,6 +56,60 @@ model's own reported energy before anything is interpreted. It needs the
 `.model` architecture pickle, which mace writes only at the end of training, and
 refuses with the current checkpoint list until then.
 
+### the run did not finish, and the cause was my own time budget
+
+3430114 reached epoch 37 of 40 and was killed at 05:01:17 by its own
+`timeout 6900` (sacct: step 3430114.0 CANCELLED, ExitCode 0:9, elapsed
+01:55:02), five minutes inside the 2 h allocation. mace writes models/*.model
+only on normal completion, so the endpoint model the probe needs does not
+exist.
+
+THE DEFECT IS THE ESTIMATE, not the pace. Epoch cost is bimodal:
+`solvent_pb1d_warmup_encounters=30` puts epochs 0-29 on the cheap warmup path
+and epochs 30+ on the full self-consistent 1-D PB solve. Measured in both runs
+at the same boundary, with the loss dropping 4.20 -> 0.95 there as well:
+
+| | cheap epoch | expensive epoch |
+|---|---|---|
+| gate_le | 2:04 (19->20) | 5:14 (36->37) |
+| gate_bl | 2:00 (28->29) | 4:33 (29->30) |
+
+The budget came from gate_bl's AVERAGE pace, 34 epochs in 1h27m = 2.56
+min/epoch. That average does not transfer: gate_bl paid for 4 expensive epochs
+out of 34, gate_le needed 10 out of 40. Segmented arithmetic gives 8 min
+startup and initial eval + 30*2.1 + 10*5.2 = 1h54m against a 1h55m cap, i.e.
+the run was always going to finish within a minute of the wall. Any future wall
+estimate here must be segmented, and must check that the cheap/expensive epoch
+mix is the same before reusing a measured pace.
+
+3430182 resumes from `checkpoints/s3d_gate_le_run-123_epoch-37.pt`
+(`restart_latest: True`; mace takes the epoch from the filename, the checkpoint
+carries model + optimizer + lr_scheduler) and runs epochs 37-39 only, budgeted
+from the measured expensive-epoch pace rather than an average: 3*5:15 = 16 min
+plus ~8 min overhead, `timeout 3300` against a 1 h allocation. It writes to
+run_finish.log with `>>` because the first run's run.log is the only copy of
+the epoch-0..37 history.
+
+| epoch | gate_le E / F / pot | gate_bl E / F / pot |
+|---|---|---|
+| 33 | 11.37 / 32.73 / 0.1450 | 11.75 / 32.75 / 0.1227 |
+| 34 | 11.26 / 32.37 / 0.1520 | -- (34-epoch run ended at 33) |
+| 35 | 10.97 / 31.74 / 0.1624 | -- |
+| 36 | 11.21 / 31.43 / 0.1453 | -- |
+| 37 | 10.75 / 30.97 / 0.1548 | -- |
+
+At the one comparable epoch, 33, gate_le is 3.2% better on energy, 0.06% on
+force, 18.2% WORSE on potential, with total loss within 0.8% (0.82303 vs
+0.81640). The energy advantage is not an effect: the signed le-minus-bl gap on
+energy runs +3.1% (ep 20), +1.8% (24), -0.3% (28), -5.4% (30), -1.6% (32),
+-3.2% (33), so it changes sign repeatedly and a 3% difference is not resolvable
+against trajectory noise between two from-scratch runs. There are no replicate
+seeds, so no run-to-run spread can be quoted -- the claim here is only that
++-3% sits inside the observed swing, not that the channel helps or hurts. The
+aggregate metrics were never the criterion anyway: a channel holding 1.52% of
+the parameters could fix the paired charging energy completely and move these
+three numbers by almost nothing.
+
 ## 工作树快照(2026-07-26 登记)
 
 | 工作树 | commit | 用途 |
