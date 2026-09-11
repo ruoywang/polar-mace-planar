@@ -303,7 +303,11 @@ def kfold_alpha(X, yy, idx, alphas, k=5):   # retained, unused: the
 # hold TEST back until a form is chosen. Selecting on val means the val score
 # is no longer an unbiased estimate of that form -- which is exactly why test
 # is sealed -- and the script says so rather than quietly reporting val as if
-# it were clean. KIT_FINAL_FORM breaks the seal, once, for a named form.
+# it were clean. Choosing alpha on val is standard practice and is not itself
+# the problem; treating an ordinary bootstrap CI on those same points as a
+# significance test would be. KIT_FINAL_COMPARE opens the test set once and
+# scores BOTH candidate forms together, since a single pass is about not
+# revisiting the decision afterwards, not about the number of models in it.
 ALPHAS = [1e-6, 1e-4, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4, 1e5]
 X3 = LAD[2][1]
 _sel = []
@@ -376,19 +380,19 @@ d_lo, d_md, d_hi = np.percentile(diffs, [2.5, 50, 97.5])
 print(f"   bootstrap of the DIFFERENCE (row1 - row3): median {d_md:+.4f}, "
       f"95% CI [{d_lo:+.4f}, {d_hi:+.4f}]"
       f"{' (excludes zero)' if d_lo > 0 else ' (INCLUDES ZERO)'}")
-print(f"   BUT THIS INTERVAL CANNOT SETTLE ROW 3, and reading it as if it "
-      f"could would contradict the caveat four lines above. The penalty was "
-      f"chosen ON VAL and this CI is computed on the SAME val points, so it\n"
-      f"   inherits the selection contamination in full: scanning "
-      f"{len(ALPHAS)} penalties against {len(iva)} points and then asking "
-      f"those points whether the winner is significant is circular. Only the "
-      f"SEALED TEST can settle it.")
+print(f"   THIS INTERVAL IS NOT A SIGNIFICANCE TEST and is not reported as "
+      f"one. Choosing alpha on val is standard practice and is NOT the "
+      f"problem; the problem would be taking an ordinary bootstrap CI on the\n"
+      f"   SAME val points as evidence that the improvement is significant, "
+      f"when {len(ALPHAS)} penalties were scanned against those "
+      f"{len(iva)} points. The interval is printed as a spread indicator "
+      f"only.")
 if d_lo > 0:
-    print(f"   And the margin is as thin as 'excludes zero' gets: the lower "
-          f"bound is {100*d_lo/max(d_md,1e-30):.1f}% of the median.")
-print(f"   Note also where row 3's advantage comes from: it is already present "
-      f"at the smallest penalty on the grid, so the ridge is not what makes "
-      f"row 3 look good -- at most it moves a marginal interval across zero.")
+    print(f"   Its lower bound is {100*d_lo/max(d_md,1e-30):.1f}% of the "
+          f"median, which is thin even before the selection is considered.")
+print(f"   Where row 3's advantage comes from: most of it is already present "
+      f"at the smallest penalty on the grid, so the penalty is not what makes "
+      f"row 3 look good.")
 _edge = a3 <= min(ALPHAS) * 1.0001
 print(f"   RIDGE BIT? alpha {a3:g} "
       f"{'sits at the smallest value on the grid, so essentially NO penalty was applied and the ridge did NOT turn the under-determined fit into a regularised model -- saying with ridge would overstate it' if _edge else 'is interior to the grid, so the penalty is doing real work'}")
@@ -472,25 +476,63 @@ for nm, rr in (("a*dN", r1), ("a*dN + b*dN^2", y - LAD[1][1] @ np.linalg.lstsq(
     _prev = m
 print(f"  The ladder is read stepwise: a*dN improving means a per-electron "
       f"energy baseline is the first thing missing; b*dN^2 improving further "
-      f"means charging curvature is also needed; h improving further means\n"
-      f"  the correction depends on the configuration. What this says is which "
-      f"EXPRESSION is effective enough -- the fitted coefficients are not "
-      f"thereby identified as independent physical terms.")
+      f"would mean the RESIDUAL also needs a curvature term; h improving\n"
+      f"  further means the correction depends on the configuration. What this "
+      f"says is which EXPRESSION is effective enough -- the fitted "
+      f"coefficients are not thereby identified as independent physical "
+      f"terms.")
+print(f"  AND NOTE WHAT THE QUADRATIC RESULT IS NOT. What is fitted here is "
+      f"the residual of the EXISTING model, so b*dN^2 buying nothing says "
+      f"only that the residual needs no curvature term. It does NOT say the\n"
+      f"  real system has no charging curvature -- the existing terms may "
+      f"already carry it.")
 
-_final = os.environ.get("KIT_FINAL_FORM")
-if _final:
+# THE FINAL COMPARISON, on the user's instruction: opening the test set once
+# does not mean evaluating only one model. Both forms are frozen -- form 1's
+# coefficient, and form 3's alpha, feature standardisation and weights, all
+# fitted on TRAIN with alpha selected on val beforehand -- and scored together
+# in a single pass on the same 20 test pairs. What must not happen afterwards
+# is tuning, switching form, or re-testing; the point of the single pass is
+# that decision, not the count of models in it.
+if os.environ.get("KIT_FINAL_COMPARE"):
     ite = np.where(spl == "test")[0]
-    pick = {"1": (LAD[0][1], 1e-8), "2": (LAD[1][1], 1e-8), "3": (X3, a3)}[_final]
-    w = ridge_fit(pick[0], y, itr, pick[1])
-    rf = y - pick[0] @ w
-    print(f"\n[SEALED TEST OPENED for form {_final}] {len(ite)} test pairs: "
-          f"rmse {np.sqrt((rf[ite]**2).mean()):.4f}, bias {rf[ite].mean():+.4f}"
-          f", mean-removed {rf[ite].std():.4f} eV. This is the clean estimate; "
-          f"it is valid once and only for this form.")
+    frozen = [("form 1  a*dN", LAD[0][1], 1e-8),
+              ("form 3  (a + w.h)*dN", X3, a3)]
+    print(f"\n[FINAL COMPARISON -- test set opened once, both forms, frozen] "
+          f"{len(ite)} test pairs")
+    print(f"   form 1 coefficient and form 3's alpha={a3:g}, standardisation "
+          f"(train statistics) and weights are all fixed before this line; "
+          f"nothing below was tuned on test.")
+    print(f"   {'form':>24} {'rmse':>9} {'bias':>9} {'mean-removed':>13}")
+    keep = {}
+    for nm, X, al in frozen:
+        w = ridge_fit(X, y, itr, al)
+        rf = (y - X @ w)[ite]
+        keep[nm] = rf
+        print(f"   {nm:>24} {np.sqrt((rf**2).mean()):9.4f} {rf.mean():+9.4f} "
+              f"{rf.std():13.4f}")
+    k1, k3 = keep["form 1  a*dN"], keep["form 3  (a + w.h)*dN"]
+    print(f"   {'form 3 - form 1':>24} "
+          f"{np.sqrt((k3**2).mean())-np.sqrt((k1**2).mean()):+9.4f} "
+          f"{abs(k3.mean())-abs(k1.mean()):+9.4f} "
+          f"{k3.std()-k1.std():+13.4f}   (negative = form 3 better)")
+    print(f"\n   PER-PAIR errors, eV (form 3 - form 1 in the last column)")
+    print(f"   {'pair':>6} {'dN':>6} {'form 1':>10} {'form 3':>10} "
+          f"{'difference':>11}")
+    for j, i in enumerate(ite):
+        print(f"   {int(z['k'][i]):>6} {dN[i]:+6.2f} {k1[j]:+10.4f} "
+              f"{k3[j]:+10.4f} {k3[j]-k1[j]:+11.4f}")
+    better = sum(1 for j in range(len(ite)) if abs(k3[j]) < abs(k1[j]))
+    print(f"   form 3 closer on {better} of {len(ite)} pairs")
+    print(f"\n   READING, fixed in advance: if form 3's advantage HOLDS on "
+          f"these pairs, the structure features carry additional information. "
+          f"If it is unclear, keep the simple form 1 and stop tuning against\n"
+          f"   this test set. Either way the decision is made now and not "
+          f"revisited, which is what spending the single pass buys.")
 else:
-    print(f"\n  TEST IS SEALED: {int((spl=='test').sum())} pairs held back and "
-          f"not scored. Set KIT_FINAL_FORM=1|2|3 to open it, once, after the "
-          f"form is chosen.")
+    print(f"\n  TEST HELD BACK: {int((spl=='test').sum())} pairs, not scored. "
+          f"Set KIT_FINAL_COMPARE=1 to run the final comparison of form 1 and "
+          f"form 3 together, once.")
 
 print(f"\n[READING] a correction that removes the BIAS but not the SPREAD is a "
       f"constant per electron and does not make the energy easier to learn "

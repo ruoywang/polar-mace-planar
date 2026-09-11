@@ -2625,11 +2625,15 @@ against a mean mu_bar of -5.4425, so 0.154 eV less negative: close enough to
 be the same physics, far enough that "the constant IS the mean chemical
 potential" is not what the data says.
 
-REFUTED: charging curvature. b*dN^2 fails on two of three metrics, and this is
-the SHARP result rather than a weak one, because the quadratic is the EXACT
-functional form if the missing quantity were a trapezoid of a chemical
-potential linear in N. Its failure to appear is a refutation, not an absence
-of evidence.
+NO EXTRA GAIN FROM CURVATURE ON THE RESIDUAL, and the earlier wording
+"REFUTED: charging curvature" over-reached. b*dN^2 fails on two of three
+metrics, so the RESIDUAL of the existing model needs no curvature term. That
+is NOT a statement about the real system: what is fitted here is the residual,
+and the existing terms may already carry the physical curvature. The
+observation is still sharp against one specific hypothesis -- that the missing
+quantity is a trapezoid of a chemical potential linear in N, for which the
+quadratic is the exact form -- but it says nothing about whether the system has
+charging curvature.
 
 THE CONTROL LOST, which is what proves the earlier "oracle"/"upper bound"
 label was wrong: mu_bar*dN uses the true DFT Fermi levels of BOTH states and
@@ -2655,9 +2659,15 @@ them -- with corr(Q, dE_model) = +0.2735 and a mean of -0.5671 eV. The
 control's residual lands near spread(dE_model) only because those two offset.
 Right answer, wrong route.
 
-UNSETTLED: whether the correction depends on configuration. Row 3 cannot be
-decided on val BY CONSTRUCTION under the user's protocol, and the seal is
-therefore the only clean evidence available about it.
+UNSETTLED: whether the correction depends on configuration -- and the earlier
+wording here over-stated the problem. Choosing alpha on VAL is STANDARD
+PRACTICE and is not itself contamination; what was wrong was taking an
+ordinary bootstrap CI on those same val points as evidence that the
+improvement is SIGNIFICANT, with ten penalties scanned against twenty points.
+That significance conclusion is withdrawn; the selection is not. Row 3 shows a
+real sign of further improvement, val rmse 0.157 -> 0.100 with bias and
+mean-removed error both improving as well, and it is worth an independent
+check rather than being called undecidable.
   with alpha by CV inside train: alpha 1e-06 at the grid edge, val rmse
   0.1083, bootstrap of (row1 - row3) median +0.0488, CI [-0.0127, +0.1128] --
   includes zero;
