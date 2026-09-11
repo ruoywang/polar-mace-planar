@@ -1688,3 +1688,80 @@ caches to `charge_branch_cache.npz`.
 **What the table does establish**: the missing correction is, to 99.2% of its
 bias and 80.1% of its frame-to-frame spread, **a constant per electron** —
 one number, fitted, no chemical potential required.
+
+## Row 3 settled (mace 194d9e9): NOT established
+
+`branch_194d9e9.log`. mace 194d9e9, pb 9b3b9ba, executed sha256
+9282d3df9f780bfab7c2aa0794e7dbb444ae7377a11560326ded6d30b66908e7, IDENTICAL.
+Cache reuse, no forwards.
+
+| control | result |
+|---|---|
+| ridge, alpha by 5-fold CV in TRAIN | alpha **1e-06**, val rmse 0.1083, spread 0.1053 — identical to the unregularised fit |
+| features SHUFFLED x20 | val rmse 0.7408 (min 0.4393, max 1.3881); real beats shuffled by 85.4% |
+| paired bootstrap of (row1 - row3) | median **+0.0488**, 95% CI **[-0.0127, +0.1128]** — **includes zero** |
+
+**The structure dependence is not established.** The bootstrap CI on the
+difference includes zero, which is the comparison that matters. My earlier
+estimate of "roughly two standard errors" was right.
+
+The two controls answer different nulls and must not be conflated. The shuffle
+null is "1153 noise features", and its failure mode is overfitting damage — 
+shuffled features give 0.7408, far WORSE than row 1's 0.1569, not parity with
+it. So "real beats shuffled by 85.4%" establishes that the features are not
+noise; it says nothing about whether they add anything over knowing the electron
+count alone. Only the bootstrap addresses that, and it says no.
+
+Also worth stating: CV chose alpha 1e-06, i.e. essentially no penalty, and the
+ridge numbers are identical to the unregularised ones. So the ridge did not turn
+the under-determined fit into a real model — CV inside TRAIN found no reason to
+regularise.
+
+**The rescaled oracle, now measured rather than estimated**: scale 0.9723 fitted
+on train gives val rmse 0.2779 and spread 0.2778, against the unscaled 0.3217
+and 0.2755. Rescaling improves the rmse and leaves the spread alone. One fitted
+constant per electron is **1.84x** better in spread. My estimate from the
+200-pair correlation was 2.0x, so it was 9% optimistic and derived from a
+different sample; the conclusion is unchanged.
+
+### The structural reading: supported, but Q is not negligible
+
+The proposed reading is that the model's existing terms already follow part of
+the chemical potential's variation, so crediting the full integral
+over-corrects. Tested from the cache over all 200 pairs:
+
+| quantity | value |
+|---|---|
+| spread(dE_model) | 0.3020 |
+| spread(Q = dE_DFT - mu_bar*dN), the quadrature error | **0.1837**, mean **-0.5671** |
+| spread(row 4 residual = Q - dE_model) | 0.3076 |
+| corr(Q, dE_model) | +0.2735 |
+| **corr((mu_bar - a)*dN, dE_model)** | **+0.4253** |
+| spread((mu_bar - a)*dN) | 0.2096 |
+| spread(row 1 residual) | 0.2159 |
+| the same if the two were uncorrelated | sqrt(0.2096^2 + 0.3020^2) = **0.3676** |
+
+**The mechanism is confirmed and it is large.** The correlation is +0.4253,
+positive as the reading requires, and the cancellation cuts the row-1 residual
+spread from the 0.3676 it would have if the two were independent down to the
+0.2159 measured — a 41% reduction. The model's existing terms genuinely track
+part of the chemical potential's variation, and crediting the full integral
+genuinely over-corrects.
+
+**But the step "dE_DFT is about mu_bar*dN, so row 4's residual is essentially
+-dE_model" is not sound as stated.** Q is not small: its mean is -0.5671 eV and
+its spread 0.1837, against dE_model's spread of 0.3020. The conclusion survives
+numerically — spread(row 4 residual) is 0.3076 against spread(dE_model) 0.3020 —
+but not for the reason given: Q is partially correlated with dE_model
+(corr +0.2735) and the two effects roughly offset. Right answer, wrong route,
+and the -0.567 eV mean of Q matters for the bias even where the spread works out.
+
+### The constant has a value
+
+Fitted over all 200 pairs, **a = -5.2885 eV per electron**, against a mean
+chemical potential of -5.4425 eV. The best constant is 0.154 eV less negative
+than the mean mu_bar — close, and not equal.
+
+(My spreads above are over all 200 pairs; the script's table is scored on the
+20 val pairs, which are tighter — row 1 spread 0.1509 there against 0.2159 over
+the 200. Not a discrepancy, different samples.)
