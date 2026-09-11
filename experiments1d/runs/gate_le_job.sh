@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=3
 #SBATCH --cpus-per-task=16
-#SBATCH --time=03:00:00
-#SBATCH --partition=gpu-a100
+#SBATCH --time=02:00:00
+#SBATCH --partition=gpu-a100-dev
 #SBATCH --account=DMR24028
 set -uo pipefail
 BASE=/scratch/08384/tg876840/tmp/c-MACEsol
@@ -17,7 +17,7 @@ echo "CONFIG DIFF vs the gate_bl reference run:"
 diff $BASE/3-residual_3D/gate_bl/config_pb1d.yaml config_pb1d.yaml | sed 's/^/    /'
 echo "REFERENCE (gate_bl epoch 33, from scratch, 34 epochs, same seed 123):"
 echo "    RMSE_E_per_atom 11.75 meV, RMSE_F 32.75 meV/A, RMSE_potential 0.1227 eV"
-timeout 10200 srun -n 3 env PYTHONPATH="$CODE" $BASE/.venv/bin/python -u -m mace.cli.run_train \
+timeout 6900 srun -n 3 env PYTHONPATH="$CODE" $BASE/.venv/bin/python -u -m mace.cli.run_train \
   --config config_pb1d.yaml --name s3d_gate_le --seed 123 \
   --distributed --launcher slurm \
   --work_dir . --log_dir logs --model_dir models \
