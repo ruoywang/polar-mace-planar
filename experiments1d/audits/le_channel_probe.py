@@ -98,6 +98,10 @@ def find_ckpt(run):
 os.chdir(RUN)
 
 device = torch_tools.init_device(os.environ.get("KIT_DEVICE", "cuda"))
+# the run trained in float64 (default_dtype: float64) and the e3nn submodules
+# are compiled for it, so leaving the process default at float32 fails in the
+# first o3.Linear with "both inputs should have same dtype" (job 3430201)
+torch_tools.set_default_dtype("float64")
 mpath = find_model(RUN)
 model = torch.load(f=mpath, map_location=device).to(device)
 cpath = os.environ.get("KIT_CKPT") or find_ckpt(RUN)
@@ -126,10 +130,21 @@ if mod is None:
     raise SystemExit("this model has local_electron_energy = None, i.e. the run "
                      "was built with add_local_electron_energy False. Nothing "
                      "to probe.")
+# Report TRAINABLE parameters and total state_dict tensors separately. Counting
+# a checkpoint's state_dict wholesale mixes in buffers and overstates the model
+# by 5.3x here: 958718 trainable against 5110243 tensors, and for the channel
+# 76545 trainable against 77825 tensors, the 1280 difference being its four
+# output_mask buffers. The share that matters for "how much model is this" is
+# the trainable one.
 npar = sum(p.numel() for p in mod.parameters())
 ntot = sum(p.numel() for p in model.parameters())
-print(f"   parameters : {npar} in the channel, {ntot} in the model "
+nsd = sum(v.numel() for v in model.state_dict().values() if hasattr(v, "numel"))
+nsd_c = sum(v.numel() for k, v in model.state_dict().items()
+            if "local_electron" in k and hasattr(v, "numel"))
+print(f"   trainable  : {npar} in the channel, {ntot} in the model "
       f"({100.0 * npar / ntot:.2f}%)")
+print(f"   state_dict : {nsd_c} in the channel, {nsd} in the model "
+      f"({100.0 * nsd_c / nsd:.2f}%) -- buffers included, NOT the right share")
 
 # ------------------------------------------------------------ capture --------
 _backend = {}
