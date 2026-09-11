@@ -4,6 +4,58 @@
 `git rev-parse HEAD` 写进 run 日志;本文件记录每个实验目录用的是哪个
 commit。新实验一律登记,旧实验按已知信息回填(未知处如实标注)。
 
+## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
+
+Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
+differs from gate_bl in exactly two lines: `max_num_epochs 34 -> 40` and
+`add_local_electron_energy: True`. From scratch, seed 123, so it is directly
+comparable to gate_bl's from-scratch run.
+
+TEST GATE PASSED. `add_local_electron_energy=True` appears in the run's own
+Namespace (not only in the yaml), epoch 0 landed at 03:17 with no Traceback and
+no OOM, and the epoch-10 checkpoint carries 24 `local_electron_energy.*`
+tensors totalling 77825 parameters = 1.52% of the model's 5110243, with the
+mlp's last layer at |w|_rms 3.52e-02, i.e. trained rather than left at init.
+
+| epoch | gate_le E / F / pot | gate_bl E / F / pot |
+|---|---|---|
+| 0  | 38.05 / 668.15 / 2.5433 | 137.54 / 597.56 / 3.9916 |
+| 2  | 35.61 / 472.52 / 3.0838 | 25.51 / 402.01 / 2.1159 |
+| 5  | 47.56 / 124.23 / 1.6983 | 63.25 / 135.95 / 1.6609 |
+| 8  | 26.45 / 64.15 / 1.5968 | 20.52 / 65.31 / 1.4909 |
+| 10 | 24.80 / 55.62 / 1.4444 | 20.36 / 57.12 / 1.4340 |
+
+(meV/atom, meV/A, eV.) These early epochs are NOT a verdict: the two runs start
+from different random states and their initial losses differ by a factor of
+8200 (158610 vs 1.30e9), so the epoch-0..10 gap is initialisation noise. The
+comparable points are epoch 33 (gate_bl: 11.75 meV/atom, 32.75 meV/A, 0.1227
+eV) and the endpoint.
+
+WHAT THE EARLIER CHARGE-BLIND FINDING DOES AND DOES NOT COVER. The reconcile
+audit compared the READOUT INPUT FEATURES between sid1 and sid601 (identical to
+1.9e-16 relative, d(inter_e) exactly +0.000000 eV). It did not compare the
+atomic charges, so it is silent about this channel. From field_blocks.py:723
+the channel is
+
+    q_in = charges_induced + charges_0
+    le   = mlp( [ <node_feats, W_q q_in> , <node_feats, W_v field_feats> ] )
+
+so charge-blind node_feats are contracted against a charge-carrying vector, and
+whether le is charge-dependent reduces to whether q_in differs between the two
+states. total_charge enters the charge construction only through the solvent
+(extensions.py:178) and reaches the atomic charges only via the field feedback
+at 2562; charges_0 is cloned at 2444, i.e. BEFORE that feedback, so the two
+inputs have different exposure and must be reported separately.
+
+`experiments1d/audits/le_channel_probe.py` measures this instead of arguing it:
+a forward_pre_hook captures charges_0, charges_induced, field_feats and
+node_feats exactly as the channel sees them, a forward_hook captures its
+output, and every frame is run twice -- once normally, once with the output
+forced to zero -- so the captured sum is checked against the change in the
+model's own reported energy before anything is interpreted. It needs the
+`.model` architecture pickle, which mace writes only at the end of training, and
+refuses with the current checkpoint list until then.
+
 ## 工作树快照(2026-07-26 登记)
 
 | 工作树 | commit | 用途 |
