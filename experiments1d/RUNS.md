@@ -85,6 +85,83 @@ native channel on and training it for 40 epochs therefore does not fix the
 charging energy, and the a = -5.2745 eV/electron constant remains the only
 measured thing that does.
 
+### the head CAN fit the pair; the fit it finds is not compatible with energies or forces
+
+Head-only fit, everything else frozen, target = dE_DFT - dE_rest (mean -4.9117
+eV on val against the current head's -0.0401). 160 train / 20 val NiN44 pairs,
+splits never straddling, gates: cached inputs replay the head exactly
+(0.000e+00), and perturbing the head's weights moves its own output by
+1.198e-11 eV against a control of 6.222e-12 -- the wobble is the stateful PB
+solver, not the head, so caching is exact. Optimiser shown to act: max|grad|
+4.156e-01 at step 0 with 20/20 parameter tensors non-zero, and 20/24 state_dict
+entries moved (the 4 unmoved are output_mask buffers).
+
+| model | fitted on | train rmse / bias / mean-rem | val rmse / bias / mean-rem |
+|---|---|---|---|
+| current head | no fit | 5.0137 / +4.9719 / 0.6458 | 4.9295 / +4.8716 / 0.7532 |
+| a*dN refit | train | 0.2134 / -0.0038 / 0.2134 | 0.1981 / +0.0249 / 0.1965 |
+| a*dN, a=-5.2745 | none | 0.6957 / -0.6615 / 0.2153 | 0.6388 / -0.6156 / 0.1705 |
+| head, fixed step 4000 | train | 0.1127 / -0.0012 / 0.1127 | 0.1359 / -0.0062 / 0.1357 |
+| head, val-selected | train+val | 0.1127 / -0.0012 / 0.1127 | 0.1359 / -0.0062 / 0.1357 |
+
+The last two rows are identical: the best val step WAS the pre-declared
+endpoint, so no val selection occurred here. The val curve was still falling at
+step 4000 (0.1403, 0.1382, 0.1359), so this is a fixed-budget number and not a
+converged one. On val the head beats the refitted constant on the MEAN-REMOVED
+column by 30.9% and on 15 of 20 pairs, so its advantage is not bias-only -- the
+opposite of what the 3-pair smoke showed, where mean-removed was 0.0700 against
+the constant's 0.0660. The 3-pair reading was a sample-size artefact. Also: the
+constant refits to a = -4.6632 eV/electron on this residual, and forcing the
+earlier -5.2745 gives val rmse 0.6388, so that constant is per-model, not a
+property of the system.
+
+So the ~0.04 eV response after 40 joint epochs is NOT this head's ceiling.
+What the table does not separate is whether the extra capability comes from
+geometry information or from a non-linear response to charge.
+
+THEN INSTALLING IT. Gates first, both per-item and both with a failure exit,
+against a declared 1e-3 eV (100x below the 0.1359 eV being interpreted) with an
+A-vs-A control arm measuring the solver floor at |dE| 5.593e-11 eV:
+  gate 1, per frame: E_new - E_old equals le_new - le_old, worst 9.229e-10 eV
+          over 40 frames -- installation changed only that term
+  gate 2, per pair: the live model's own dE against dE_rest(cached) + the
+          fitted head's cached prediction, worst 1.173e-09 eV -- the cached fit
+          transfers exactly
+Installed paired error against DFT: rmse 0.1359, bias -0.0062, mean-removed
+0.1357 eV, i.e. exactly the fit's own number.
+
+| | charged A | charged B | neutral A | neutral B |
+|---|---|---|---|---|
+| absolute energy, mean meV/atom | +17.67 | -78.13 | -5.87 | -78.10 |
+| absolute energy, rms meV/atom | 17.97 | 78.37 | 5.98 | 78.33 |
+| force rmse, eV/A | 0.0292 | 0.7278 | 0.0330 | 0.7070 |
+| worst single force error, eV/A | 0.2264 | 9.9954 | 0.6470 | 10.6306 |
+
+The fit bought a correct dE by adding about -17.4 eV to BOTH frames: the head's
+output goes from -0.78 eV in both states to about -20 (charged) and -15
+(neutral). After installation the two states' errors are nearly EQUAL (-78.13
+against -78.10 meV/atom, a 0.03 meV/atom gap = the -0.0062 eV bias), so the
+paired difference is right and a common -16.17 eV offset is wrong. Forces
+degrade 25x and 21x with worst-case errors of 10 eV/A.
+
+THE COMMON MODE IS A REAL C(R), NOT A CONSTANT, and that is what the forces
+prove rather than the shift itself. A shift in the two-state mean of le is NOT
+by itself evidence of harm: a correct paired correction applied asymmetrically
+already moves that mean by a*dN/2, and dN varies per frame, so a non-zero shift
+with a non-zero spread is expected. Measured: shift -17.3912 eV with spread
+1.0199 eV against the a_fit*dN/2 reference of -2.4434 eV with spread 0.3204 eV,
+so the shift is 7.1x the reference and its spread 3.2x. And a pure constant
+cannot change forces at all, so the 22x force degradation is itself the proof
+that the term the head added depends on geometry.
+
+SCOPE. This refutes the OBJECTIVE, not the head. Nothing in (dE_LE - target)^2
+constrains the common level or the forces, so a solution like this was always
+admissible. Whether a head can satisfy the pair AND the absolute energies AND
+the forces at once is untested: the absolute-energy version of this fit is
+cheap on the same cache (E_new = E_rest_cached + le_new against the label),
+while a force-aware fit is not, because dle/dR needs a full-model backward per
+step rather than cached inputs.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
