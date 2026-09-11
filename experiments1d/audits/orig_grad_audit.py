@@ -134,7 +134,24 @@ print(f"WEIGHTS ARE EMA-AVERAGED: every save in tools/train.py runs inside "
       f"raw trajectory, so the state below is the closest available, not exact.")
 
 # ------------------------------------------------- loss / optimizer ----------
-loss_fn = get_loss_fn(args, dipole_only=False, compute_dipole=False).to(device)
+# run_train.py:1058-1075 -- for model=PolarMACE with this loss it sets
+# dipole_only=False, compute_dipole=True, and derives compute_energy /
+# compute_forces from whether the ORIGINAL weights are non-zero. Taken from
+# source rather than guessed: passing compute_dipole=False tripped the
+# assertion at scripts_utils.py:811 (job 3430262).
+assert args.model == "PolarMACE" and args.loss == "energy_forces_electrostatics"
+dipole_only = False
+args.compute_dipole = True
+args.compute_energy = bool(float(args.energy_weight) != 0.0)
+args.compute_forces = bool(float(args.forces_weight) != 0.0)
+args.compute_virials = False
+args.compute_stress = False
+args.compute_polarizability = False
+print(f"\nderived as run_train does: dipole_only={dipole_only} "
+      f"compute_dipole={args.compute_dipole} "
+      f"compute_energy={args.compute_energy} "
+      f"compute_forces={args.compute_forces}")
+loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole).to(device)
 param_options = get_params_options(args, model)
 optimizer = get_optimizer(args, param_options)
 lr_sched = LRScheduler(optimizer, args)
@@ -197,8 +214,13 @@ PAIRS = [allp[i] for i in idx]
 print(f"\nSAMPLES: {NPAIRS} TRAIN pairs spanning dN "
       + ", ".join(f"{p[0]}:{dn[p]:+.3f}" for p in PAIRS))
 z_table = tools.AtomicNumberTable([int(z) for z in model.atomic_numbers])
-output_args = {"energy": True, "forces": True, "virials": False,
-               "stress": False, "dipoles": False}
+# the forward is IDENTICAL in every arm -- only the loss weights change -- so
+# the term isolation cannot be confounded by a different forward
+output_args = {"energy": bool(args.compute_energy),
+               "forces": bool(args.compute_forces),
+               "virials": False, "stress": False,
+               "dipoles": bool(args.compute_dipole)}
+print(f"output_args {output_args}")
 
 
 def make_batch(sid):
@@ -318,8 +340,8 @@ for nm, keep in ARMS:
     for s in BATCH:
         model.zero_grad(set_to_none=True)
         out = model(BATCH[s].to_dict(), training=True,
-                    compute_force=True, compute_virials=False,
-                    compute_stress=False)
+                    compute_force=output_args["forces"],
+                    compute_virials=False, compute_stress=False)
         L = loss_fn(pred=out, ref=BATCH[s])
         L.backward()
         gh += head_vec(lambda p: (p.grad.detach() if p.grad is not None
@@ -357,8 +379,9 @@ print("PRIORITY 2 -- clipping, and what ONE step of the loaded Adam does")
 set_terms(set(ALL_W))
 model.zero_grad(set_to_none=True)
 s0 = PAIRS[0][0]
-out = model(BATCH[s0].to_dict(), training=True, compute_force=True,
-            compute_virials=False, compute_stress=False)
+out = model(BATCH[s0].to_dict(), training=True,
+            compute_force=output_args["forces"], compute_virials=False,
+            compute_stress=False)
 L = loss_fn(pred=out, ref=BATCH[s0])
 L.backward()
 tot_before = float(torch.sqrt(sum((p.grad.detach() ** 2).sum()
@@ -412,7 +435,8 @@ for nm, keep in ARMS:
     wb = {k: v.detach().clone() for k, v in head.state_dict().items()}
     for s in BATCH:                      # accumulate like a 3-rank DDP mean
         model.zero_grad(set_to_none=True)
-        out = model(BATCH[s].to_dict(), training=True, compute_force=True,
+        out = model(BATCH[s].to_dict(), training=True,
+                    compute_force=output_args["forces"],
                     compute_virials=False, compute_stress=False)
         (loss_fn(pred=out, ref=BATCH[s]) / len(BATCH)).backward()
         _evict()
