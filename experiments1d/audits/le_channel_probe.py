@@ -53,10 +53,18 @@ from ase.io import read
 from mace import data as mace_data
 from mace.data import KeySpecification
 from mace.tools import torch_geometric, torch_tools, utils
+import mace.modules.pb1d_backend as PB   # for _evict; the reconcile
+# audit measured 24 MB/sample retained in _bl_ram and needed per-pair
+# eviction to bring a forward pass from 160 MB of growth down to 11 MB.
+# MACE_PB1D_NO_PRELOAD alone does not release what a forward has cached.
 
 RUN = os.environ.get("KIT_RUN",
                      "/scratch/08384/tg876840/tmp/c-MACEsol/3-residual_3D/gate_le")
-XYZ = os.environ.get("KIT_XYZ", os.path.join(RUN, "data", "val.xyz"))
+# sid 1/601 live in TRAIN, not val (measured: train.xyz has both, val.xyz has
+# neither), so every split is read and the split of each frame is printed. A
+# charge dependence seen on a TRAINING pair is not held-out evidence, and the
+# table says which pairs are which rather than leaving the reader to assume.
+SPLITS = ("train", "val", "test")
 PAIRS = [tuple(int(x) for x in p.split(":"))
          for p in os.environ.get("KIT_PAIRS", "1:601").split(",")]
 A_CONST = float(os.environ.get("KIT_A_CONST", "-5.2745"))   # eV per electron
@@ -114,6 +122,24 @@ print(f"   parameters : {npar} in the channel, {ntot} in the model "
       f"({100.0 * npar / ntot:.2f}%)")
 
 # ------------------------------------------------------------ capture --------
+_backend = {}
+_bk = PB.PB1DBackend.solve_graph
+
+def _wrap_bk(self, *a, **k):
+    _backend["b"] = self
+    return _bk(self, *a, **k)
+
+PB.PB1DBackend.solve_graph = _wrap_bk
+
+def _evict():
+    b = _backend.get("b")
+    if b is None:
+        return
+    for attr in ("_bl_ram", "_grids", "_solvers", "_c_units"):
+        d = getattr(b, attr, None)
+        if isinstance(d, dict):
+            d.clear()
+
 cap = {}
 ABLATE = {"on": False}
 
@@ -140,12 +166,22 @@ kspec = KeySpecification(
                "fermi_level": "Fermi", "solvated": "solvated",
                "potential": "potential_diff", "head": "head"},
     arrays_keys={"forces": "forces"})
-atoms = read(XYZ, ":")
-by_sid = {}
-for a in atoms:
-    s = a.info.get("sample_id")
-    if s is not None:
-        by_sid[int(s)] = a
+by_sid, split_by_sid = {}, {}
+for sp in SPLITS:
+    f = os.path.join(RUN, "data", f"{sp}.xyz")
+    if not os.path.exists(f):
+        continue
+    for a in read(f, ":"):
+        sid = a.info.get("sample_id")
+        if sid is None:
+            continue
+        by_sid[int(sid)] = a
+        split_by_sid[int(sid)] = sp
+print(f"   frames     : {len(by_sid)} with a sample_id across "
+      f"{[sp for sp in SPLITS if os.path.exists(os.path.join(RUN,'data',sp+'.xyz'))]}")
+missing = [s for pr in PAIRS for s in pr if s not in by_sid]
+if missing:
+    raise SystemExit(f"these sids are in none of the splits: {missing}")
 z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 
 def one(sid):
@@ -174,10 +210,16 @@ for sc, sn in PAIRS:
     print(f"\n=================== pair {sc} (charged) / {sn} (neutral) "
           f"===================")
     rc, rn = one(sc), one(sn)
+    _evict()
     dpos = float(np.abs(rc["atoms"].get_positions()
                         - rn["atoms"].get_positions()).max())
     print(f"   same geometry: max |dpos| {dpos:.3e} A;  q = {rc['q']:+.3f} / "
           f"{rn['q']:+.3f};  dN = {rn['q'] - rc['q']:+.3f} electrons")
+    print(f"   splits: sid {sc} in {split_by_sid[sc]}, sid {sn} in "
+          f"{split_by_sid[sn]}"
+          + ("   <- TRAINING pair, not held-out evidence"
+             if "train" in (split_by_sid[sc], split_by_sid[sn]) else
+             "   <- held out"))
 
     print(f"\n   ABLATION GATE -- the captured sum must equal what the channel "
           f"puts into the total energy")
