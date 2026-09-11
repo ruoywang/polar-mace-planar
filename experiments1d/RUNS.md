@@ -162,6 +162,78 @@ cheap on the same cache (E_new = E_rest_cached + le_new against the label),
 while a force-aware fit is not, because dle/dR needs a full-model backward per
 step rather than cached inputs.
 
+### three-arm force-weight experiment: the force weight is not the obstacle
+
+From epoch 39 (EMA weights, _pb1d_epoch 39), only local_electron_energy
+updated, full coordinate-derivative path with compute_force=True and nothing
+cached, identical starting weights / loaded Adam state / lr / sample order
+across arms, original per-atom normalisation and whole-model clipping, no added
+paired loss. 16 train pairs spanning dN +0.795..+1.375, 100 steps, recorded at
+0/20/50/100, scored on the same 20 val pairs. A = (1, 100) the run's own
+weights, B = (1, 20), C = (1, 0). 20 sits below both measured crossover points
+(forces_weight 32.4 at epoch 25, 87.6 at epoch 39).
+
+| step 100 change | A (1,100) | B (1,20) | C (1,0) |
+|---|---|---|---|
+| pair_rmse [eV] | +3.49e-03 | +4.16e-03 | +2.07e-03 |
+| pair_bias [eV] | +3.47e-03 | +4.12e-03 | +2.05e-03 |
+| pair_mr [eV] | +4.12e-04 | +5.49e-04 | +2.80e-04 |
+| E_chg_mean [meV/at] | -3.8198 | -3.5585 | -3.5052 |
+| E_neu_mean [meV/at] | -3.8366 | -3.5784 | -3.5151 |
+| F_chg [eV/A] | -1.77e-05 | -1.83e-05 | -9.96e-06 |
+| F_neu [eV/A] | +1.73e-05 | +2.18e-05 | +1.10e-05 |
+
+(baselines: pair_rmse 4.929487 eV, pair_bias 4.871605, pair_mr 0.753193,
+E_chg_mean +17.6658 meV/at, E_neu_mean -5.8685, F_chg 2.924980e-02,
+F_neu 3.304054e-02.)
+
+NO ARM IMPROVES THE PAIRED ENERGY. All three move it slightly the wrong way,
+by 0.04-0.08% of a 4.93 eV gap, and not monotonically in the force weight (B is
+worse than A at step 100), so there is no force-weight trend in the pair at
+all.
+
+THE INTERVENTION DID TAKE EFFECT, which is what makes the null result readable:
+the force metrics respond to the weight in the expected order, A improving
+F_chg by 1.77e-05 against C's 9.96e-06, i.e. the arm with forces on improves
+its own metric about 1.8x more.
+
+WHAT THE HEAD ACTUALLY DID, in every arm including C with forces entirely off:
+it moved the COMMON energy level and left the difference pinned.
+
+| arm | common shift | differential | ratio |
+|---|---|---|---|
+| A | -3.8282 meV/at | +0.0168 | 228x |
+| B | -3.5685 | +0.0199 | 179x |
+| C | -3.5102 | +0.0099 | 354x |
+
+The decomposition closes: differential x 207 / 1000 reproduces the pair_bias
+change to 0.7-0.9% in every arm. And because the two states' errors have
+opposite signs (+17.67 and -5.87 meV/at), a common downward shift necessarily
+helps the charged frame and hurts the neutral one -- E_chg_rms falls by 3.43 to
+3.74 while E_neu_rms rises by 3.47 to 3.79.
+
+The trajectory is also not monotone: the common shift is -9.79 meV/at at step
+20, -8.52 at 50 and -3.82 at 100 for arm A, so 100 steps is a transient in
+which the common level oscillates while the pair stays flat.
+
+READING, by the criteria fixed in advance: this is the third case. Even with the
+force constraint removed entirely, the energy supervision moves the common
+level 354x more than the paired difference. The force weight is therefore not
+the obstacle, and the next target is how the energy head distinguishes the two
+charge states -- not a weight.
+
+This is consistent with, but stronger than, the local gradient picture
+(||u_sum||/||u_diff|| = 5800 at this state): the realised 354x is what survives
+Adam's per-coordinate rescaling and the loss structure, measured on held-out
+pairs rather than inferred from a norm ratio.
+
+CAVEATS kept explicit. The checkpoint holds EMA weights while the Adam moments
+belong to the raw trajectory, so this is a controlled short experiment from the
+closest available state, not a replay. 100 steps is not training, and the
+non-monotone trajectory means a longer run could differ. What is excluded is
+narrow and specific: lowering the force weight, on its own, from this state,
+does not make the paired charging energy move.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
