@@ -196,6 +196,22 @@ hsteps = [int(optimizer.state[p]["step"]) for g in optimizer.param_groups
 print(f"   Adam step counts: model min/max {min(steps) if steps else '-'}/"
       f"{max(steps) if steps else '-'}, head min/max "
       f"{min(hsteps) if hsteps else '-'}/{max(hsteps) if hsteps else '-'}")
+name_of = {}
+for mod_name, prm in model.named_parameters():
+    name_of[id(prm)] = mod_name
+odd = sorted(((int(optimizer.state[prm]["step"]), name_of.get(id(prm), "?"))
+              for g in optimizer.param_groups for prm in g["params"]
+              if prm in optimizer.state and "step" in optimizer.state[prm]))
+if odd and odd[0][0] != odd[-1][0]:
+    print(f"   STEP-COUNT ANOMALY: Adam counts are not uniform. step only ever "
+          f"increments, so tensors with FEWER steps than others were either "
+          f"rarely given a gradient or had their state lost on a resume. The "
+          f"five lowest:")
+    for st, nmt in odd[:5]:
+        print(f"     {st:>6}  {nmt}")
+    print(f"   the five highest:")
+    for st, nmt in odd[-5:]:
+        print(f"     {st:>6}  {nmt}")
 print(f"   tensors with Adam state: {len(steps)} of "
       f"{sum(len(g['params']) for g in optimizer.param_groups)}; head "
       f"{len(hsteps)} of {len(head_ids)}")
@@ -475,7 +491,8 @@ print("   full-model clipping is applied exactly as training does, and then the"
 print("   non-head gradients are set to None so Adam skips those tensors. The")
 print("   change in the paired dE is then attributable to the head alone.")
 print(f"\n   {'arm':>17} {'|eps| after':>12} {'change':>10} "
-      f"{'max|dw| head':>13} {'d(paired dE)':>13}")
+      f"{'max|dw| head':>13} {'d(paired dE)':>13} {'cos(dw,d_pair)':>14} "
+      f"{'proj':>12}")
 for nm, keep in ARMS:
     model.load_state_dict(W0)
     optimizer.load_state_dict(copy.deepcopy(O0))
@@ -495,9 +512,20 @@ for nm, keep in ARMS:
     optimizer.step()
     aft = live_paired()
     mdw = max(float((head.state_dict()[k] - wb[k]).abs().max()) for k in wb)
+    # ADAM DOES NOT STEP ALONG THE GRADIENT. Its update is -lr*m_hat/sqrt(v_hat),
+    # so a per-coordinate rescaling of a direction that also carries momentum
+    # from thousands of earlier steps. cos(-g, d_pair) is therefore the SIGNAL,
+    # not the update; this measures the update actually applied. The epoch-25
+    # run made the difference visible: every arm, the forces-only one included,
+    # lowered |eps| slightly, which cannot follow from a gradient at
+    # cos = -0.965.
+    dw = torch.cat([(head.state_dict()[k] - wb[k]).reshape(-1)
+                    for k, _ in head.named_parameters()])
+    cdw = float(dw @ d_pair_n) / max(float(dw.norm()), 1e-300)
     print(f"   {nm:>17} {np.abs(aft - de_dft).mean():12.4f} "
           f"{np.abs(aft - de_dft).mean() - np.abs(base - de_dft).mean():+10.4f} "
-          f"{mdw:13.3e} {(aft - base).mean():+13.3e}")
+          f"{mdw:13.3e} {(aft - base).mean():+13.3e} {cdw:+14.4f} "
+          f"{float(dw @ d_pair_n):+12.3e}")
 model.load_state_dict(W0)
 optimizer.load_state_dict(copy.deepcopy(O0))
 set_terms(set(ALL_W))
@@ -537,6 +565,11 @@ def cosv(a, b):
     return float(a @ b) / max(na * nb, 1e-300)
 
 
+print(f"\n   LEVERAGE: ||u_sum|| / ||u_diff|| = "
+      f"{float(u_sum.norm()) / max(float(u_diff.norm()), 1e-300):.0f}x -- the "
+      f"head can move its COMMON level that many times more easily than the "
+      f"charged-minus-neutral DIFFERENCE, so even a perfectly aimed energy "
+      f"signal would mostly move the common level.")
 print(f"\n   ||u_diff|| {float(u_diff.norm()):.4e}   ||u_sum|| "
       f"{float(u_sum.norm()):.4e}   cos(u_diff,u_sum) "
       f"{cosv(u_diff, u_sum):+.4f}")
