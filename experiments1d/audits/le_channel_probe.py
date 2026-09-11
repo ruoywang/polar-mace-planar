@@ -307,6 +307,16 @@ for sc, sn in PAIRS:
           f"move the pair at all?")
     print(f"     |d(le)| vs gate slack  {abs(dle) / TOL_EV:.3e}x the tolerance, "
           f"so the gate's residual cannot account for it")
+    # PER-FRAME signed errors, because the paired error can exceed the
+    # aggregate RMSE only if the two frames err in OPPOSITE directions. On this
+    # data eps_Delta / n_atoms is about 24 meV/atom against a reported
+    # RMSE_E_per_atom of 10.33 meV/atom, which is arithmetically impossible for
+    # same-signed per-frame errors -- so this prints them instead of leaving it
+    # as an inference.
+    for r, tag in ((rc, "charged"), (rn, "neutral")):
+        er = r["e_on"] - r["label"]
+        print(f"     error({tag:>7})        {er:+.6f} eV = "
+              f"{1000.0 * er / r['nat']:+.2f} meV/atom over {r['nat']} atoms")
     print(f"     Delta E model          {de_model:+.6f} eV")
     print(f"     Delta E DFT            {de_label:+.6f} eV")
     print(f"     eps_Delta              {eps:+.6f} eV    <- the gap d(le) "
