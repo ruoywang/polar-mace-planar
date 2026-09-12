@@ -845,6 +845,61 @@ native electron head trained in both; no new correction term -- after a GPU
 gate that measures arm B's peak memory on the 339-atom frames and one full
 3-GPU DDP epoch on the post-warmup path.
 
+### second order after the cavity/solvent3D reconnection: re-measured, then split by term  (jobs 3433245 @51cd604, 3433255 @ce2c1a8; LIVE_POS=1 GRAD_PASSES=0)
+
+1. SAME SCRIPT AS BEFORE (second_order_check.py), same v, both frames,
+   relative error of autograd against FD (eps 1e-4 unless noted):
+
+| group | quantity | sid 28 before -> after (gp=0) | sid 628 before -> after (gp=0) |
+|---|---|---|---|
+| density maps | v.dE | 29.2% -> 3.9e-6 | 24.6% -> 0.36% (vs eps 3e-5 FD: 1.5e-6) |
+| density maps | v.dL_F | 26.8% -> 7.5% | n/a: FD(L_F) drifts 103% between eps 1e-4 and 3e-5 |
+| pb1d_head | v.dE / v.dL_F | 4.4e-5 / 0.11% -> 1.3e-5 / 0.039% | 1.2e-8 / 7.5e-7 |
+| products | v.dE / v.dL_F | 0.76% / 1.16% -> 5.6e-7 / 0.029% | 3.4e-9 / 0.37% (FD drift 0.43%) |
+| local_e (control) | v.dE / v.dL_F | 2.4e-4 / 3.0e-5 | 1.3e-4 / 8.5e-7 |
+
+   At gp=1 (the analytic adjoint) the second-order numbers stay wrong, as
+   before: density maps 8955%, pb1d_head 1329% / 450%, products 9.9% / 574%.
+   GRAD_PASSES=0 stays the training setting. The absolute values moved
+   because the cavity/solvent3D reconnection changed the force and hence L_F
+   (sid 28 FD v.dL_F 1.411e-04 -> 6.143e-05).
+
+2. THE REMAINING 7.5% SPLIT BY TERM (floss_grad_by_term.py: g = dL_F/dF
+   frozen, Q_k = g . F_k, AD_k = v.grad Q_k, FD_k central; sum_k AD_k =
+   v.dL_F exactly, sum_k FD_k = FD(L_F) + O(eps^2); eps_rel 1e-4, 3e-5,
+   1e-5). Closures: sum_k AD_k vs direct 5.9e-11 / 1.3e-11; sum_k FD_k vs
+   FD(L_F) 2.4e-9 / 4.8e-11 at eps 1e-5; sum_k D_k = D_total to 5.9e-11.
+
+   sid 28, density maps: D_total -4.48e-06 = -7.31% of FD at eps 1e-5
+   (-7.54% at 1e-4, so stable). Per term (D_k at eps 1e-5, share):
+     cavity     AD -5.88278e-05  FD -5.43441e-05  D -4.484e-06  -100.1%  (drift 1.9e-3)
+     E_bl       +6.12781e-04     +6.12773e-04     +7.9e-09      +0.2%
+     solute ES  +7.04856e-05     +7.04880e-05     -2.4e-09      -0.1%
+     comp 1D, slab dip, solv3D, local_e: |D_k| <= 8e-10, each below its drift.
+   sid 628, density maps: at eps 1e-4 the FD is unusable (solv3D FD_k
+   +3.73e-03 against -1.13e-04 at 1e-5: a 34x drift in that one term); at
+   eps 3e-5 and 1e-5 it is smooth (FD(L_F) -9.861e-05 / -1.074e-04).
+   D_total -3.58e-06 = -3.34% of FD at eps 1e-5, again 100.0% cavity:
+     cavity     AD -3.66013e-04  FD -3.62430e-04  D -3.583e-06  -100.0%  (drift 4.7e-3)
+     every other term |D_k| <= 9e-11.
+   Control group local_electron_energy: only its own term has AD_k != 0
+   (+1.18617e-05 / +2.49079e-05, matching FD to 8e-5 / 2e-7); all other
+   FD_k are 1e-9..1e-12 (solver noise); D_total +0.06% / -0.00%.
+
+   READING. The whole remaining second-order gap is the cavity term: its
+   force's parameter derivative is 8.3% (sid 28) and 1.0% (sid 628) off,
+   while its VALUE closes to 1e-12 eV, its FORCE closes to 0.00-0.01 meV/A
+   (term split) and its FIRST-order parameter derivative closes to 1.8e-6
+   (param_grad_by_term). The other nine terms are exact at second order.
+   The 1e-30 floor under sqrt(|grad s_cav|^2) and the two clamps in
+   create_cavity_torch are the candidate operations; the clamps sit where
+   the shape function's slope is ~1e-51 (N_MIN 1e-4, SIGMA_K 0.6), so a kink
+   reading is unlikely on paper. cavity_second_order_probe.py (job 3433298,
+   code fda741c: env-gated live export of the chain's intermediates and an
+   area-floor knob, defaults unchanged) measures AD vs FD stage by stage --
+   ne, s_vdw, s_cav, |grad|^2, area at floors 1e-30/1e-20/1e-12, the term
+   itself -- and the plateau / clamp populations at theta.
+
 ### arm-B GPU gate before the joint A/B  (job 3433252, code 6ec75bf; run dir 3-residual_3D/ab_deriv_gate)
 
 Arm B = MACE_PB1D_LIVE_POS=1, MACE_PB1D_GRAD_PASSES=0, DFORCE unset; gate_le
