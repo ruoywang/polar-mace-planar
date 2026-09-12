@@ -56,15 +56,15 @@ def _evict():
 atoms = {}
 for a in read(os.path.join(RUN, "data", "train.xyz"), ":"):
     s = a.info.get("sample_id")
-    if s is not None and len(a) == 207: atoms[int(s)] = a
-FR = sorted(atoms)[:3]
+    if s is not None and len(a) == int(os.environ.get("KIT_NATOMS", "207")): atoms[int(s)] = a
+FR = [int(x) for x in os.environ["KIT_FRAMES"].split(",")] if os.environ.get("KIT_FRAMES") else sorted(atoms)[:3]
 def batch(sid):
     cfg = mace_data.config_from_atoms(atoms[sid], key_specification=args.key_specification)
     ds = [mace_data.AtomicData.from_config(cfg, z_table=z_table, cutoff=float(model.r_max))]
     b = next(iter(torch_geometric.dataloader.DataLoader(ds, batch_size=1))).to(device)
     attach_density_3d_samples_to_batch(b, loss_fn); attach_solvent3d_samples_to_batch(b, loss_fn); return b
 B = {s: batch(s) for s in FR}
-print(f"model {os.path.basename(mp)} @ {os.path.basename(cp)}  LIVE_POS=1  frames {FR}")
+print(f"model {os.path.basename(mp)} @ {os.path.basename(cp)}  LIVE_POS=1  frames {FR}  atoms/frame {[len(atoms[s]) for s in FR]}  total_charge {[round(float(atoms[s].info.get('total_charge', 0.0)), 3) for s in FR]}")
 print(f"{'GRAD_PASSES':>12} {'frame':>6} {'fwd+loss+bwd s':>15} {'peak GiB':>9} {'loss':>14}")
 for gp in (1, 0, 1):   # 1 twice: the first pass pays warm-up costs
     os.environ["MACE_PB1D_GRAD_PASSES"] = str(gp)
