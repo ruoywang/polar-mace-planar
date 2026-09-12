@@ -790,6 +790,18 @@ class PB1DBackend:
             "solv3d": solv3d,
             "e_cav": e_cav_t,
             "e_bl": e_bl_t,
+            # DIAGNOSTIC EXPORTS ONLY (2026-09-11). E_bl couples the solvent
+            # charge to the solute baseline potential, so its position
+            # derivative splits as
+            #   dE_bl/dR = int( Phi_b d(rho_solv)/dR + rho_solv d(Phi_b)/dR )
+            # and separating the two numerically needs the three factors
+            # themselves. These are exports: nothing here enters any energy,
+            # and e_bl above is unchanged. Detached so they can never alter a
+            # gradient path by being exported.
+            "bl_rho_solv_z": ((rho_ion_z + rho_bound_z).detach()
+                              if bl_energy else None),
+            "bl_phi_b_z": (pbz_s.detach() if bl_energy else None),
+            "bl_dz_area": ((float(dz), float(area)) if bl_energy else None),
             "e_s3d": e_s3d_t,
             "s3d_obs": s3d_obs,
         }

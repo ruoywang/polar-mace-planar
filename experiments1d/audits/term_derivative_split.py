@@ -404,6 +404,25 @@ for sc, sn in VALP:
                   f"{1000 * float(np.abs(tot_z).max()):12.2f}")
             pos = sum(v.sum() for v in zs.values() if v.sum() > 0)
             neg = sum(v.sum() for v in zs.values() if v.sum() < 0)
+            # SAVE THE PER-COMPONENT ARRAYS. The previous run printed only the
+            # signed sum, rms and max per term, so RMS(D_total - D_bl) -- which
+            # asks whether E_bl dominates the RMS gap and not just the signed
+            # sum -- could not be computed from the log at all. That was an
+            # omission, not a limitation of the data.
+            np.savez(os.path.join(os.environ.get("KIT_OUT", "."),
+                                  f"Dk_{sid}_{'train' if keep_sid else 'deploy'}.npz"),
+                     pick=np.array(pick), Dtot=Dtot,
+                     **{f"D_{k}": D[k] for k in TERMS})
+            rms = lambda v: 1000 * float(np.sqrt((v ** 2).mean()))
+            print(f"\n  RMS over ALL components (not just z, not a sum of "
+                  f"per-term RMS):")
+            print(f"    RMS(D_total)          {rms(Dtot):9.2f} meV/A")
+            print(f"    RMS(D_total - D_bl)   "
+                  f"{rms(Dtot - D['baseline_coupling_energy_g']):9.2f} meV/A"
+                  f"   <- what is left once E_bl is removed")
+            for k in TERMS:
+                if rms(D[k]) > 1.0:
+                    print(f"    RMS(D_{SHORT[k]:<16}) {rms(D[k]):9.2f}")
             print(f"  cancellation: positive contributions {1000 * pos:+.2f}, "
                   f"negative {1000 * neg:+.2f}, net {1000 * (pos + neg):+.2f} "
                   f"meV/A -- the shares above can exceed 100% because terms "
