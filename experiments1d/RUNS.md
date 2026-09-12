@@ -300,6 +300,73 @@ from trained-parameter error, so nothing here assigns the gap a cause. Next
 step is the term-by-term localisation the user specified: 1-D solvent response,
 dipole correction, 3-D residual charge, cavity, baseline coupling.
 
+### derivative gap, located by term and inside E_bl  (code e815a47)
+
+Per-term split, 8 cells (2 NiN44 val pairs x charged/neutral x training-cache
+and deployment baselines), h = 0.01 A, 6 largest-|F_DFT| atoms, D_k = F_auto,k
+- F_FD,k. Four closures in every cell: terms sum to the model's energy
+(3.4e-12 eV), per-term autograd forces sum to the returned force (2.3e-11
+eV/A), per-term FD sums to total FD (4.1e-08 meV/A), and sum_k D_k = D_total
+component by component (4.1e-08 meV/A).
+
+GRAPH-DISCONNECTED TERMS (autograd force exactly zero, FD non-zero):
+baseline_coupling_energy_g in all 8 cells; cavity_energy_g in the 4
+training-cache cells only; e0 by construction. No term is "in the graph but
+not reaching positions".
+
+E_bl IS THE LARGEST SINGLE-TERM GAP IN ALL EIGHT CELLS, by RMS over all 18
+components: 340.5-414.1 meV/A against the next term at most 184.1.
+
+FIXING IT ALONE, measured as RMS(D_total - D_bl) against RMS(D_total):
+
+| cell | RMS(D_total) | RMS(D_total - D_bl) | change |
+|---|---|---|---|
+| 28 charged train | 171.55 | 195.05 | +13.7% |
+| 28 charged deploy | 347.93 | 66.80 | -80.8% |
+| 628 neutral train | 329.52 | 28.09 | -91.5% |
+| 628 neutral deploy | 69.91 | 9.74 | -86.1% |
+| 30 charged train | 187.46 | 215.94 | +15.2% |
+| 30 charged deploy | 322.74 | 63.27 | -80.4% |
+| 630 neutral train | 327.19 | 15.99 | -95.1% |
+| 630 neutral deploy | 68.25 | 8.98 | -86.8% |
+
+It lowers the total gap in six cells and RAISES it by 13.7% and 15.2% in the
+two charged training-cache cells, because there E_bl partly cancels the other
+missing responses -- solute electrostatics alone is 154.4 and 152.1 there.
+These are two different statements (largest single term; effect of removing
+it) and are recorded as such, not collapsed into "dominant in six of eight".
+
+THE TWO RESPONSES INSIDE E_bl, by finite difference at fixed partner using
+diagnostic exports captured at the e_bl_raw site (closures: recomputation vs
+site value 1.7e-16 eV, vs baseline_coupling_energy_g 1.7e-16 eV, FD_rho +
+FD_phi vs full FD 0.012 meV/A):
+
+| cell | Phi_b d(rho_solv)/dR, z sum | rho_solv d(Phi_b)/dR, z sum | d(Phi_b) share |
+|---|---|---|---|
+| 28 charged train | -3299.87 | +0.00 | 0.00% |
+| 28 charged deploy | +1035.24 | -24.36 | 1.29% |
+| 628 neutral train | -3207.38 | +0.00 | 0.00% |
+| 628 neutral deploy | +240.72 | -4.82 | 1.30% |
+| 30 charged train | -3642.10 | +0.00 | 0.00% |
+| 30 charged deploy | +2723.16 | -35.18 | 1.79% |
+| 630 neutral train | -3152.24 | +0.00 | 0.00% |
+| 630 neutral deploy | +393.28 | -9.34 | 2.18% |
+
+The share column is max|FD_phi| over max|FD_full| across all 18 components
+(for 28 deploy: 14.02 / 1086.45), NOT a ratio of the signed z sums, which
+cannot reproduce it. Frozen per-sid baseline: d(Phi_b)/dR is exactly zero by
+that path's definition, as expected in 4/4. Runtime baseline: 1.3-2.2%, as
+expected non-zero in 4/4. The missing derivative is therefore almost entirely
+Phi_b d(rho_solv)/dR -- the solvent charge's response to atomic displacement
+through the PB solve -- with the baseline-potential response a 1-2% correction
+that exists only on the deployment path.
+
+Mechanism in source: pb1d_backend.py forms
+e_bl_raw = ((rho_ion_z + rho_bound_z) * (-pbz_s)).sum() * dz * area and then
+e_bl_t = e_bl_raw if live_resp else e_bl_raw.detach(), with live_resp set only
+by MACE_PB1D_DFORCE. Under the default the value enters the energy while
+neither the force nor the energy loss can pass a gradient through it.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
