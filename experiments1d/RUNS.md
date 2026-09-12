@@ -475,6 +475,84 @@ Diagnostic queued: the same split under GRAD_PASSES=0 on the four training
 cells, to separate "the analytic adjoint's first-order position gradient is
 incomplete on this path" from "the truncation is outside the solver".
 
+### remedy input: the exact unrolled solver graph is affordable  (job 3432543)
+
+One training-style step per frame (training=True, compute_force=True, the
+run's loss, backward), three NiN44 train frames, LIVE_POS=1, epoch 39:
+
+| GRAD_PASSES | frame | fwd+loss+bwd s | peak GiB | loss |
+|---|---|---|---|---|
+| 1 (first, warm-up) | 1 | 47.17 | 12.54 | 2.699734 |
+| 1 | 2 | 1.40 | 12.74 | 2.570729 |
+| 1 | 3 | 4.00 | 12.93 | 2.559273 |
+| 0 | 1 | 5.48 | 12.99 | 2.699734 |
+| 0 | 2 | 3.46 | 12.99 | 2.570729 |
+| 0 | 3 | 1.07 | 12.99 | 2.559273 |
+| 1 (repeat) | 1 | 1.60 | 12.93 | 2.699734 |
+| 1 | 2 | 3.59 | 12.93 | 2.559273 |
+| 1 | 3 | 1.02 | 12.93 | 2.559273 |
+
+Loss values identical to six decimals between the two settings, as they must
+be: only the gradient construction differs. Peak memory 12.99 against 12.93
+GiB, +0.06 GiB (0.5%) -- the 1-D solver's unrolled graph is small next to the
+3-D grids. Time per frame 1.07-5.48 s (mean 3.34) against 1.02-3.59 s (mean
+2.07) on the repeat pass; with three frames and a 5.48 s first-use outlier the
+ratio is bounded at ~1.6x and is probably less. At the measured 2.3 min/epoch
+of the full-PB stage that is at most ~3.7 min/epoch.
+
+So the fully unrolled graph, already in the code and FD-verified there, is an
+affordable remedy for the second-order defect: no new math, values unchanged,
+exact where the analytic adjoint was wrong in sign.
+
+### the original training path: pb1d_head received EXACTLY ZERO gradient from energy and forces  (job 3432543 b)
+
+Same second-order check, same two frames and four groups, but on the original
+training configuration: MACE_PB1D_LIVE_POS unset (the default), training-cache
+path, epoch 39. Control exact at both orders (1.7e-4 / 2.4e-6 and 1.3e-4 /
+1.7e-7). Every perturbed forward re-solved.
+
+| group | quantity | autograd (gp=1 = gp=0) | FD | missing |
+|---|---|---|---|---|
+| pb1d_head, sid 28 | v.dE | **0.000000e+00** | +4.118880e-03 | 100% |
+| pb1d_head, sid 28 | v.dL_F | **0.000000e+00** | +9.958086e-08 | 100% |
+| pb1d_head, sid 628 | v.dE | **0.000000e+00** | -4.056353e-03 | 100% |
+| pb1d_head, sid 628 | v.dL_F | **0.000000e+00** | +4.993448e-08 | 100% |
+| density maps, sid 28 | v.dE | 3.454577e-03 | 4.854779e-02 | 93% |
+| density maps, sid 628 | v.dE | 2.521807e-02 | 4.611300e-02 | 45% |
+| density maps, 28 / 628 | v.dL_F | 4.68e-06 / -9.14e-06 | 6.55e-06 / -1.32e-05 | 29% / 31% |
+| products, 28 / 628 | v.dE | -6.160e-02 / -5.881e-02 | -6.140e-02 / -5.665e-02 | 0.3% / 3.8% |
+| products, 28 / 628 | v.dL_F | -7.860e-06 / 3.051e-06 | -7.726e-06 / 2.798e-06 | 1.7% / 9.1% |
+
+The autograd columns are identical at GRAD_PASSES 1 and 0 in every row: with
+nothing flowing from the solve into the energy, the adjoint's construction is
+irrelevant, and every discrepancy here is an upstream truncation.
+
+WHY IT IS EXACTLY ZERO. pb1d_head's only route to the energy is through the
+solve output -- p_off -> phi -> rho_solv -> {compensation_periodic_1d_energy,
+E_bl, slab dipole}. Under the default all three are detached from the graph:
+prof_energy at extensions.py:1902, e_bl_raw in the backend, solvent_dipole_e at
+extensions.py:2957. So the energy and force losses could not reach the head at
+all; its 8733 Adam steps were driven only by the profile/observable losses
+(potential_1d_profile, rhob_1d, rho1d, solvent3d, fermi). That is consistent
+with an Adam step count advancing on a zero-valued (not None) gradient.
+
+The density-coefficient maps lost 45-93% of their energy gradient the same way
+-- the solvent-coupling energy is a larger share on the charged frame -- and
+29-31% of their force-loss gradient. The trunk was largely unaffected because
+its dominant paths (interaction energy, direct electrostatics) never went
+through the solve.
+
+WHAT THIS ANSWERS. The charging energy lives in the solvent-coupling terms.
+The parameters that shape the solvent response were structurally disconnected
+from the energy label. This is the mechanism behind the earlier finding that
+the native head's charging response stayed at 0.04 eV under joint training:
+not a competition the force term won, but a channel the energy loss never
+reached.
+
+Under LIVE_POS=1 (job 3432527, earlier entry) the same head's energy gradient
+becomes exact to 8e-6 / 5e-8; the second-order defect that appears there is the
+separate frozen-J_c issue, remedied by GRAD_PASSES=0 at +0.06 GiB.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
