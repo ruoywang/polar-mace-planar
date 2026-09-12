@@ -553,6 +553,25 @@ Under LIVE_POS=1 (job 3432527, earlier entry) the same head's energy gradient
 becomes exact to 8e-6 / 5e-8; the second-order defect that appears there is the
 separate frozen-J_c issue, remedied by GRAD_PASSES=0 at +0.06 GiB.
 
+### the adjoint is not the training-path residual: GRAD_PASSES=0 changes nothing  (job 3432559)
+
+Same 8 cells, LIVE_POS=1, GRAD_PASSES 1 -> 0. Every term's RMS(D_k) and every
+D_total identical to the printed 0.1 meV/A (E_bl 54.8->54.8, 37.7->37.7,
+92.1->92.1, 32.2->32.2 on the training cells; solute ES 154.4->154.4;
+slab dipole 63.0->63.0, 52.4->52.4). The analytic adjoint's FIRST-order
+position gradient is therefore exact on both paths, as IFT predicts and as the
+parameter-space check already showed. The residual training-path gap is
+upstream of the solver.
+
+Where to look, stated as a candidate to be TESTED, not a conclusion: the
+frozen-baseline branch computes the solvent-center quantities (z_e50, w_e50,
+solv_center) at extensions.py:2665-2670 from radial_coefficients.detach() and
+positions.detach(). If that center enters the 1-D solvent placement, its FD
+response is present and its autograd response absent, on that branch only --
+which would touch exactly the three residual terms (E_bl, solute
+electrostatics, slab dipole). A generic scan for outputs that move under FD
+but carry no grad_fn decides this without guessing.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
