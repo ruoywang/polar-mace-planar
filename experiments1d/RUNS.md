@@ -900,6 +900,56 @@ gate that measures arm B's peak memory on the 339-atom frames and one full
    ne, s_vdw, s_cav, |grad|^2, area at floors 1e-30/1e-20/1e-12, the term
    itself -- and the plateau / clamp populations at theta.
 
+### the cavity second-order gap is the 1e-30 floor under sqrt(|grad s_cav|^2)  (job 3433298, code fda741c)
+
+Staged AD vs FD of g . F_S for a scalar S at each stage of the cavity chain,
+same frozen g and direction v as the term split, eps_rel 3e-5 and 1e-5,
+3,000,000 grid points per frame:
+
+| stage | sid 28 AD-FD rel (drift) | sid 628 AD-FD rel (drift) |
+|---|---|---|
+| sum w.ne (raw density, before the log) | 1.03 (1.28) -- unreadable, see below | 0.99 (0.66) -- unreadable |
+| sum w.s_vdw | 8.5e-5 (8.0e-5) | 1.6e-6 (1.3e-5) |
+| sum w.s_cav | 1.8e-6 (1.5e-6) | 3.6e-8 (2.1e-7) |
+| sum w.|grad s_cav|^2 | 1.7e-5 (2.1e-5) | 6.5e-8 (5.3e-7) |
+| area, floor 1e-30 (the backend's) | 8.25e-2 (2.9e-4) | 9.9e-3 (5.4e-3) |
+| area, floor 1e-20 | 5.3e-2 (2.6e-4) | 1.2e-2 (5.5e-3) |
+| area, floor 1e-12 | 2.7e-4 (8.4e-4) | 3.0e-4 (1.0e-3) |
+| E_cav term | 8.25e-2 (2.9e-4) | 9.9e-3 (5.4e-3) |
+
+The E_cav row reproduces the term split (AD -5.882783e-05 vs FD
+-5.434416e-05 on sid 28). Everything up to and including |grad s_cav|^2
+closes; the sqrt with its 1e-30 floor does not, and the SAME gradients with
+a 1e-12 floor close to within the FD drift on both frames. The FD values
+themselves are floor-independent to 1e-3 (-2.1215 / -2.1215 / -2.1224 on
+sid 28), so the true response of the regularised area does not care about
+the floor; only autograd's second derivative does.
+
+WHY. d^2 sqrt(x^2 + a) / dx^2 = a / (x^2 + a)^{3/2}: with a = 1e-30 the
+curvature at a plateau point with |grad| ~ 1e-13 is ~1e13, and the mixed
+term (d grad/d theta . d grad/dR) / |grad| is amplified by 1/|grad| there.
+The plateau population: |grad|^2 < 1e-20 on 0.033% / 0.032% of the grid
+(about 1000 points, minimum 6e-28 / 5e-26 -- FFT round-off on the saturated
+regions), < 1e-12 on 25% / 22%. A thousand points with 1/|grad| ~ 1e10-1e13
+amplification are the 8.25% / 0.99%. This is noise in dF/dtheta, not a
+response of the physics; the FD (a finite step) never sees it.
+
+The two clamps are NOT it: clamp(ne, min=0) is active on 30.7% / 32.0% of
+the grid and the log floor on 46.9% / 48.2%, which is why the raw-density
+stage's FD is unreadable (kinks under a random +-1 weighting), but the shape
+function's slope at the floor (x = log 1e-4 = -9.2, SIGMA_K 0.6) is ~1e-51,
+and s_vdw already closes.
+
+REMEDY, pending the floor scan (job queued: floors 1e-20 / 1e-18 / 1e-16 /
+1e-14 / 1e-12 with the value change of area and E_cav at each): set
+MACE_PB1D_AREA_EPS (added in fda741c, default 1e-30 = unchanged) to the
+smallest floor at which the second order closes, in BOTH arms of the A/B --
+in arm A the cavity has no parameter gradient at all (ne_cav detached), so
+the floor changes only its value there, by the same amount as in arm B.
+Value cost bound: <= (number of points with |grad| < sqrt(floor)) x
+sqrt(floor) x TAU dV; at 1e-12 that is <= 7.5e5 x 1e-6 x 2.56e-5 = 1.9e-5 eV
+on E_cav = 3.94 eV, measured exactly by the scan.
+
 ### arm-B GPU gate before the joint A/B  (job 3433252, code 6ec75bf; run dir 3-residual_3D/ab_deriv_gate)
 
 Arm B = MACE_PB1D_LIVE_POS=1, MACE_PB1D_GRAD_PASSES=0, DFORCE unset; gate_le

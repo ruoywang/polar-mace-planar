@@ -43,6 +43,7 @@ RUN = "/scratch/08384/tg876840/tmp/c-MACEsol/3-residual_3D/gate_le"; os.chdir(RU
 GROUP = os.environ.get("KIT_GROUP", "field_dependent_charges_maps")
 EPS_REL = [float(x) for x in os.environ.get("KIT_EPS", "3e-5,1e-5").split(",")]; SEED = 7
 SIDS = [int(x) for x in os.environ.get("KIT_SIDS", "28,628").split(",")]
+FLOORS = [float(x) for x in os.environ.get("KIT_FLOORS", "1e-20,1e-12").split(",")]
 device = torch_tools.init_device("cuda"); torch_tools.set_default_dtype("float64")
 args = tools.build_default_arg_parser().parse_args(["--config", "config_pb1d.yaml", "--name", "s3d_gate_le", "--seed", "123", "--work_dir", ".", "--device", "cuda"])
 args.key_specification = KeySpecification(); update_keyspec_from_kwargs(args.key_specification, vars(args))
@@ -104,13 +105,13 @@ def stage_scalars(pred, ex):
     s_vdw = TP._shape_func(x_vdw, float(p["SIGMA_K"]))
     g2 = ex["gx"] ** 2 + ex["gy"] ** 2 + ex["gz"] ** 2
     S = {"E_cav term": pred["cavity_energy_g"].sum(),
-         "area (backend, floor 1e-30)": ex["area"],
-         "area floor 1e-20": torch.sqrt(g2 + 1e-20).sum(),
-         "area floor 1e-12": torch.sqrt(g2 + 1e-12).sum(),
-         "sum w.|grad s_cav|^2": (w * g2).sum(),
+         "area (backend, floor 1e-30)": ex["area"]}
+    for fl in FLOORS:
+        S[f"area floor {fl:g}"] = torch.sqrt(g2 + fl).sum()
+    S.update({"sum w.|grad s_cav|^2": (w * g2).sum(),
          "sum w.s_cav": (w * ex["s_cav3e"]).sum(),
          "sum w.s_vdw": (w * s_vdw).sum(),
-         "sum w.ne": (w * ne).sum()}
+         "sum w.ne": (w * ne).sum()})
     return S, g2
 
 def plateau_stats(ex, g2):
@@ -141,6 +142,10 @@ for sid in SIDS:
     print(f"  E {float(E):.9f}   E_cav {ecav:.6f} eV   area {area0:.4f}   E_cav/area (TAU*dV) {ecav/area0:.6e}")
     st = plateau_stats(ex, g2.detach())
     for k, v in st.items(): print(f"    {k:>36}: {v:.4e}" if isinstance(v, float) else f"    {k:>36}: {v}")
+    fac = ecav / area0
+    for fl in FLOORS:
+        da = float(torch.sqrt(g2.detach() + fl).sum()) - area0
+        print(f"    value change at floor {fl:g}: area {da:+.4e} ({da/area0:+.2e} rel)  E_cav {da*fac:+.3e} eV")
     names = list(S.keys()); del pred, ex, E, F, S, g2, b; _evict()
     # ---- AD per stage, one forward each
     AD = {}
