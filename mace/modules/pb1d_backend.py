@@ -636,7 +636,18 @@ class PB1DBackend:
                 # spectral gradient. |grad| recomposed with an eps floor:
                 # sqrt(0) on the saturated plateaus has an infinite backward
                 gx, gy, gz, _ = grid.grad_from_recip(grid.fft(s_cav3e))
-                area = torch.sqrt(gx * gx + gy * gy + gz * gz + 1.0e-30).sum()
+                # MACE_PB1D_AREA_EPS (diagnostic knob, default = the 1e-30
+                # above): lets the second-order probe test the floor itself.
+                area = torch.sqrt(gx * gx + gy * gy + gz * gz
+                                  + float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30"))).sum()
+                if os.environ.get("MACE_PB1D_CAV_EXPORT"):
+                    # live (graph-attached) intermediates for the staged
+                    # second-order probe; never set in training.
+                    self.last_cav_export = {
+                        "ne_cav": ne_cav, "s_cav3e": s_cav3e, "gx": gx, "gy": gy,
+                        "gz": gz, "area": area, "grid": grid, "p": p,
+                        "m_ion3": m_ion3, "neutral_e": neutral_e, "net_g2": net_g2,
+                        "volume": volume, "pf": pf, "cfd": cfd}
                 if not do_s3d:
                     zero = area.new_zeros(())
                     zv = area.new_zeros(nz_pl)
