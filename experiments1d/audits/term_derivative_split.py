@@ -199,13 +199,25 @@ def forward_terms(at, keep_sid, want_grad):
         res = dict(E=float(pred["energy"].detach()),
                    F=pred["forces"].detach().cpu().numpy(),
                    terms={k: float(v.detach()) for k, v in tt.items()})
-        res["Fk"], res["disconnected"] = {}, []
+        # THREE cases, distinguished rather than merged, because they mean
+        # different things. allow_unused covers an unused INPUT; it does not
+        # cover an OUTPUT with no grad_fn, which raises instead (job 3431950).
+        #   no grad_fn        the term is detached from the whole graph -- true
+        #                     by construction for e0, a finding for anything else
+        #   grad returns None the term is in the graph but does not reach
+        #                     positions
+        #   otherwise         a real per-term force
+        res["Fk"], res["detached"], res["no_pos"] = {}, [], []
         for k, v in tt.items():
+            if not v.requires_grad:
+                res["Fk"][k] = np.zeros_like(res["F"])
+                res["detached"].append(k)
+                continue
             g = torch.autograd.grad(v, b["positions"], retain_graph=True,
                                     allow_unused=True)[0]
             if g is None:
                 res["Fk"][k] = np.zeros_like(res["F"])
-                res["disconnected"].append(k)
+                res["no_pos"].append(k)
             else:
                 res["Fk"][k] = (-g).detach().cpu().numpy()
         _evict()
@@ -249,11 +261,14 @@ for sc, sn in VALP:
             d1 = float(np.abs(fsum - base["F"]).max())
             print(f"  CLOSURE 2, sum of per-term autograd forces vs the "
                   f"returned force: max |diff| {d1:.3e} eV/A")
-            if base["disconnected"]:
-                print(f"  graph-DISCONNECTED terms (autograd force exactly "
-                      f"zero): " + ", ".join(SHORT[k] for k in base["disconnected"]))
-            else:
-                print(f"  every term is connected to positions in the graph")
+            det = [k for k in base["detached"] if k != "e0"]
+            print(f"  terms with NO grad_fn at all (detached from the graph): "
+                  + (", ".join(SHORT[k] for k in base["detached"]) or "none")
+                  + ("   <- e0 is a per-species constant, expected"
+                     if base["detached"] == ["e0"] else
+                     "   <- anything beyond e0 here is a finding" if det else ""))
+            print(f"  terms in the graph but NOT reaching positions: "
+                  + (", ".join(SHORT[k] for k in base["no_pos"]) or "none"))
             if abs(ssum - base["E"]) > 1e-6 or d1 > 1e-6:
                 print(f"  CLOSURE FAILED -- the decomposition is not the "
                       f"energy the model uses; stopping this cell")
