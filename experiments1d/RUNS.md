@@ -234,6 +234,72 @@ non-monotone trajectory means a longer run could differ. What is excluded is
 narrow and specific: lowering the force weight, on its own, from this state,
 does not make the paired charging energy move.
 
+### energy-force consistency: a stable z-axis derivative gap of 70-350 meV/A
+
+2 NiN44 val pairs, charged and neutral each, both baseline paths, h =
+0.005/0.01/0.02, 6 largest-|F_DFT| atoms per frame. MACE_PB1D_DFORCE unset
+throughout, solvent flags on in every arm, so each arm's FD is the slope of its
+own energy.
+
+GATES, all passed and all measured rather than assumed:
+  E(no_grad) == E(grad) to 2e-12..3e-10 eV in all 8 cells
+  every displaced forward performed 2 PB solves (no cache short-circuit; the
+    per-sid profile cache is empty and geometry-independent anyway)
+  solver provenance: n_outer 8 of a cap of 12, 0 of 24 at the cap, rms_last
+    max 5e-12 against tol 1e-3, every exit reason 'tol' for both the fixed-point
+    and the Newton loop -- converged on the criterion, not on the cap
+  the planar warm-up path cannot fire here: it is gated on training=True and
+    every forward is training=False
+
+| sid | state | path | auto-FD | auto-DFT | FD-DFT | h-drift | x | y | z |
+|---|---|---|---|---|---|---|---|---|---|
+| 28 | charged | train | 171.55 | 39.72 | 200.76 | 11.37 | 20.18 | 19.99 | 295.77 |
+| 28 | charged | deploy | 347.93 | 40.46 | 334.97 | 25.15 | 30.80 | 19.13 | 601.55 |
+| 628 | neutral | train | 329.52 | 27.71 | 329.11 | 11.37 | 23.75 | 20.71 | 569.88 |
+| 628 | neutral | deploy | 69.91 | 25.89 | 77.84 | 11.37 | 30.62 | 18.93 | 115.61 |
+| 30 | charged | train | 187.46 | 35.78 | 179.50 | 12.45 | 31.10 | 25.97 | 322.18 |
+| 30 | charged | deploy | 322.74 | 39.50 | 334.43 | 23.16 | 27.08 | 16.67 | 558.08 |
+| 630 | neutral | train | 327.19 | 33.01 | 314.04 | 12.40 | 22.32 | 25.60 | 565.67 |
+| 630 | neutral | deploy | 68.25 | 36.42 | 79.64 | 12.40 | 28.37 | 22.38 | 112.55 |
+
+(meV/A; the last three columns are the per-component rmse of auto - FD.)
+
+THE GAP IS REAL: auto-FD is 68-348 meV/A against a step-size drift of 11-25,
+a median factor of 14. This is the first row of the reading table -- the
+derivative disagrees with that path's own forward energy.
+
+IT IS THE SOLVENT AXIS: the z component carries 113-602 meV/A while x and y sit
+at 20-31, a median factor of 17. x and y are themselves comparable to the drift,
+so no gap is established there.
+
+F_auto IS THE ACCURATE ONE: auto-DFT is 26-40 meV/A in all 8 cells while FD-DFT
+is 78-335. The force the model returns matches DFT; the slope of its own energy
+does not.
+
+TWO CONSEQUENCES OF THAT, stated carefully.
+  The FD-DFT and auto-FD columns are NOT independent here. Because auto is
+  close to DFT, FD-DFT is numerically almost the same quantity as auto-FD in
+  every cell. This test yields one finding, not two.
+  Since FD measures the true slope and auto measures the graph's, a position
+  dependence that is detached from the graph appears in FD and not in auto. So
+  the energy carries a z-dependence of order 100-600 meV/A that the autograd
+  does not propagate, and removing it (i.e. using auto) is what agrees with
+  DFT. A plausible reading is that forces_weight 100 trained the autograd force
+  onto DFT while the undifferentiated part of the energy stayed unconstrained
+  and drifted -- that is a hypothesis, not something this test establishes.
+
+PATH AND CHARGE DEPENDENCE, reproducible across both geometries: for the
+charged frames the deployment path has the larger gap (348, 323 against 172,
+187); for the neutral frames the training path does (330, 327 against 70, 68).
+Two of two in each direction.
+
+LIMITS. Six largest-|F_DFT| atoms per frame, chosen to expose a gap: this does
+not establish that every atom's derivative is correct, and no full scan was
+run. A consistency test also cannot separate an energy-expression approximation
+from trained-parameter error, so nothing here assigns the gap a cause. Next
+step is the term-by-term localisation the user specified: 1-D solvent response,
+dipole correction, 3-D residual charge, cavity, baseline coupling.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
