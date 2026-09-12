@@ -634,6 +634,51 @@ and live centre/interface geometry; the source keeps them detached
 deliberately, so that is a design decision, not a bug fix, and is not taken
 here.
 
+### two corrections to earlier entries, and the stage-1 reconnection  (code a2a2523)
+
+CORRECTION 1. The zero-gradient finding (job 3432543 b) explains why pb1d_head
+did not adjust to the energy target. Extending it to local_electron_energy's
+0.04 eV charging response was a step too far: that is a different head, and
+the earlier gradient audit measured a non-zero energy gradient on it. How much
+of the ~5 eV charging error comes from these truncations is for the post-fix
+joint training to show, not for this audit to assert.
+
+CORRECTION 2. The partial-truncation scan drew its random projection vector
+from a generator that advanced between paths, so each path's autograd-vs-FD
+comparison used a DIFFERENT v. The per-path AD-FD disagreements stand; the
+"65% vs 12%" is not a fraction of the whole charge response lost and is not a
+quantitative cross-path comparison. It supports fixing the proven truncation;
+it does not judge the frozen baseline's physics.
+
+WHAT IS RECONNECTED, in computational order, all under MACE_PB1D_LIVE_POS
+(values unchanged; the user's configuration is LIVE_POS=1, GRAD_PASSES=0,
+DFORCE unset, keeping the existing baseline):
+  stage 1 (extensions.py _pb1d_stage1): want_grad follows the switch. Under
+    fresh_stage1 this pass is a fresh prior-only solve on the current geometry
+    every forward -- it never reads a previous encounter -- so keeping its
+    graph changes no algorithm. Its density input comp_charge_density is live
+    at its source and was cut only by want_grad=False.
+  the SCF's solvent-profile features (2165): take profile_features_grad, the
+    live twin the code already computes at 1907-1910, instead of the detached
+    prof_feat of 1893.
+  the stage-1 dipole into the slab-correction features (2184): passed live
+    instead of re-detached.
+  Read and confirmed detach-free on these inputs:
+    periodic_profile_layer_potential_field_nodes, the slab-correction feature
+    function, and their entry into the field-dependent charges.
+
+NOT touched, next by dependency order: comp_center_init (2140), the stage-1
+planar centre built from detached density and positions; then the post-SCF
+centre / interface-pooling detaches (2665-2670, 2749-2750), which sit after the
+charges form and cannot explain their missing response; and cavity_energy_g,
+detached-but-moving on the training path only.
+
+ACCEPTANCE reuses the existing scripts in one job (3432680): value identity
+under GRAD_PASSES=0, the 8-cell term split on both paths, the second-order
+parameter check (pb1d_head must now receive gradient; the density maps' 25-29%
+first-order error was attributed to this truncation), and the training-step
+cost -- stage 1 now carries a graph, so the +0.06 GiB figure is void.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
