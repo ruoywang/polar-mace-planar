@@ -62,8 +62,15 @@ W = {k: float(getattr(loss_fn, k).item()) for k in dir(loss_fn)
      if k.endswith("_weight") and torch.is_tensor(getattr(loss_fn, k, None)) and float(getattr(loss_fn, k).item()) > 0}
 def set_only(k):
     for kk, v in W.items(): getattr(loss_fn, kk).fill_(v if kk == k else 0.0)
-def terms(sid):
-    b = batch(sid); out = {}
+def terms(sid, b):
+    # the batch -- with its RANDOMLY SAMPLED density_3d / solvent3d points --
+    # is built once per frame by the caller and reused for both arms. The
+    # first version rebuilt it per call, so off and on were scored on
+    # different sample points and the two sampled losses appeared to change
+    # by 24-74% (job 3432847) while every deterministic term matched to
+    # 1e-11. The earlier cost run showed the loss identical to six decimals
+    # across three passes on one reused batch, which is the same fact.
+    out = {}
     with torch.enable_grad():
         pred = model(b.to_dict(), training=True, compute_force=True)
         for k in W:
@@ -74,8 +81,9 @@ def terms(sid):
 print(f"model {os.path.basename(mp)} @ {os.path.basename(cp)}  training=True  GRAD_PASSES=0  frames {FR}")
 worst_nonforce = 0.0
 for sid in FR:
-    os.environ.pop("MACE_PB1D_LIVE_POS", None); off = terms(sid)
-    os.environ["MACE_PB1D_LIVE_POS"] = "1";   on = terms(sid)
+    b = batch(sid)
+    os.environ.pop("MACE_PB1D_LIVE_POS", None); off = terms(sid, b)
+    os.environ["MACE_PB1D_LIVE_POS"] = "1";   on = terms(sid, b)
     os.environ.pop("MACE_PB1D_LIVE_POS", None)
     print(f"\nframe {sid}:  {'loss term':>28} {'LIVE_POS off':>14} {'LIVE_POS on':>14} {'|diff|':>11}")
     for k in list(W) + ["TOTAL"]:
@@ -85,5 +93,13 @@ for sid in FR:
             worst_nonforce = max(worst_nonforce, d)
             if d > 1e-9: tag = "  <- CHANGED: not a gradient-only switch"
         print(f"          {k:>28} {off[k]:14.8f} {on[k]:14.8f} {d:11.3e}{tag}")
+# controls on the last frame: same arm, same batch (must be 0); same arm,
+# rebuilt batch (shows the sampling spread the first version mistook for a
+# value change)
+os.environ.pop("MACE_PB1D_LIVE_POS", None)
+a1 = terms(FR[-1], b); a2 = terms(FR[-1], b); a3 = terms(FR[-1], batch(FR[-1]))
+print(f"\ncontrols, frame {FR[-1]}, LIVE_POS off:")
+for k in ("density_3d_weight", "solvent3d_weight", "forces_weight", "TOTAL"):
+    print(f"   {k:>22}: same batch twice |diff| {abs(a1[k]-a2[k]):.3e}   rebuilt batch |diff| {abs(a1[k]-a3[k]):.3e}")
 print(f"\nworst non-force loss-term difference: {worst_nonforce:.3e}  ->  "
       + ("ALL NON-FORCE TERMS UNCHANGED" if worst_nonforce < 1e-9 else "A NON-FORCE TERM CHANGED"))
