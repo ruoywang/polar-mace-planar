@@ -427,6 +427,54 @@ being measured; (b) make J_c theta-differentiable and iterate the differentiable
 step so phi_star carries first-order theta dependence -- more code, second-order
 correct to the needed order, cheaper if (a) is not affordable.
 
+### LIVE_POS acceptance: deployment path closed, training-cache path partial  (code d51cc7b, jobs 3432525/3432532)
+
+Value-identity gate PASSED first: same frames, switch off vs on in one process,
+both paths, with and without compute_force, 16 cells: worst forward-value
+difference 2.567e-10 eV over the total energy and every term. Forces moved by
+253-1831 meV/A max, as intended.
+
+Per-term RMS(D_k) over all 18 components, meV/A, LIVE_POS 0 -> 1:
+
+| cell | D_total | E_bl | solute ES | comp 1D | slab dip | local_e |
+|---|---|---|---|---|---|---|
+| 28 train | 171.5 -> 22.8 | 366.3 -> 54.8 | 154.4 -> 154.4 | 56.5 -> 4.5 | 6.3 -> 63.0 | 14.7 -> 14.7 |
+| 28 deploy | 347.9 -> 6.3 | 414.1 -> 5.0 | 3.4 -> 3.4 | 67.4 -> 0.7 | 1.1 -> 1.4 | 0.4 -> 0.4 |
+| 628 train | 329.5 -> 70.9 | 354.3 -> 37.7 | 42.0 -> 42.0 | 181.8 -> 2.5 | 125.4 -> 2.1 | 16.0 -> 16.0 |
+| 628 deploy | 69.9 -> 6.5 | 77.6 -> 0.5 | 1.8 -> 1.8 | 11.8 -> 0.0 | 1.3 -> 0.0 | 0.4 -> 0.4 |
+| 30 train | 187.5 -> 9.0 | 402.6 -> 92.1 | 152.1 -> 152.1 | 96.6 -> 20.5 | 12.7 -> 52.4 | 15.2 -> 15.2 |
+| 30 deploy | 322.7 -> 7.2 | 385.2 -> 4.6 | 2.2 -> 2.2 | 62.6 -> 1.0 | 0.8 -> 0.8 | 0.3 -> 0.3 |
+| 630 train | 327.2 -> 75.5 | 340.5 -> 32.2 | 41.4 -> 41.4 | 184.1 -> 2.0 | 128.8 -> 2.1 | 16.2 -> 16.2 |
+| 630 deploy | 68.3 -> 5.8 | 75.7 -> 0.5 | 2.0 -> 2.0 | 11.8 -> 0.0 | 1.5 -> 0.1 | 0.4 -> 0.4 |
+
+(cavity 0-10.2 and solvent3D 4.3-21.9 essentially unchanged; energy head
+1.3-1.5 is the connected-term floor.)
+
+DEPLOYMENT PATH: ACCEPTED. D_total 5.8-7.2 and E_bl's own D_k 0.5-5.0, both
+at or below the 11-25 meV/A step-size drift measured in step 1. The returned
+force is now the derivative of the energy on this path to FD resolution.
+
+TRAINING-CACHE PATH: PARTIAL. D_total falls 4-21x (171.5->22.8, 329.5->70.9,
+187.5->9.0, 327.2->75.5) but E_bl's own D_k is still 32-92 RMS with max|D|
+98-281, above the drift. The acceptance criterion -- E_bl's autograd force
+equal to its FD -- is met on deployment and NOT yet on the training path.
+
+Three terms keep a gap ONLY on the training path and all three couple solvent
+charge to solute potential: E_bl (32-92), solute electrostatics (152-154 on
+the charged frames, 41-42 neutral, UNTOUCHED by LIVE_POS), and the slab dipole
+correction, which got WORSE on the charged frames (6.3->63.0, 12.7->52.4)
+while closing on the neutral ones (125->2). On deployment the same three sit
+at 0.5-5.0, 1.8-3.4 and 0.0-1.4. So there is a truncation specific to the
+frozen-baseline path that pf_in did not reach, and the slab dipole's growth
+says a live path there now carries a derivative that disagrees with FD rather
+than merely missing one. Not localised yet. The frozen baseline itself is not
+the candidate: its zero position response is by that path's definition and FD
+sees the same zero.
+
+Diagnostic queued: the same split under GRAD_PASSES=0 on the four training
+cells, to separate "the analytic adjoint's first-order position gradient is
+incomplete on this path" from "the truncation is outside the solver".
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
