@@ -2003,10 +2003,23 @@ class PolarMACE(ScaleShiftMACE):
         """Scheme C stage 1: SCF features from the cached previous-encounter
         profile; first encounter = fresh prior-only solve on the pre-recursion
         density (detached), which also seeds the cache."""
+        # MACE_PB1D_LIVE_POS (2026-09-12): stage 1 keeps its inputs, its
+        # prior-only solve and its output VALUES exactly as before, but the
+        # graph is kept. Under fresh_stage1 this pass is a fresh solve on the
+        # current geometry every forward -- it never reads a previous
+        # encounter -- so there is no algorithm change in letting its density
+        # input (live at its source, comp_charge_density), its profile and its
+        # dipole carry gradients into the SCF. Measured reason: on the
+        # frozen-baseline path the SCF charges' position response was ~65%
+        # truncated (one projection; not a cross-path ratio), which the
+        # partial-truncation scan traced to this pass's detached outputs.
         return self._pb1d_run_graphs(
             data, positions, cell, radial_blocks, node_valence_electrons,
             num_graphs, planar_center,
-            use_head=False, want_grad=False, use_cache_rows=True, write_cache=True,
+            use_head=False,
+            want_grad=bool(os.environ.get("MACE_PB1D_LIVE_POS")
+                           or os.environ.get("MACE_PB1D_DFORCE")),
+            use_cache_rows=True, write_cache=True,
         )
 
     @torch.jit.ignore
@@ -2162,7 +2175,11 @@ class PolarMACE(ScaleShiftMACE):
                 _compensation_external_field_nodes,
             ) = _slab_compensation_profile_features(
                 external_field_block=self.external_field_contribution,
-                profile=pb_solvent_data["profile_features"],
+                # the live profile is the same computation without the
+                # detach (extensions.py:1907-1910 vs 1893); present only when
+                # stage 1 ran with want_grad, i.e. under LIVE_POS / DFORCE
+                profile=pb_solvent_data.get(
+                    "profile_features_grad", pb_solvent_data["profile_features"]),
                 cell=cell.detach(),
                 pbc=data["pbc"].view(-1, 3),
                 batch=data["batch"],
@@ -2181,7 +2198,11 @@ class PolarMACE(ScaleShiftMACE):
                 positions=positions,
                 sigma_g=self.solvent_sigma_g,
                 axis=self.solvent_potential_axis,
-                solvent_mu_override=pb_solvent_data["solvent_mu"].detach(),
+                solvent_mu_override=(
+                    pb_solvent_data["solvent_mu"]
+                    if (os.environ.get("MACE_PB1D_LIVE_POS")
+                        or os.environ.get("MACE_PB1D_DFORCE"))
+                    else pb_solvent_data["solvent_mu"].detach()),
             )
         else:
             (
