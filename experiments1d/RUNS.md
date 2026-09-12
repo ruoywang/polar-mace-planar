@@ -983,6 +983,42 @@ A submission defect to record: `sbatch --export=ALL,KIT_FLOORS=a,b,c` is
 split at the commas by sbatch, so only the first floor ran (3433303);
 the list has to go through the environment (`KIT_FLOORS=... sbatch`).
 
+### acceptance under MACE_PB1D_AREA_EPS = 1e-12  (job 3433309, code 568c9f6; LIVE_POS=1 GRAD_PASSES=0)
+
+1. VALUE IDENTITY off vs on (16 cells): worst off-vs-on 1.24e-9 eV, worst
+   on-vs-on floor 4.98e-10, threshold 4.98e-9 -> unchanged. The floor's own
+   value effect is visible and is the predicted one: sid 28 train E
+   -1306.584202658 -> -1306.584183703, +1.90e-5 eV (scan predicted +1.895e-5
+   on E_cav). Both arms of the A/B carry the same floor, so this offset is
+   common to them.
+2. PER-TERM FORCE vs FD, 8 cells: identical to the 1e-30 run to the printed
+   digit -- cavity 0.00-0.03, solvent3D 0.00-0.02, E_bl unchanged, D_total
+   1.47 / 1.47 / 1.35 / 1.31 (train) and 3.35 / 1.49 / 2.76 / 1.40 (deploy)
+   meV/A. The first derivative does not see the floor.
+3. SECOND ORDER, same script as 3433245, relative error at GRAD_PASSES=0:
+
+| group | quantity | sid 28: 1e-30 -> 1e-12 | sid 628: 1e-30 -> 1e-12 |
+|---|---|---|---|
+| density maps | v.dL_F | 7.5% -> 0.42% (FD drift 0.32%) | unreadable at eps 1e-4/3e-5 (drift 103%); the staged probe at eps 1e-5: 0.99% -> 0.030% |
+| products | v.dL_F | 0.029% -> 4.4e-6 | 0.37% -> 1.2e-5 |
+| pb1d_head | v.dL_F | 0.039% -> 0.023% | 7.5e-7 -> 7.1e-8 |
+| control local_e | v.dL_F | 0.026% | 5.2e-7 |
+| all groups | v.dE | 4.1e-6 / 5.8e-6 / 5.2e-8 / 7.5e-5 | 0.36% (eps) / 1.6e-7 / 3.5e-9 / 1.3e-4 |
+
+   At GRAD_PASSES=1 the second order is still wrong (density maps 8951%,
+   pb1d_head 1329% / 450%, products 9.8% / 576%): GRAD_PASSES=0 stays.
+
+STATE OF THE DERIVATIVE REPAIR, all accepted: values unchanged by the
+switches (gate against the measured floor); per-term force = FD on both paths
+(training D_total 1.3-1.5 meV/A, in the interaction term, no solvent
+dependence); first-order parameter derivatives exact (density maps 29% -> 4e-6);
+second-order parameter derivatives exact to the FD drift for every group
+(density maps 26.8% -> 7.5% -> 0.42%); loss terms other than the force
+unchanged; cost 20.6 / 23.9 GiB per 207 / 339-atom frame, 27.8 GiB per GPU in
+3-GPU DDP, cold epoch 16 min. Training setting for arm B:
+MACE_PB1D_LIVE_POS=1 MACE_PB1D_GRAD_PASSES=0 MACE_PB1D_AREA_EPS=1e-12, DFORCE
+unset; arm A: LIVE_POS unset, GRAD_PASSES default, AREA_EPS=1e-12.
+
 ### arm-B GPU gate before the joint A/B  (job 3433252, code 6ec75bf; run dir 3-residual_3D/ab_deriv_gate)
 
 Arm B = MACE_PB1D_LIVE_POS=1, MACE_PB1D_GRAD_PASSES=0, DFORCE unset; gate_le
