@@ -950,6 +950,39 @@ Value cost bound: <= (number of points with |grad| < sqrt(floor)) x
 sqrt(floor) x TAU dV; at 1e-12 that is <= 7.5e5 x 1e-6 x 2.56e-5 = 1.9e-5 eV
 on E_cav = 3.94 eV, measured exactly by the scan.
 
+### floor scan and decision: MACE_PB1D_AREA_EPS = 1e-12  (job 3433308, code 13c1312)
+
+Same staged probe, floors 1e-20 ... 1e-10 on the exported gradients, with
+the value change of area and E_cav at theta. AD-FD relative (FD drift) for
+the area's force-loss gradient, and the value cost:
+
+| floor | sid 28 | sid 628 | E_cav change (28 / 628) |
+|---|---|---|---|
+| 1e-30 (current) | 8.25e-2 (2.9e-4) | 9.9e-3 (5.4e-3) | 0 |
+| 1e-20 | 5.3e-2 (2.6e-4) | 1.2e-2 (5.5e-3) | +8.0e-12 / +7.1e-12 eV |
+| 1e-18 | 5.4e-2 (3.6e-4) | 8.7e-4 (5.4e-3) | +5.1e-10 / +4.4e-10 |
+| 1e-16 | 8.4e-3 (1.2e-3) | 5.2e-3 (4.6e-3) | +2.5e-8 / +2.1e-8 |
+| 1e-14 | 1.4e-2 (1.6e-3) | 6.8e-3 (3.7e-3) | +8.0e-7 / +7.0e-7 |
+| 1e-12 | 2.7e-4 (8.4e-4) | 3.0e-4 (1.0e-3) | +1.9e-5 / +1.7e-5 |
+| 1e-10 | 4.9e-6 (4.4e-5) | 1.4e-6 (1.1e-5) | +3.5e-4 / +3.3e-4 |
+
+Not monotonic between 1e-18 and 1e-14 (the amplified population moves as
+the floor moves through it); closed within the FD drift from 1e-12 on, on
+both frames. DECISION: 1e-12, i.e. |grad| floor 1e-6 1/A against a maximum
+|grad s_cav| of 2.3 1/A. Value cost +1.9e-5 eV on E_cav 3.94 eV (4.8e-6 of
+the area), 0.09 micro-eV per atom -- five orders below the energy error
+being trained (10 meV/atom = 2 eV per frame); 1e-10 would close ten times
+tighter at 3.5e-4 eV and is the fallback if the population grows during
+training. Set in BOTH arms of the A/B (arm A's cavity has no parameter
+gradient -- ne_cav detached -- so there it changes the value only, by the
+same amount). Acceptance under the new floor queued (job_floor12.sh): value
+identity off-vs-on, 8-cell term split, and the second-order check with the
+script of 3433245.
+
+A submission defect to record: `sbatch --export=ALL,KIT_FLOORS=a,b,c` is
+split at the commas by sbatch, so only the first floor ran (3433303);
+the list has to go through the environment (`KIT_FLOORS=... sbatch`).
+
 ### arm-B GPU gate before the joint A/B  (job 3433252, code 6ec75bf; run dir 3-residual_3D/ab_deriv_gate)
 
 Arm B = MACE_PB1D_LIVE_POS=1, MACE_PB1D_GRAD_PASSES=0, DFORCE unset; gate_le
