@@ -734,6 +734,117 @@ NEXT, by dependency: comp_center_init (2140) -> post-SCF centres (2665-2670,
 2749-2750) -> cavity (training path) -> solvent3D's partial truncation; then
 the joint A/B with LIVE_POS=1, GRAD_PASSES=0, DFORCE unset.
 
+### cavity and solvent3D reconnection: acceptance  (code 20a0fbb; audits b0ace4d, 28190fc, 51cd604; jobs 3432886, 3432998, 3433193, 3433228; LIVE_POS=1 GRAD_PASSES=0)
+
+WHAT CHANGED (20a0fbb, pb1d_backend.py _stage2_energy): ne_cav = ne2 stays live
+under LIVE_POS (it was ne2.detach() on the training path, so the cavity and the
+envelopes saw no position response through the SCF charges), and delta_b /
+delta_i are no longer detached before the solvent3D energy unless neither
+MACE_S3D_LIVE_DELTA nor LIVE_POS is set. Values untouched by construction (1).
+
+1. VALUE IDENTITY against a MEASURED floor (3433193; 16 cells = 4 sids x
+   train/deploy x force off/on). The fixed 1e-9 eV gate of the earlier runs sat
+   below the iterative solve's own run-to-run scatter, so the gate is now 10x
+   the on-vs-on floor measured in the same job. Worst off-vs-on |dE| 7.31e-10
+   eV (sid 28 train, force=0), worst on-vs-on floor 9.08e-10 eV, largest
+   per-cell ratio 5.8, threshold 9.08e-9 eV. Energies -1306.584202658 /
+   -1305.015926664 / -1306.408789702 / -1304.511542449 eV on the training
+   path, identical off and on to the digits shown.
+
+2. PER-TERM FORCE vs FD (3432886), RMS over all 18 components, meV/A, h =
+   0.01 A, before (a2a2523, job 3432680) -> after (20a0fbb):
+
+| cell | D_total | cavity | solv3D | E_bl | energy head |
+|---|---|---|---|---|---|
+| 28 train | 7.53 -> 1.47 | 4.51 -> 0.00 | 9.37 -> 0.00 | 0.02 -> 0.02 | 1.47 -> 1.47 |
+| 628 train | 20.10 -> 1.47 | 8.41 -> 0.01 | 13.54 -> 0.00 | 0.01 -> 0.01 | 1.47 -> 1.47 |
+| 30 train | 5.87 -> 1.35 | 10.24 -> 0.00 | 13.32 -> 0.01 | 0.18 -> 0.18 | 1.35 -> 1.35 |
+| 630 train | 10.78 -> 1.31 | 3.63 -> 0.01 | 9.75 -> 0.01 | 0.02 -> 0.02 | 1.35 -> 1.35 |
+| 28 deploy | 6.28 -> 3.35 | 0.00 -> 0.00 | 4.63 -> 0.00 | 3.30 -> 3.30 | 1.47 -> 1.47 |
+| 628 deploy | 5.54 -> 1.49 | 0.00 -> 0.00 | 4.96 -> 0.00 | 0.54 -> 0.54 | 1.47 -> 1.47 |
+| 30 deploy | 7.00 -> 2.76 | 0.00 -> 0.00 | 6.10 -> 0.00 | 2.78 -> 2.78 | 1.35 -> 1.35 |
+| 630 deploy | 4.68 -> 1.40 | 0.01 -> 0.01 | 4.30 -> 0.00 | 0.52 -> 0.52 | 1.35 -> 1.35 |
+
+   Closures in every cell: sum of terms = model energy to 3.4e-12 eV; sum of
+   per-term autograd forces = returned force to <= 4.4e-8 eV/A; sum of
+   per-term FD = total FD to <= 3.9e-8 meV/A; sum_k D_k = D_total component
+   by component to <= 9.0e-6 meV/A. Cavity and solvent3D are CLOSED on both
+   paths; the training-path D_total drops 4-14x. E_bl is unchanged in all
+   eight cells, as it must be (this patch does not touch it). What remains on
+   the training path, 1.31-1.49, is the energy-head (interaction energy) term:
+   identical in all four cells of a geometry (charged/neutral, train/deploy),
+   so it carries no solvent dependence; whether it is FD truncation at h =
+   0.01 A on the short-range network was not measured for that term alone.
+   Deployment keeps E_bl on the charged frames at 3.30 / 2.78 (max |D| 8.7 /
+   7.5), the rho_solv d(Phi_b)/dR piece recorded under LIVE_POS acceptance;
+   deployment is not the training path and was not the target here.
+
+3. DENSITY-MAP PARAMETER GRADIENT, split by energy term (3433228 at 51cd604;
+   the same section in 3432886 crashed because E0 has no grad_fn -- the script
+   now sets AD_k := 0 for such a term and prints which). Same random direction
+   v as the second-order check (FD(E) identical: 4.854780e-02 / 4.611300e-02),
+   so this is the direct before -> after of the 29.2% / 24.6% first-order
+   error recorded in the stage-1 entry:
+
+   sid 28, field_dependent_charges_maps (75816 params): AD 4.854760e-02 vs FD
+     4.854780e-02, D_total -1.93e-07 = -4.0e-6 relative (before: auto
+     3.435951e-02, -29.2%). Per term: E_bl -2.8e-07, cavity +6.1e-08, comp 1D
+     +4.5e-08, solv3D -1.3e-08, the rest <= 6e-09; sum_k D_k = D_total to
+     8.4e-12; every D_k is below that term's own FD drift.
+   sid 628, same group: AD 4.594609e-02 vs FD(eps 1e-4) 4.611300e-02, D_total
+     -1.67e-04 = -0.36% (before: auto 3.475703e-02, -24.6%). 100.0% of it is
+     the solv3D term, whose FD_k drifts 1.66e-2 relative between eps = 1e-4
+     and 3e-5; against the eps = 3e-5 FD of the same direction (4.594602e-02,
+     job 3432680's table) autograd agrees to 1.5e-6 relative. The residual is
+     the FD reference's truncation on that term, not the derivative.
+   products (126336 params; v drawn second here, so a different direction
+     from the second-order check): D_total -2.05e-08 (-1.7e-6 relative) /
+     +2.14e-10 (+1.5e-8 relative); the energy head's own gradient through
+     products, 1.35507e-02, agrees to 6e-13.
+   So the 25-29% first-order error WAS the cavity + solvent3D detach
+   (ne2.detach() and delta_b/delta_i.detach() in _stage2_energy), downstream
+   of stage 1 as the previous entry predicted, and it is closed. The
+   second-order quantity v.dL_F is being re-measured at 51cd604 with the same
+   script (job 3433245); before, at GRAD_PASSES=0: density maps 26.8%,
+   products 1.2%, pb1d_head 0.11%, control 0.018%.
+
+4. LOSS-TERM IDENTITY (3432998, code 28190fc: both arms scored on ONE sampled
+   batch; the first version rebuilt the batch per arm, and the unseeded
+   sample-point draw made density_3d / solvent3d look changed). LIVE_POS off
+   -> on, three NiN44 train frames, training=True, GRAD_PASSES=0: all eleven
+   non-force terms identical to <= 5.2e-11 (fermi_level, frame 1); the force
+   term 0.0803 -> 3.1629, 0.0662 -> 2.0967, 0.0793 -> 1.9089 (x39, x32, x24);
+   TOTAL 0.660 -> 3.742, 0.666 -> 2.696, 0.698 -> 2.528. Controls (frame 3,
+   off): same batch twice, density_3d 1.2e-15, solvent3d 2.0e-13, forces
+   1.1e-12; rebuilt batch, density_3d 7.3e-2, solvent3d 7.5e-2, forces
+   2.1e-12 -- the rebuilt-batch numbers are the sampling noise behind the
+   earlier false reading. The loss rise recorded in the stage-1 entry
+   (2.6997 -> 3.7375 on frame 1) is therefore the force term and nothing
+   else: the reconnected force -- the actual slope of the energy the model
+   returns -- is much farther from DFT than the truncated force was. That is
+   the state of this checkpoint, trained on a force that was not its energy's
+   derivative; it is not a defect of the patch.
+
+5. COST with the full graph (3432886; three NiN44 train frames, epoch-39
+   path, batch 1, fwd + loss + bwd): peak 20.58 GiB at GRAD_PASSES=0, 20.46
+   at 1; before this patch 16.45 / 16.33 (stage 1 in the graph); before
+   stage 1 12.99 / 12.93. Cavity + solvent3D add +4.1 GiB; the whole
+   reconnection is +7.6 GiB (+58%) over the LIVE_POS-only graph, for a
+   207-atom frame on a 40 GB A100. The 339-atom frames (160 of the 640
+   training frames) were NOT measured and must be before any training job.
+   Time per frame, mean of three (noisy, first call included): 3.86 s at
+   gp=0 against 3.65 before.
+
+All commits pushed from a compute node (3433229; gh cannot start on the login
+node under its 300-thread limit while this session's daemon holds ~228).
+
+NEXT: the joint A/B retraining agreed with the user -- arm A: LIVE_POS unset,
+GRAD_PASSES default (1); arm B: LIVE_POS=1, GRAD_PASSES=0; DFORCE unset in
+both; same code, seed, config, data order, loss weights and epoch budget; the
+native electron head trained in both; no new correction term -- after a GPU
+gate that measures arm B's peak memory on the 339-atom frames and one full
+3-GPU DDP epoch on the post-warmup path.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
