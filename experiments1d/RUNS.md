@@ -1055,6 +1055,75 @@ production-queue choice is the user's. Both arms' directories, configs and
 job scripts are in place (3-residual_3D/ab_deriv_A, ab_deriv_B; job.sh
 takes MAXEP for a split protocol); nothing submitted.
 
+### segmented A/B on gpu-a100-dev: a resume that is the continuous run  (code dfc1005 / db4dda7; user decision 2026-09-12)
+
+DECISION (user): run the joint A/B on gpu-a100-dev in segments of at most
+2 h, alternating arms on one 3-GPU node; warm-up 20 epochs instead of 30,
+40 epochs total; the final full evaluation runs separately.
+
+WHY THE EXISTING restart_latest CANNOT BE THE SPLICE (user's reading,
+confirmed in code and in gate_le's own log):
+1. the checkpoint holds the EMA-averaged weights (saved under
+   ema.average_parameters()) next to the RAW trajectory's Adam moments, and
+   the EMA is re-created from those averaged weights on restart
+   (run_train 1415, torch_ema num_updates back to 0 -> effective decay 0.1
+   for the first steps);
+2. the saved epoch is repeated: start_epoch = the epoch in the filename;
+   gate_le resumed from epoch-37.pt and logged Epoch 37 again (05:21:58);
+3. no RNG stream is saved: the loss's two sample-point RNGs
+   (density_3d_rng, solvent3d_rng: random.Random per rank, seed + rank), the
+   DataLoader generators (worker base seeds), python/numpy/torch streams;
+4. also: the first resumed epoch skips the scheduler step a continuous run
+   takes (train.py `if epoch > start_epoch`), and the pre-training validation
+   pass is re-run, advancing the loss RNGs.
+
+WHAT WAS ADDED (mace/tools/train.py, run_train.py, arg_parser.py):
+--segment_stop_epoch N     after completing epoch N: all ranks all_gather
+                           their RNG streams, rank 0 writes
+                           checkpoints/segments/<tag>_segment_state.pt (+ a
+                           per-epoch copy) holding raw weights, optimizer,
+                           lr_scheduler, EMA state (shadow params +
+                           num_updates), next_epoch = N+1, lowest_loss,
+                           valid_loss, patience, keep_last, the checkpoint
+                           handler's old_path, and per-rank {python, numpy,
+                           torch CPU, torch CUDA, train/valid loader
+                           generators, density_3d_rng, solvent3d_rng}; then
+                           exits before the final evaluation (unless N is the
+                           last epoch, where the normal completion follows).
+--segment_time_budget S    same stop at an epoch boundary when elapsed +
+                           1.15 x last epoch would exceed S seconds from
+                           process start.
+--resume_state PATH        load all of the above, start at next_epoch, skip
+                           the pre-training validation, take the scheduler
+                           step at the first resumed epoch with the saved
+                           valid_loss.
+--skip_final_eval          model files yes, error tables no.
+The DistributedSampler already draws its order from (seed, epoch), so the
+data order is segment-independent. Nothing else in the model carries state
+across epochs: the PB caches (_grids, _solvers, _bl_ram, _c_units) are
+recomputed values; _phi_warm_stash is a single (sid, nz) entry reused only
+within one frame; the profile cache is never written with fresh_stage1.
+
+EQUIVALENCE TEST (job 3434309, 3-residual_3D/resume_check): 12 train frames
+(sids 1-5, 8 and their neutral partners), 6 val (28/628, 30/630, 43/643),
+arm-B switches, warmup 1 so epochs 1-2 run the full PB path, 3 GPUs.
+X = continuous 0-2; X2 = the same again (the run-to-run floor from
+non-deterministic CUDA scatter/index_add); Y = stop after epoch 1, resume,
+epoch 2. resume_equivalence.py compares X-Y against X-X2 on raw parameters,
+EMA shadow parameters, Adam exp_avg / exp_avg_sq / max_exp_avg_sq and step
+counts, the scheduler dict, the best-loss bookkeeping, every rank's RNG
+streams (must be identical), and the epoch-2 validation lines.
+
+PLAN AFTER THE TEST (per arm; both arms identical): segments STOP = 19
+(warm-up, ~20 x 2.2 min + startup), 24, 29, 34, 39 (5 full-PB epochs each:
+B at most 5 x 16 min = 80 min + startup on the cold-model estimate, A ~25
+min), 6000 s budget guard in every segment, the segment completing epoch 39
+writes the model files and skips the tables; ab_eval.py on both arms
+afterwards. Configs: gate_le's with warmup_encounters 20, restart_latest
+False, save_latest_every 0, an empty cache dir per arm; env A: LIVE_POS
+unset, GRAD_PASSES default, AREA_EPS=1e-12; env B: LIVE_POS=1,
+GRAD_PASSES=0, AREA_EPS=1e-12; DFORCE unset in both.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
