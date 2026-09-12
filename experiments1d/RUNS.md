@@ -679,6 +679,61 @@ parameter check (pb1d_head must now receive gradient; the density maps' 25-29%
 first-order error was attributed to this truncation), and the training-step
 cost -- stage 1 now carries a graph, so the +0.06 GiB figure is void.
 
+### stage-1 reconnection: acceptance  (code a2a2523, job 3432680, LIVE_POS=1 GRAD_PASSES=0)
+
+1. VALUE IDENTITY: passed. Switch off vs on, both paths, with and without
+   compute_force, 16 cells: energies and every energy term identical below
+   1e-9 eV. The original checkpoint's paired charging energy and its ~5 eV
+   error are therefore unchanged by construction.
+
+2. PER-TERM FORCE vs FD, RMS over 18 components (meV/A), before -> after:
+
+| cell | D_total | E_bl | solute ES | slab dip | comp 1D | local_e | cavity | solv3D |
+|---|---|---|---|---|---|---|---|---|
+| 28 train | 22.8 -> 7.5 | 54.8 -> 0.0 | 154.4 -> 0.1 | 63.0 -> 0.0 | 4.5 -> 0.0 | 14.7 -> 0.0 | 4.5 -> 4.5 | 9.0 -> 9.4 |
+| 628 train | 70.9 -> 20.1 | 37.7 -> 0.0 | 42.0 -> 0.1 | 2.1 -> 0.0 | 2.5 -> 0.0 | 16.0 -> 0.0 | 8.4 -> 8.4 | 20.4 -> 13.5 |
+| 30 train | 9.0 -> 5.9 | 92.1 -> 0.2 | 152.1 -> 0.1 | 52.4 -> 0.0 | 20.5 -> 0.1 | 15.2 -> 0.0 | 10.2 -> 10.2 | 6.2 -> 13.3 |
+| 630 train | 75.5 -> 10.8 | 32.2 -> 0.0 | 41.4 -> 0.1 | 2.1 -> 0.0 | 2.0 -> 0.0 | 16.2 -> 0.0 | 3.6 -> 3.6 | 14.5 -> 9.8 |
+| 28 deploy | 6.3 -> 6.3 | 5.0 -> 3.3 | 3.4 -> 0.1 | 1.4 -> 0.0 | 0.7 -> 0.5 | 0.4 -> 0.0 | 0.1 -> 0.0 | 4.6 -> 4.6 |
+| 628 deploy | 6.5 -> 5.5 | 0.5 -> 0.5 | 1.8 -> 0.1 | 0.0 -> 0.0 | 0.0 -> 0.1 | 0.4 -> 0.0 | 0.0 -> 0.0 | 4.9 -> 5.0 |
+| 30 deploy | 7.2 -> 7.0 | 4.6 -> 2.8 | 2.2 -> 0.1 | 0.8 -> 0.0 | 1.0 -> 0.4 | 0.3 -> 0.0 | 0.1 -> 0.0 | 6.2 -> 6.1 |
+| 630 deploy | 5.8 -> 4.7 | 0.5 -> 0.5 | 2.0 -> 0.1 | 0.1 -> 0.0 | 0.0 -> 0.1 | 0.4 -> 0.0 | 0.0 -> 0.0 | 4.3 -> 4.3 |
+
+   E_bl ACCEPTED on both paths: max|D| 0.03-0.77 meV/A on the training path,
+   1.5-8.7 on deployment (within the 11-25 step-size drift; the deployment
+   residual on the charged frames is of the size of the rho_solv d(Phi_b)/dR
+   piece measured earlier, 14-19 max). The SCF charges' position response is
+   restored: solute electrostatics 41-154 -> 0.1, slab dipole 52-63 -> 0.0,
+   comp 1D -> <= 0.1, local_electron 15-16 -> 0.0, all on the training path
+   where they had stayed after LIVE_POS alone. Remaining, both paths: cavity
+   (training path only, 3.6-10.2, the known detach) and solvent3D (4.3-13.5,
+   altered by the fix -- 20.4 -> 13.5, 6.2 -> 13.3 -- but not closed: a
+   partial truncation of its own). D_total is now those two.
+
+3. SECOND ORDER, read per the user's frame:
+   regression -- pb1d_head stays exact: v.dE 4.4e-05 / 1.5e-07, v.dL_F at
+     GRAD_PASSES=0 1.1e-03 / 3.1e-07. Not credited to this patch.
+   not a criterion -- density maps' first-order energy-gradient error is
+     UNCHANGED to four digits (0.2923 / 0.2463 before and after):
+     field_dependent_charges_maps is applied after the recursion, downstream
+     of stage 1, so this 25-29% is a downstream truncation and the next item.
+     A parameter derivative is cut where a parameter-dependent quantity is
+     detached; the centres built from detached density (comp_center_init at
+     2140; z_e50 / solv_center at 2665-2670) fit that.
+   trunk v.dL_F at GRAD_PASSES=0: 11% -> 1.2%, 44% -> 4.4%. Control exact.
+
+4. COST, stage 1 in the graph: peak 16.45 GiB at GRAD_PASSES=0 (16.33 at 1),
+   against 12.99 / 12.93 before -- +3.4 GiB (+26%), fine on 40 GB; time per
+   frame mean 3.65 s (gp=0) / 2.35 s (gp=1) against 3.34 / 2.07, i.e. +10-15%.
+   The full training loss ROSE with energies identical (frame 1: 2.699734 ->
+   3.737508). The expected cause is the force term -- the reconnected force
+   is farther from DFT, as anticipated -- but the observable terms were not
+   individually gated; loss_terms_identity.py does that before any A/B.
+
+NEXT, by dependency: comp_center_init (2140) -> post-SCF centres (2665-2670,
+2749-2750) -> cavity (training path) -> solvent3D's partial truncation; then
+the joint A/B with LIVE_POS=1, GRAD_PASSES=0, DFORCE unset.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
