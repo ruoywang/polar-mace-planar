@@ -191,44 +191,134 @@ def term_tensors(pred, b):
 
 
 def forward_terms(at, keep_sid, want_grad):
-    b = build(at, keep_sid)
-    if want_grad:
-        b["positions"].requires_grad_(True)
-        pred = model(b.to_dict(), compute_force=True, training=False)
-        tt = term_tensors(pred, b)
-        res = dict(E=float(pred["energy"].detach()),
-                   F=pred["forces"].detach().cpu().numpy(),
-                   terms={k: float(v.detach()) for k, v in tt.items()})
-        # THREE cases, distinguished rather than merged, because they mean
-        # different things. allow_unused covers an unused INPUT; it does not
-        # cover an OUTPUT with no grad_fn, which raises instead (job 3431950).
-        #   no grad_fn        the term is detached from the whole graph -- true
-        #                     by construction for e0, a finding for anything else
-        #   grad returns None the term is in the graph but does not reach
-        #                     positions
-        #   otherwise         a real per-term force
-        res["Fk"], res["detached"], res["no_pos"] = {}, [], []
-        for k, v in tt.items():
-            if not v.requires_grad:
-                res["Fk"][k] = np.zeros_like(res["F"])
-                res["detached"].append(k)
-                continue
-            g = torch.autograd.grad(v, b["positions"], retain_graph=True,
-                                    allow_unused=True)[0]
-            if g is None:
-                res["Fk"][k] = np.zeros_like(res["F"])
-                res["no_pos"].append(k)
-            else:
-                res["Fk"][k] = (-g).detach().cpu().numpy()
+    """TWO forwards when gradients are wanted, deliberately.
+
+    compute_force=True makes the model call autograd.grad on total_energy
+    itself, which FREES the graph, so any per-term grad afterwards dies with
+    "backward through the graph a second time" (job 3431964). So the official
+    force comes from one forward with compute_force=True, and every per-term
+    gradient is taken on a SECOND forward run with compute_force=False, where
+    the graph is still intact and each grad is taken with retain_graph=True.
+    The two forwards differ only by solver reproducibility (~1e-11 eV,
+    measured in the gate-B control of the head-fit audit), which is nine orders
+    below the meV/A quantities here, and the sum of my per-term forces is
+    checked against the model's own returned force precisely to catch it if
+    that ever stops being true.
+    """
+    if not want_grad:
+        b = build(at, keep_sid)
+        with torch.no_grad():
+            pred = model(b.to_dict(), compute_force=False, training=False)
+            tt = term_tensors(pred, b)
+            res = dict(E=float(pred["energy"]),
+                       terms={k: float(v) for k, v in tt.items()})
         _evict()
         return res
-    with torch.no_grad():
-        pred = model(b.to_dict(), compute_force=False, training=False)
-        tt = term_tensors(pred, b)
-        res = dict(E=float(pred["energy"]),
-                   terms={k: float(v) for k, v in tt.items()})
+
+    b1 = build(at, keep_sid)
+    b1["positions"].requires_grad_(True)
+    pred1 = model(b1.to_dict(), compute_force=True, training=False)
+    F_official = pred1["forces"].detach().cpu().numpy()
+    E_official = float(pred1["energy"].detach())
+    _evict()
+
+    b = build(at, keep_sid)
+    b["positions"].requires_grad_(True)
+    pred = model(b.to_dict(), compute_force=False, training=False)
+    tt = term_tensors(pred, b)
+    res = dict(E=float(pred["energy"].detach()), F=F_official,
+               E_official=E_official,
+               terms={k: float(v.detach()) for k, v in tt.items()})
+    res["Fk"], res["detached"], res["no_pos"] = {}, [], []
+    for k, v in tt.items():
+        if not v.requires_grad:
+            res["Fk"][k] = np.zeros_like(F_official)
+            res["detached"].append(k)
+            continue
+        g = torch.autograd.grad(v, b["positions"], retain_graph=True,
+                                allow_unused=True)[0]
+        if g is None:
+            res["Fk"][k] = np.zeros_like(F_official)
+            res["no_pos"].append(k)
+        else:
+            res["Fk"][k] = (-g).detach().cpu().numpy()
+    gt = torch.autograd.grad(pred["energy"].sum(), b["positions"],
+                             retain_graph=False, allow_unused=True)[0]
+    res["F_selfgrad"] = ((-gt).detach().cpu().numpy() if gt is not None
+                         else np.zeros_like(F_official))
     _evict()
     return res
+
+
+# ------------------------------------------------------------------ probe ----
+def probe():
+    """Exercise every risky call ONCE and collect ALL failures instead of
+    stopping at the first. Five interface errors in this script family --
+    get_loss_fn's arguments, args.key_specification, prepare_default_head's
+    module, external_field already being sliced, and allow_unused not covering
+    an output with no grad_fn -- each cost a separate queue wait because they
+    surface one per run. This makes them surface together."""
+    at = atoms_by_sid[VALP[0][0]]
+    fails = []
+    try:
+        b = build(at, True)
+    except Exception as e:
+        print(f"PROBE: build failed: {type(e).__name__}: {e}")
+        return False
+    try:
+        b["positions"].requires_grad_(True)
+        pr = model(b.to_dict(), compute_force=False, training=False)
+    except Exception as e:
+        print(f"PROBE: forward failed: {type(e).__name__}: {e}")
+        return False
+    try:
+        tt = term_tensors(pr, b)
+        miss = [k for k in TERMS if k not in tt]
+        if miss:
+            fails.append(f"term_tensors missing {miss}")
+    except Exception as e:
+        fails.append(f"term_tensors: {type(e).__name__}: {e}")
+        tt = {}
+    for k, v in tt.items():
+        try:
+            if v.requires_grad:
+                torch.autograd.grad(v, b["positions"], retain_graph=True,
+                                    allow_unused=True)
+        except Exception as e:
+            fails.append(f"grad of {k}: {type(e).__name__}: {e}")
+    try:
+        ssum = float(sum(v.detach() for v in tt.values()))
+        ee = float(pr["energy"].detach())
+        if abs(ssum - ee) > 1e-6:
+            fails.append(f"terms do not sum to the energy: {ssum} vs {ee}")
+    except Exception as e:
+        fails.append(f"energy closure: {type(e).__name__}: {e}")
+    _evict()
+    try:
+        r = forward_terms(at, True, True)
+        d = float(np.abs(sum(r["Fk"].values()) - r["F"]).max())
+        if d > 1e-6:
+            fails.append(f"per-term forces do not sum to the returned force: "
+                         f"max |diff| {d:.3e}")
+        d2 = float(np.abs(r["F_selfgrad"] - r["F"]).max())
+        if d2 > 1e-6:
+            fails.append(f"my total autograd force != the model's: "
+                         f"max |diff| {d2:.3e}")
+    except Exception as e:
+        fails.append(f"forward_terms(grad): {type(e).__name__}: {e}")
+    if fails:
+        print(f"PROBE FOUND {len(fails)} PROBLEM(S):")
+        for f in fails:
+            print(f"   - {f}")
+        return False
+    print("PROBE: every interface exercised, all closures hold")
+    return True
+
+
+print("\n" + "=" * 78)
+print("INTERFACE PROBE (all failures at once, not one per job)")
+if not probe():
+    raise SystemExit(1)
 
 
 for sc, sn in VALP:
