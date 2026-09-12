@@ -845,6 +845,42 @@ native electron head trained in both; no new correction term -- after a GPU
 gate that measures arm B's peak memory on the 339-atom frames and one full
 3-GPU DDP epoch on the post-warmup path.
 
+### arm-B GPU gate before the joint A/B  (job 3433252, code 6ec75bf; run dir 3-residual_3D/ab_deriv_gate)
+
+Arm B = MACE_PB1D_LIVE_POS=1, MACE_PB1D_GRAD_PASSES=0, DFORCE unset; gate_le
+config with warmup_encounters 0 and max_num_epochs 1 so the one epoch runs on
+the full-PB path from step 1. Nothing here is about accuracy.
+
+1. PER-FRAME COST on the 339-atom frames (sids 202/203/204, all charged --
+   train.xyz has no neutral NiN88 frame; the 160 NiN88 frames are sids
+   202-400), gate_le epoch-39 model, batch 1, fwd + loss + bwd: peak 23.92 /
+   23.93 / 23.92 GiB at GRAD_PASSES=0, 23.80 / 23.80 / 23.81 at 1; against
+   20.58 / 20.46 for the 207-atom frames. So +3.3 GiB for the larger cell;
+   time 1.7-6.1 s per frame (noisy).
+2. ENV REACHES EVERY RANK: srun -n 3 printed LIVE_POS=1 GRAD_PASSES=0
+   DFORCE=unset on ranks 0, 1, 2.
+3. ONE 3-GPU DDP EPOCH on the full-PB path, from scratch: run_train rc 0,
+   no NaN, checkpoint and model written. nvidia-smi memory.used sampled every
+   2 s (3624 samples): peak 26791 / 27767 / 27441 MiB on GPUs 0/1/2 of 40 GB
+   -- 12 GB headroom. Epoch 0 took 16.0 min (10:00:55 -> 10:16:54) against
+   gate_le's first full-PB epoch of 4.5 min (epoch 30, 04:23:20 -> 04:27:51)
+   and 4.5-5.2 min thereafter: 3.1-3.6x slower than arm A's post-warmup
+   epochs. This is a cold-model number (a from-scratch solve at epoch 0 is
+   not the solve at epoch 30 after warm-up); the A/B run itself will give the
+   per-epoch cost after warm-up. The end-of-training evaluation (train +
+   valid + test error tables, forces by autograd through the full graph) took
+   18.7 min (10:17:02 -> 10:35:45) against gate_le's 11 min.
+
+BUDGET IMPLICATION. Arm A (gate_le's own arithmetic): 8 min startup + 30 x
+2.1 + 10 x 5.2 + 11 min eval = 2 h 14 min -- already over the 2 h dev wall,
+which is why gate_le needed a resume. Arm B: 8 + 30 x 2.2 + 10 x (8-16) +
+19 = 2.8-4.4 h. On gpu-a100-dev (MaxJobsPU 1, 2 h) that is 3-4 resumed
+segments per arm, run one after another; on gpu-a100-small (MaxJobsPU 3,
+48 h) both arms run uninterrupted side by side, ~2.5 h and ~4.5 h. The
+production-queue choice is the user's. Both arms' directories, configs and
+job scripts are in place (3-residual_3D/ab_deriv_A, ab_deriv_B; job.sh
+takes MAXEP for a split protocol); nothing submitted.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
