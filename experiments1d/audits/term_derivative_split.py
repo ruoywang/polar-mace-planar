@@ -177,8 +177,14 @@ def term_tensors(pred, b):
             continue
         v = pred.get(k)
         out[k] = v.sum() if v is not None else torch.zeros((), device=device)
+    # extensions.py:3071 returns "external_field" as external_potential[:, 1:],
+    # so the slice in the assembly expression is ALREADY applied here. Slicing
+    # again gave 2 columns against explicit_dipole's 3 (job 3431871). The
+    # verified form is the one charging_reconcile.py:267-271 uses, and copying
+    # the assembly expression instead of the already-checked script is what
+    # introduced the error.
     ef, ed = pred.get("external_field"), pred.get("explicit_dipole")
-    out["extfield_dipole"] = ((ef[:, 1:] * ed).sum() if ef is not None
+    out["extfield_dipole"] = ((ef * ed).sum() if ef is not None
                               and ed is not None else
                               torch.zeros((), device=device))
     return out
