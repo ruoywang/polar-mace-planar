@@ -572,6 +572,68 @@ which would touch exactly the three residual terms (E_bl, solute
 electrostatics, slab dipole). A generic scan for outputs that move under FD
 but carry no grad_fn decides this without guessing.
 
+### the training-path residual, localised: the SCF charges' position response, truncated behind scheme C  (jobs 3432586, 3432602)
+
+MEASURED (partial-truncation scan: for every connected output and a fixed
+random contraction, autograd d(v.out)/dR_z at the largest-|F| atom against the
+FD of the same scalar, h = 0.01 A, LIVE_POS=1):
+
+| output | 28 train auto / FD | 628 train auto / FD | 28 deploy auto / FD | 628 deploy auto / FD |
+|---|---|---|---|---|
+| explicit_potential(_base) | 1.77e-2 / 1.79e-1 | -1.7e-3 / 3.98e-1 | -1.77e-2 / -1.13e-2 | -1.7e-3 / 2.26e-2 |
+| explicit_dipole | -1.59e-2 / -1.57e-1 | 6.1e-3 / -1.71e-1 | -2.6e-3 / -4.5e-3 | 4.9e-3 / -9.9e-3 |
+| density_coefficients (SCF charges) | -2.24e-2 / -6.45e-2 | -- | 1.07e-2 / 1.22e-2 | -- |
+| electrostatic_energy | -1.25e-2 / 1.75e-1 | 1.47e-2 / 6.59e-2 | 1.25e-2 / 2.00e-2 | 1.47e-2 / 2.00e-2 |
+| compensation_slab_correction | -6.08e-2 / 1.58e-2 | -1.50e-1 / -1.53e-1 | -9.1e-3 / -6.1e-3 | 2.1e-3 / 2.3e-3 |
+| baseline_coupling E_bl | 3.84e-1 / 4.51e-1 | -3.91e-1 / -4.37e-1 | -8.41e-1 / -8.31e-1 | -2.22e-1 / -2.23e-1 |
+| solvent_potential | -2.171 / -2.200 | -2.168 / -2.181 | 1.93e-2 / 2.06e-2 | -3.07e-2 / -3.13e-2 |
+| solvent_profile_features | -2.3e-5 / -3.2e-5 | -8.6e-5 / -8.2e-5 | 3.6e-6 / 2.1e-6 | 2.3e-5 / 2.5e-5 |
+
+(eV/A for energies and potentials; dipole in e; the profile row is a random
+contraction of 1024 features.)
+
+On the training path explicit_potential and explicit_dipole have a position
+response 10-40x larger than on deployment, and autograd captures <= 10% of it
+(sid 628: essentially zero, wrong sign). electrostatic_energy and the slab
+correction inherit that with the wrong sign on the charged frame; E_bl inherits
+10-15%. solvent_potential and solvent_dipole -- the solve's own outputs -- are
+within 1.3% on both paths: the solve is not the carrier. The first scan
+(3432586) flagged cavity_energy_g as detached-but-moving on the training path
+only (FD 3.9-6.5e-3), which localises its 4-10 meV/A residual.
+
+READ FROM SOURCE:
+  explicit_potential_base = predict_potential_from_dipole_and_solvent_layer(
+      dipole=explicit_dipole, center=solv_center [or z_e50], cell=cell.detach())
+                                                          (extensions.py 2762, 2885, 2895)
+  explicit_dipole = sum_i positions_i * charge_coeff_i   (no detach inside)
+  so the dipole's missing response is the SCF charges' missing response;
+  density_coefficients is 65% truncated on the training path against 12% on
+  deployment. explicit_potential_base also enters graph_feats_global (2775)
+  and the interface pooling uses z_axis = positions[:, axis].detach() (2749)
+  and z_center = z_e50.detach() (2750); solv_center / z_e50 come from
+  compute_density_threshold_crossing_from_baseline_profile with
+  radial_coefficients.detach() and positions.detach() (2665-2670); the SCF
+  profile features are prof_feat = (...).detach() (1893, scheme C, by design).
+  On the frozen-baseline path n_e = neutral_v(frozen, reference geometry) -
+  net(displaced), so a displaced atom's neutral reference stays behind.
+
+INFERRED, not proven: that last construction gives the electron density an
+artificial position response on the training path that is absent on
+deployment (where neutral_v follows pf_in through the runtime tables), and it
+propagates through the detached SCF-feature and centre paths into the charges.
+That is consistent with the 5-15x larger FD responses on the training path and
+with autograd missing most of them, but the share attributable to each detach
+site has not been measured.
+
+CONSEQUENCE FOR ACCEPTANCE. E_bl's autograd force equals its FD on the
+deployment path (0.5-5.0 meV/A) and does NOT on the training-cache path
+(32-92), and the remaining carrier is the scheme-C SCF-feature truncation plus
+the detached centre and z-axis inputs -- all shared with solute electrostatics
+and the slab correction. Reconnecting them means a differentiable stage-1 solve
+and live centre/interface geometry; the source keeps them detached
+deliberately, so that is a design decision, not a bug fix, and is not taken
+here.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
