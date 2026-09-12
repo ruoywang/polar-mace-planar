@@ -367,6 +367,66 @@ e_bl_t = e_bl_raw if live_resp else e_bl_raw.detach(), with live_resp set only
 by MACE_PB1D_DFORCE. Under the default the value enters the energy while
 neither the force nor the energy loss can pass a gradient through it.
 
+### second-order check: the force-loss gradient to solve-reaching parameters is wrong under the production adjoint  (code c7f5229, job 3432527)
+
+Directional FD in parameter space along a fixed random unit direction v, per
+group, sid 28 (charged) and 628 (neutral), training-cache path, LIVE_POS=1,
+_pb1d_epoch=39. Autograd at GRAD_PASSES=1 (the analytic adjoint with a frozen
+coupled Jacobian J_c, what trains) and =0 (fully unrolled, kept in the code as
+the exact baseline). L_F = mean (F - F_DFT)^2, the training form. Every
+perturbed forward re-solved (2 solves each, counted).
+
+CONTROL PASSED: local_electron_energy does not reach the solve and agrees at
+both orders in both frames (v.dE 1.1e-6 / 1.3e-4 relative, v.dL_F 3.0e-3 /
+2.0e-6, all within the FD's own drift). The script is sound.
+
+FIRST ORDER (v.dE), identical at gp=1 and gp=0 in every row as IFT predicts:
+
+| group | sid 28 rel err | sid 628 rel err |
+|---|---|---|
+| pb1d_head | 8.2e-06 | 5.1e-08 |
+| products (trunk) | 7.6e-03 | 1.7e-02 |
+| field_dependent_charges_maps | 2.9e-01 | 2.5e-01 |
+
+The density-coefficient maps carry a 25-29% FIRST-order energy-gradient error
+at BOTH gp settings with FD drift of 2.4e-6 / 3.6e-3, so it is not the solver.
+It is an upstream truncation on the density path, and the candidate named in
+the source is the scheme-C detached SCF profile features: the density maps
+change the solvent, the solvent enters node_feats through prof_feat, and that
+path is cut by design. Quantified here, not fixed; outside the E_bl scope.
+
+SECOND ORDER (v.dL_F), the user's concern, confirmed and large:
+
+| group | frame | auto gp=1 | auto gp=0 | FD | gp=1 rel err | gp=0 rel err |
+|---|---|---|---|---|---|---|
+| pb1d_head | 28 | -4.629e-05 | +2.692e-05 | +2.720e-05 | 2.70 (sign wrong) | 1.0e-02 |
+| pb1d_head | 628 | -8.459e-06 | -3.530e-05 | -3.530e-05 | 0.76 | 5.7e-07 |
+| density maps | 28 | +2.284e-03 | -1.010e-04 | -6.588e-05 | 35.7 (sign wrong) | 0.53 |
+| density maps | 628 | +2.890e-03 | -8.272e-05 | -8.177e-05 | 36.3 (sign wrong) | 1.2e-02 |
+| products | 28 | -8.039e-06 | -1.068e-06 | -9.606e-07 | 7.37 | 0.11 (FD drift 0.17) |
+| products | 628 | +8.207e-05 | -6.785e-07 | -1.210e-06 | 68.8 (sign wrong) | 0.44 |
+
+Under the production adjoint the force-loss gradient to pb1d_head is 76-270%
+wrong (sign wrong on the charged frame), to the density-coefficient maps 36x
+wrong with the wrong sign in both frames, and to the trunk 7-69x wrong with the
+wrong sign on the neutral frame. The unrolled graph recovers pb1d_head to
+1e-2 / 6e-7 and the density maps to 1.2% on the neutral frame; its residual
+errors (53% on sid 28 density maps, 11-44% on the trunk, where the trunk FD
+itself drifts 17%) are consistent with the same upstream scheme-C truncation
+and with FD noise on values of order 1e-6, and are not attributable to J_c.
+
+WHAT THIS MEANS. forces_weight is 100. For every parameter group that reaches
+the PB solve, the training signal from the force loss has been pointing in a
+direction that is not the gradient of the force loss -- in sign as well as
+size on the groups measured. The energy gradient (first order) is exact for
+pb1d_head, 1-2% off for the trunk, and 25-29% off for the density maps.
+
+REMEDY CANDIDATES, to be decided on measured cost: (a) GRAD_PASSES=0, the
+existing exact unrolled path -- its time and memory at training scale are
+being measured; (b) make J_c theta-differentiable and iterate the differentiable
+step so phi_star carries first-order theta dependence -- more code, second-order
+correct to the needed order, cheaper if (a) is not affordable.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config

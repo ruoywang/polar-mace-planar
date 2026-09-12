@@ -49,7 +49,11 @@ sys.path.insert(0, os.environ.get(
     "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 os.environ.setdefault("MACE_PB1D_NO_PRELOAD", "1")
 assert not os.environ.get("MACE_PB1D_DFORCE"), "run with DFORCE unset"
-assert os.environ.get("MACE_PB1D_LIVE_POS"), "run with MACE_PB1D_LIVE_POS=1"
+# LIVE_POS=1 is the path the joint training will use; the ORIGINAL training
+# ran with it off, so KIT_LIVE_POS_OFF=1 permits that arm explicitly -- the
+# adjoint is the same either way, but what reaches the solve is not.
+assert os.environ.get("MACE_PB1D_LIVE_POS") or os.environ.get("KIT_LIVE_POS_OFF"), \
+    "set MACE_PB1D_LIVE_POS=1, or KIT_LIVE_POS_OFF=1 to audit the original path"
 
 from ase.io import read
 from mace import data as mace_data, tools
@@ -118,7 +122,7 @@ THETA_NORM = {g: float(torch.sqrt(sum((p.detach() ** 2).sum()
                                       for _, p in PARAMS[g]))) for g in GROUPS}
 print("=" * 78)
 print(f"model {os.path.basename(mp)} @ {os.path.basename(cpath)}   "
-      f"LIVE_POS={os.environ.get('MACE_PB1D_LIVE_POS')}   _pb1d_epoch=39")
+      f"LIVE_POS={os.environ.get('MACE_PB1D_LIVE_POS') or '0 (original training path)'}   _pb1d_epoch=39")
 for g in GROUPS:
     print(f"  group {g:<32} {sum(p.numel() for _, p in PARAMS[g]):>8} params  "
           f"||theta|| {THETA_NORM[g]:.4e}")
