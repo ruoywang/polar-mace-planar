@@ -501,11 +501,23 @@ class PB1DBackend:
         # term (net-only) by construction. Lagged by default; LIVE under
         # MACE_PB1D_DFORCE like every other solve consumer.
         e_bl_t: Optional[torch.Tensor] = None
+        _bl_export = None
         if bl_energy:
             pbz_s = fourier_upsample(phi_base.mean(dim=(0, 1)), f)
             pbz_s = pbz_s - pbz_s.mean()
             e_bl_raw = ((rho_ion_z + rho_bound_z) * (-pbz_s)).sum() * dz * area
             e_bl_t = e_bl_raw if live_resp else e_bl_raw.detach()
+            # diagnostic exports captured HERE, at the site, not rebuilt at
+            # dict-construction time: the first attempt read dz/area/rho from
+            # the enclosing scope hundreds of lines later and recomputed E_bl
+            # 803x too large (job 3432051, closure A). Whatever the stale
+            # binding was, capturing the actual operands removes the question.
+            _bl_export = {
+                "rho": (rho_ion_z + rho_bound_z).detach(),
+                "phi": pbz_s.detach(),
+                "dz": float(dz), "area": float(area),
+                "e_raw": float(e_bl_raw.detach()),
+            }
 
         self.last_diagnostics = {
             "rms_last": float(out["rms_last"]),
@@ -798,10 +810,7 @@ class PB1DBackend:
             # themselves. These are exports: nothing here enters any energy,
             # and e_bl above is unchanged. Detached so they can never alter a
             # gradient path by being exported.
-            "bl_rho_solv_z": ((rho_ion_z + rho_bound_z).detach()
-                              if bl_energy else None),
-            "bl_phi_b_z": (pbz_s.detach() if bl_energy else None),
-            "bl_dz_area": ((float(dz), float(area)) if bl_energy else None),
+            "bl_export": _bl_export,
             "e_s3d": e_s3d_t,
             "s3d_obs": s3d_obs,
         }

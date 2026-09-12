@@ -101,11 +101,13 @@ _bd = {}
 def _wrap(self, *a, **k):
     _bd["b"] = self
     r = _bk(self, *a, **k)
-    if isinstance(r, dict) and r.get("bl_rho_solv_z") is not None:
+    if isinstance(r, dict) and r.get("bl_export") is not None:
+        e = r["bl_export"]
         CAP["rows"].append({
-            "rho": r["bl_rho_solv_z"].detach().cpu().numpy().copy(),
-            "phi": r["bl_phi_b_z"].detach().cpu().numpy().copy(),
-            "dz_area": r["bl_dz_area"],
+            "rho": e["rho"].cpu().numpy().copy(),
+            "phi": e["phi"].cpu().numpy().copy(),
+            "dz_area": (e["dz"], e["area"]),
+            "e_raw": e["e_raw"],
             "e_bl": float(r["e_bl"].detach()) if r.get("e_bl") is not None
             else 0.0})
     return r
@@ -188,6 +190,10 @@ for sc, sn in VALP:
             n_solves = len(b0["rows"])
             rec = sum(ebl_of(r["rho"], r["phi"], *r["dz_area"])
                       for r in b0["rows"])
+            raw = sum(r["e_raw"] for r in b0["rows"])
+            print(f"  CLOSURE A0, my recomputation vs e_bl_raw captured at the "
+                  f"site: {rec:+.9f} vs {raw:+.9f}, |diff| "
+                  f"{abs(rec - raw):.3e} eV")
             print(f"  CLOSURE A, E_bl recomputed from the exports vs the "
                   f"model's baseline_coupling_energy_g: {rec:+.9f} vs "
                   f"{b0['ebl_model']:+.9f}, |diff| "
