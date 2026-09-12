@@ -322,6 +322,16 @@ class PB1DBackend:
         # positions LIVE into the solve inputs below. Remaining truncations:
         # SCF features (scheme C cache) and layer_mean (float).
         live_resp = bool(os.environ.get("MACE_PB1D_DFORCE"))
+        # MACE_PB1D_LIVE_POS (2026-09-12): the GRADIENT-PATH half of DFORCE
+        # on its own. Positions stay live into the solve inputs and E_bl stays
+        # in the graph, but the baseline is NOT swapped, so every forward value
+        # is identical to the default on both the frozen per-sid and the
+        # runtime path. Motivation, measured: E_bl is the largest single-term
+        # derivative gap in all eight audited cells (340-414 meV/A RMS), its
+        # missing derivative is almost entirely Phi_b d(rho_solv)/dR, and the
+        # trailing detach below plus the detached pf_in are what remove it.
+        # DFORCE implies LIVE_POS; LIVE_POS does not imply the baseline swap.
+        live_pos = live_resp or bool(os.environ.get("MACE_PB1D_LIVE_POS"))
         if live_resp and bl_row is not None:
             rt = self._get_runtime_baseline()
             if rt is not None and node_z is not None and rt.matches(cell_np, shape):
@@ -348,7 +358,7 @@ class PB1DBackend:
         pos_frac = torch.remainder(pos64 @ torch.linalg.inv(cell64), 1.0)
         # positions into the SOLVE inputs: detached by default (lagged-force
         # convention); LIVE in energy-derivative-force mode
-        pf_in = pos_frac if live_resp else pos_frac.detach()
+        pf_in = pos_frac if live_pos else pos_frac.detach()
 
         if use_runtime_baseline:
             with self._Phase(self, "1_baseline", device):
@@ -372,7 +382,8 @@ class PB1DBackend:
         # checkpointed when grad is needed: keeping the full-grid graph
         # resident OOMs a 40 GB A100 (measured); the ~85 ms recompute is cheap
         want_grad = bool(radial_coeffs.requires_grad or (
-            node_feats is not None and node_feats.requires_grad))
+            node_feats is not None and node_feats.requires_grad)
+            or (live_pos and pf_in.requires_grad))
 
         with self._Phase(self, "2_assembly", device):
             def _assemble(coeffs):
@@ -506,7 +517,7 @@ class PB1DBackend:
             pbz_s = fourier_upsample(phi_base.mean(dim=(0, 1)), f)
             pbz_s = pbz_s - pbz_s.mean()
             e_bl_raw = ((rho_ion_z + rho_bound_z) * (-pbz_s)).sum() * dz * area
-            e_bl_t = e_bl_raw if live_resp else e_bl_raw.detach()
+            e_bl_t = e_bl_raw if live_pos else e_bl_raw.detach()
             # diagnostic exports captured HERE, at the site, not rebuilt at
             # dict-construction time: the first attempt read dz/area/rho from
             # the enclosing scope hundreds of lines later and recomputed E_bl
@@ -722,7 +733,8 @@ class PB1DBackend:
             # showed the force loss degrading (F 62-81 vs 35 meV/A) as the
             # growing delta rode that channel -> detach positions there,
             # exactly the passing-gate training physics.
-            pf_e = pos_frac if use_runtime_baseline else pos_frac.detach()
+            pf_e = (pos_frac if (use_runtime_baseline or live_pos)
+                    else pos_frac.detach())
             live = bool(want_grad or pf_e.requires_grad)
             if live:
                 outs = _ckpt2(_stage2_energy, radial_coeffs, cb, ci,

@@ -1899,7 +1899,9 @@ class PolarMACE(ScaleShiftMACE):
             # e1d compensation profile: detached (lagged) by default; LIVE in
             # energy-derivative-force mode so dE/dR includes the 1-D response
             prof_energy[g] = (
-                prof_energy_live if os.environ.get("MACE_PB1D_DFORCE")
+                prof_energy_live
+                if (os.environ.get("MACE_PB1D_DFORCE")
+                    or os.environ.get("MACE_PB1D_LIVE_POS"))
                 else prof_energy_live.detach())
             rb_g = result["rho_bound_z"].to(positions.dtype)
             if prof_feat_grad is not None:
@@ -2954,7 +2956,9 @@ class PolarMACE(ScaleShiftMACE):
         # (gate 3420358 trained healthily with it: E 12.73 meV). The 1-D
         # part keeps the lagged treatment; md_g values are lagged upstream.
         solvent_dipole_e = (
-            solvent_dipole if os.environ.get("MACE_PB1D_DFORCE")
+            solvent_dipole
+            if (os.environ.get("MACE_PB1D_DFORCE")
+                or os.environ.get("MACE_PB1D_LIVE_POS"))
             else solvent_dipole.detach())
         if md_g is not None:
             md_vec = torch.zeros_like(solvent_dipole)
