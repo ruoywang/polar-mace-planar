@@ -614,7 +614,19 @@ class PB1DBackend:
                 # exactly the passing-gate (3417982/3419003-training-side)
                 # semantics; the live-in-training variants degraded the
                 # trunk (gates 3419752/3419977 F 62-81 vs 35 meV/A).
-                ne_cav = ne2 if use_runtime_baseline else ne2.detach()
+                # MACE_PB1D_LIVE_POS (2026-09-12): ne2 also stays live on the
+                # frozen-baseline path, which reconnects the cavity area AND
+                # the two envelopes built from the same s_diel3e / s_ion3e
+                # below. Measured before this change: cavity_energy_g was
+                # detached-but-moving on the training path only (FD 3.9-6.5e-3
+                # eV/A, its whole 4-10 meV/A per-term gap). The gates that
+                # found the live-in-training cavity degrading the trunk ran
+                # under the old gradient construction (frozen J_c, stage 1 and
+                # E_bl detached); whether that recurs with a consistent
+                # derivative is for the joint A/B, not decided here. Values
+                # unchanged.
+                ne_cav = (ne2 if (use_runtime_baseline or live_pos)
+                          else ne2.detach())
                 s_ion3e, s_diel3e, s_cav3e = self._tp.create_cavity_torch(
                     ne_cav, grid, p)
                 if m_ion3 is not None:
@@ -682,7 +694,14 @@ class PB1DBackend:
                 # MD-path gap, job 3420723).
                 delta_b = raw_b - r_b[None, None, :] * env_b
                 delta_i = raw_i - r_i[None, None, :] * env_i
-                if not os.environ.get("MACE_S3D_LIVE_DELTA"):
+                # under LIVE_POS the residual is live in the energy integrals
+                # too: e_self was fully detached and e_xsol's residual side
+                # with it (measured: solvent3d_energy_g 4.3-13.5 meV/A per-term
+                # gap on both paths, and the source's own "12-36 meV/A
+                # MD-path gap", job 3420723). Same caveat as the cavity: the
+                # five unstable live-delta gates predate the consistent
+                # derivative. Values unchanged.
+                if not (os.environ.get("MACE_S3D_LIVE_DELTA") or live_pos):
                     # MACE_S3D_LIVE_DELTA is a MEASUREMENT-ONLY toggle for
                     # cost probes (wall time / peak memory of the live-delta
                     # response channel); production always trains lagged
