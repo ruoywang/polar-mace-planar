@@ -116,9 +116,13 @@ for sid in pair:
         E, tt = forward_terms(sid, True)
         plist = [p for _, p in PARAMS[g]]
         AD = {}
+        CONST = []
         for k in TERMS:
+            if not tt[k].requires_grad:   # a term with no path to this group (e.g. E0): AD_k = 0 exactly
+                AD[k] = 0.0; CONST.append(SHORT[k]); continue
             gs = torch.autograd.grad(tt[k], plist, retain_graph=True, allow_unused=True)
             AD[k] = sum(float((gi * v).sum()) for gi, v in zip(gs, DIRS[g]) if gi is not None)
+        if CONST: print(f"  terms with no autograd path to this group (AD_k := 0): {', '.join(CONST)}")
         gE = torch.autograd.grad(E, plist, allow_unused=True)
         AD_tot = sum(float((gi * v).sum()) for gi, v in zip(gE, DIRS[g]) if gi is not None)
         for p in model.parameters(): p.requires_grad_(False)
