@@ -7,6 +7,7 @@
 import dataclasses
 import logging
 import os
+import random
 import time
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
@@ -202,6 +203,98 @@ def valid_err_log(
         )
 
 
+# ---------------------------------------------------------------------------
+# segmented running: state that makes a continuation the same run
+# ---------------------------------------------------------------------------
+_LOSS_RNGS = ("density_3d_rng", "solvent3d_rng")
+
+
+def _rank_rng_state(train_loader, valid_loaders, loss_fn) -> Dict[str, Any]:
+    st = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.get_rng_state(),
+        "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    g = getattr(train_loader, "generator", None)
+    st["loader_generator"] = g.get_state() if g is not None else None
+    st["valid_generators"] = {
+        k: (v.generator.get_state() if getattr(v, "generator", None) is not None else None)
+        for k, v in valid_loaders.items()
+    }
+    for nm in _LOSS_RNGS:
+        r = getattr(loss_fn, nm, None)
+        st[nm] = r.getstate() if r is not None else None
+    return st
+
+
+def _set_rank_rng_state(st: Dict[str, Any], train_loader, valid_loaders, loss_fn) -> None:
+    random.setstate(st["python"])
+    np.random.set_state(st["numpy"])
+    torch.set_rng_state(st["torch_cpu"].cpu())
+    if st.get("torch_cuda") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([t.cpu() for t in st["torch_cuda"]])
+    g = getattr(train_loader, "generator", None)
+    if g is not None and st.get("loader_generator") is not None:
+        g.set_state(st["loader_generator"].cpu())
+    for k, v in valid_loaders.items():
+        sv = (st.get("valid_generators") or {}).get(k)
+        if sv is not None and getattr(v, "generator", None) is not None:
+            v.generator.set_state(sv.cpu())
+    for nm in _LOSS_RNGS:
+        r = getattr(loss_fn, nm, None)
+        if r is not None and st.get(nm) is not None:
+            r.setstate(st[nm])
+
+
+def _save_segment_state(path, epoch, model, optimizer, lr_scheduler, ema, lowest_loss,
+                        valid_loss, patience_counter, keep_last, rolling_latest_path,
+                        checkpoint_handler, train_loader, valid_loaders, loss_fn,
+                        distributed, rank) -> None:
+    """Everything a continuation needs to be the same run: RAW weights (not the
+    EMA average), optimizer, scheduler, EMA (shadow params + num_updates), the
+    epoch to run next, the best-loss bookkeeping and every rank's RNG streams
+    (python, numpy, torch CPU/CUDA, the loaders' generators, the loss's
+    sample-point RNGs). Rank 0 writes one file after an all_gather of the
+    streams; a per-epoch copy is kept for audit."""
+    mine = _rank_rng_state(train_loader, valid_loaders, loss_fn)
+    if distributed:
+        gathered = [None] * torch.distributed.get_world_size()
+        torch.distributed.all_gather_object(gathered, mine)
+    else:
+        gathered = [mine]
+    if rank == 0:
+        m = model.module if hasattr(model, "module") else model
+        state = {
+            "format": "segment-state-1",
+            "next_epoch": int(epoch) + 1,
+            "world_size": len(gathered),
+            "model": m.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "lr_scheduler": lr_scheduler.state_dict(),
+            "ema": ema.state_dict() if ema is not None else None,
+            "lowest_loss": float(lowest_loss),
+            "valid_loss": float(valid_loss),
+            "patience_counter": int(patience_counter),
+            "keep_last": bool(keep_last),
+            "rolling_latest_path": rolling_latest_path,
+            "ckpt_old_path": checkpoint_handler.io.old_path,
+            "rng": gathered,
+        }
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        torch.save(state, tmp)
+        os.replace(tmp, path)
+        root, ext = os.path.splitext(path)
+        torch.save(state, f"{root}_epoch{int(epoch)}{ext}")
+        logging.info(
+            f"Segment state written: {path} (next epoch {int(epoch) + 1}, "
+            f"{len(gathered)} ranks' RNG streams, raw weights + EMA + optimizer + scheduler)"
+        )
+    if distributed:
+        torch.distributed.barrier()
+
+
 def train(
     model: torch.nn.Module,
     loss_fn: torch.nn.Module,
@@ -229,13 +322,38 @@ def train(
     distributed_model: Optional[DistributedDataParallel] = None,
     train_sampler: Optional[DistributedSampler] = None,
     rank: Optional[int] = 0,
-):
+    resume_state: Optional[Dict[str, Any]] = None,
+    segment_stop_epoch: int = -1,
+    segment_time_budget: float = 0.0,
+    segment_state_path: Optional[str] = None,
+    segment_t0: Optional[float] = None,
+) -> Dict[str, Any]:
     lowest_loss = np.inf
     valid_loss = np.inf
     patience_counter = 0
     swa_start = True
     keep_last = False
     rolling_latest_path: Optional[str] = None
+    resumed = resume_state is not None
+    segment_stopped = False
+    if resumed:
+        lowest_loss = float(resume_state["lowest_loss"])
+        valid_loss = float(resume_state["valid_loss"])
+        patience_counter = int(resume_state["patience_counter"])
+        keep_last = bool(resume_state["keep_last"])
+        rolling_latest_path = resume_state.get("rolling_latest_path")
+        checkpoint_handler.io.old_path = resume_state.get("ckpt_old_path")
+        rng_states = resume_state["rng"]
+        world = torch.distributed.get_world_size() if distributed else 1
+        if len(rng_states) != world:
+            raise RuntimeError(
+                f"segment state was written by {len(rng_states)} ranks, this run has {world}"
+            )
+        _set_rank_rng_state(rng_states[rank], train_loader, valid_loaders, loss_fn)
+        logging.info(
+            f"Resumed segment state: next epoch {start_epoch}, lowest_loss {lowest_loss:.8f}, "
+            f"valid_loss {valid_loss:.8f}, patience {patience_counter}; RNG streams of rank {rank} restored"
+        )
     if log_wandb:
         import wandb
 
@@ -248,26 +366,30 @@ def train(
     logging.info("Loss metrics on validation set")
     epoch = start_epoch
 
-    # log validation loss before _any_ training
-    for valid_loader_name, valid_loader in valid_loaders.items():
-        valid_loss_head, eval_metrics = evaluate(
-            model=model,
-            loss_fn=loss_fn,
-            data_loader=valid_loader,
-            output_args=output_args,
-            device=device,
-        )
-        valid_err_log(
-            valid_loss_head, eval_metrics, logger, log_errors, None, valid_loader_name
-        )
-    valid_loss = valid_loss_head  # consider only the last head for the checkpoint
+    if not resumed:
+        # log validation loss before _any_ training
+        for valid_loader_name, valid_loader in valid_loaders.items():
+            valid_loss_head, eval_metrics = evaluate(
+                model=model,
+                loss_fn=loss_fn,
+                data_loader=valid_loader,
+                output_args=output_args,
+                device=device,
+            )
+            valid_err_log(
+                valid_loss_head, eval_metrics, logger, log_errors, None, valid_loader_name
+            )
+        valid_loss = valid_loss_head  # consider only the last head for the checkpoint
+    else:
+        logging.info("resumed: the pre-training validation pass is skipped so every RNG stream stays where a continuous run would have it")
 
     # variable used for broadcast by rank == 0 if epoch loop is exited early, e.g. patience
     exit_now = torch.zeros(1, device=device) if distributed else None
     while epoch < max_num_epochs:
+        epoch_t0 = time.time()
         # LR scheduler and SWA update
         if swa is None or epoch < swa.start:
-            if epoch > start_epoch:
+            if epoch > start_epoch or (resumed and epoch == start_epoch and epoch > 0):
                 lr_scheduler.step(
                     metrics=valid_loss
                 )  # Can break if exponential LR, TODO fix that!
@@ -446,10 +568,42 @@ def train(
             torch.distributed.broadcast(exit_now, src=0)
             if exit_now == 1:
                 break
+        # segmented running: stop at this epoch boundary?
+        stop_seg = 0
+        if rank == 0:
+            if segment_stop_epoch >= 0 and epoch >= segment_stop_epoch:
+                stop_seg = 1
+            if segment_time_budget > 0 and segment_t0 is not None:
+                elapsed = time.time() - segment_t0
+                last = time.time() - epoch_t0
+                if elapsed + 1.15 * last > segment_time_budget and epoch + 1 < max_num_epochs:
+                    logging.info(
+                        f"time budget: {elapsed:.0f} s elapsed, last epoch {last:.0f} s, "
+                        f"budget {segment_time_budget:.0f} s -> stopping at this epoch boundary"
+                    )
+                    stop_seg = 1
+        if distributed:
+            flag = torch.tensor([stop_seg], device=device)
+            torch.distributed.broadcast(flag, src=0)
+            stop_seg = int(flag.item())
+        if stop_seg and segment_state_path:
+            _save_segment_state(
+                segment_state_path, epoch, model, optimizer, lr_scheduler, ema,
+                lowest_loss, valid_loss, patience_counter, keep_last, rolling_latest_path,
+                checkpoint_handler, train_loader, valid_loaders, loss_fn, distributed, rank,
+            )
+            if epoch + 1 < max_num_epochs:
+                segment_stopped = True
+                epoch += 1
+                break
 
         epoch += 1
 
-    logging.info("Training complete")
+    if segment_stopped:
+        logging.info(f"Segment complete: state saved, next epoch {epoch}")
+    else:
+        logging.info("Training complete")
+    return {"segment_stopped": segment_stopped, "next_epoch": int(epoch)}
 
 
 def train_one_epoch(

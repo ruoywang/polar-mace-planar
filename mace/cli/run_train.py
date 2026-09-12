@@ -9,6 +9,7 @@ import glob
 import json
 import logging
 import os
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
@@ -555,6 +556,7 @@ def _compute_global_charge_residual_std(
 
 
 def run(args) -> None:
+    _t0 = time.time()  # the segment time budget counts from here
     """
     This script runs the training/fine tuning for mace
     """
@@ -1413,6 +1415,25 @@ def run(args) -> None:
     ema: Optional[ExponentialMovingAverage] = None
     if args.ema:
         ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
+    # segmented running: a resume that is the continuous run (see arg_parser)
+    resume_state = None
+    if getattr(args, "resume_state", None):
+        try:
+            resume_state = torch.load(args.resume_state, map_location="cpu", weights_only=False)
+        except TypeError:
+            resume_state = torch.load(args.resume_state, map_location="cpu")
+        model.load_state_dict(resume_state["model"], strict=True)
+        optimizer.load_state_dict(resume_state["optimizer"])
+        lr_scheduler.load_state_dict(resume_state["lr_scheduler"])
+        if ema is not None:
+            if resume_state.get("ema") is None:
+                raise RuntimeError("segment state has no EMA but this run uses EMA")
+            ema.load_state_dict(resume_state["ema"])
+        start_epoch = int(resume_state["next_epoch"])
+        logging.info(
+            f"Resuming from segment state {args.resume_state}: raw weights, optimizer, "
+            f"scheduler and EMA loaded; next epoch {start_epoch}"
+        )
 
     if args.lbfgs:
         logging.info("Switching optimizer to LBFGS")
@@ -1485,7 +1506,7 @@ def run(args) -> None:
                 "Please install it to use XPU device."
             )
 
-    tools.train(
+    train_result = tools.train(
         model=model,
         loss_fn=loss_fn,
         train_loader=train_loader,
@@ -1512,7 +1533,21 @@ def run(args) -> None:
         plotter=plotter,
         train_sampler=train_sampler,
         rank=rank,
+        resume_state=resume_state,
+        segment_stop_epoch=int(getattr(args, "segment_stop_epoch", -1)),
+        segment_time_budget=float(getattr(args, "segment_time_budget", 0.0)),
+        segment_state_path=os.path.join(args.checkpoints_dir, "segments", tag + "_segment_state.pt"),
+        segment_t0=_t0,
     )
+    if isinstance(train_result, dict) and train_result.get("segment_stopped"):
+        logging.info(
+            f"Segment stopped after writing its state; next epoch {train_result['next_epoch']}. "
+            f"Model files and error tables come from the segment that completes epoch {args.max_num_epochs - 1}."
+        )
+        if args.distributed:
+            torch.distributed.barrier()
+            torch.distributed.destroy_process_group()
+        return
 
     logging.info("")
     logging.info("===========RESULTS===========")
@@ -1667,6 +1702,11 @@ def run(args) -> None:
                 except Exception as e:  # pylint: disable=W0718
                     logging.warning(f"TorchScript export failed (python .model unaffected): {e}")
 
+        if getattr(args, "skip_final_eval", False):
+            logging.info("skip_final_eval: model files saved, error tables not computed")
+            if args.distributed:
+                torch.distributed.barrier()
+            continue
         logging.info("Computing metrics for training, validation, and test sets")
         for param in model.parameters():
             param.requires_grad = False

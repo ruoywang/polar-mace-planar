@@ -1511,6 +1511,33 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
     )
+    # segmented running (2026-09-12): a resume that IS the continuous run.
+    # --restart_latest reloads the EMA-averaged weights of the best epoch with
+    # the raw trajectory's Adam moments, re-creates the EMA from them, repeats
+    # the saved epoch and loses every RNG stream; these four replace it for
+    # runs that must be split across wall-time limits.
+    parser.add_argument(
+        "--resume_state", type=str, default=None,
+        help="path of a segment state written by --segment_stop_epoch / "
+        "--segment_time_budget: raw weights, optimizer, scheduler, EMA, next "
+        "epoch, best-loss bookkeeping and every rank's RNG streams",
+    )
+    parser.add_argument(
+        "--segment_stop_epoch", type=int, default=-1,
+        help="after completing this epoch write the segment state and exit "
+        "(no final evaluation); -1 = off",
+    )
+    parser.add_argument(
+        "--segment_time_budget", type=float, default=0.0,
+        help="seconds from process start; at an epoch boundary, if the elapsed "
+        "time plus 1.15x the last epoch would exceed it, write the segment "
+        "state and exit; 0 = off",
+    )
+    parser.add_argument(
+        "--skip_final_eval", action="store_true", default=False,
+        help="after the last epoch save the model files but do not compute the "
+        "train/valid/test error tables (run them separately)",
+    )
     parser.add_argument(
         "--save_cpu",
         help="Save a model to be loaded on cpu",
