@@ -874,7 +874,9 @@ class OneBodyMLPFieldReadout(PostScfReadout):
             # node_feats arrive in the model's layout; the branch reads the 0e
             # block, whose position is layout-independent for these irreps
             e_branch = cb(node_feats, q_in, q_ind, v_in)
-            self._branch_e = e_branch
+            # kept DETACHED: a graph-attached tensor attribute breaks deepcopy(model)
+            # in the final model save (ab_head_nn, 2026-09-13); the export is a value
+            self._branch_e = e_branch.detach()
             out = out + e_branch
         return out
 
