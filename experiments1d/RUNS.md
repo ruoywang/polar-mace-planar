@@ -1291,6 +1291,57 @@ by amounts of this size.
 OPEN: why B's full-PB epoch time grows (8.5 -> 10.2 -> 14.4 min). Solve
 iteration counts are not logged in training; watch B2.
 
+### arm A complete: 40 epochs in two segments  (A1 3434530, A2 3434532; final model 3-residual_3D/ab_deriv_A/models/ab_deriv_A.model)
+
+A2: 02:32:13 -> 03:59, wall 5231 s, resumed at epoch 28 from the epoch-27
+state (lowest_loss 0.82215474 carried over, no repeated epoch), ran 28-39,
+then the normal completion path: best checkpoint = epoch 39 (EMA weights),
+model files written, error tables skipped (--skip_final_eval). Segment
+states at epochs 27 and 39 (raw weights + EMA + optimizer). A2 ran the code
+of dfc1005 (it imported before 7594b58 landed), so no segment model object
+for A -- not needed, the final .model exists.
+
+Epoch cost, A2: 11.8 and 9.8 min for epochs 28-29, then 7-9 min, then
+4:10-4:20 for 35-39 -- the same 4.1 min pace as A1's epochs 21-23. So the
+slowdown seen in A1 (1.05 -> 1.78 s/step over epochs 21-27) and in A2's
+first epochs is transient, not a monotonic drift; the baseline RAM cache
+(512 of 720 sids -> 29% of frames re-read over BeeGFS each epoch, default
+raised to 1024 in 97efd17) is a plausible mechanism, to be confirmed by the
+accounting line from B2 on.
+
+Arm A validation, full-PB phase:
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV |
+|---|---|---|---|---|---|
+| 19 | 4.045 | 21.6 | 44.4 | 1.298 | 1.339 |
+| 20 | 0.993 | 15.2 | 40.7 | 0.211 | 0.203 |
+| 21 | 0.941 | 15.0 | 39.5 | 0.200 | 0.172 |
+| 22 | 0.902 | 14.9 | 37.9 | 0.161 | 0.128 |
+| 23 | 0.874 | 13.8 | 36.8 | 0.158 | 0.123 |
+| 24 | 0.859 | 12.8 | 36.3 | 0.164 | 0.116 |
+| 25 | 0.850 | 12.7 | 35.6 | 0.158 | 0.105 |
+| 26 | 0.828 | 11.8 | 34.9 | 0.154 | 0.101 |
+| 27 | 0.822 | 11.6 | 34.4 | 0.156 | 0.103 |
+| 28 | 0.815 | 11.1 | 33.9 | 0.170 | 0.110 |
+| 29 | 0.805 | 10.9 | 33.5 | 0.120 | 0.098 |
+| 30 | 0.794 | 10.9 | 32.9 | 0.128 | 0.089 |
+| 31 | 0.791 | 10.5 | 32.9 | 0.157 | 0.104 |
+| 32 | 0.794 | 10.4 | 32.5 | 0.149 | 0.098 |
+| 33 | 0.789 | 10.3 | 32.1 | 0.147 | 0.098 |
+| 34 | 0.779 | 10.3 | 31.7 | 0.145 | 0.090 |
+| 35 | 0.775 | 10.1 | 31.3 | 0.139 | 0.086 |
+| 36 | 0.771 | 10.2 | 31.2 | 0.143 | 0.087 |
+| 37 | 0.775 | 10.0 | 31.1 | 0.134 | 0.081 |
+| 38 | 0.757 | 9.9 | 30.5 | 0.148 | 0.085 |
+| 39 | 0.751 | 9.7 | 30.0 | 0.133 | 0.076 |
+
+gate_le (40 epochs, warm-up 30, same seed) ended at 0.762 / 10.33 / 30.18 /
+0.1317 / 0.0843: arm A with warm-up 20 lands at the same level.
+
+Evaluation job (exp_ab_deriv/job_eval.sh) queued: A from its final model
+under GRAD_PASSES=1, B from its latest segment state + model object under
+LIVE_POS=1 GRAD_PASSES=0 (skipped if none yet), and A under LIVE_POS=1 to
+see its energy's actual slope as a force; val complete, train stride 3.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
