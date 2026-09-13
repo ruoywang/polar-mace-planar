@@ -1637,6 +1637,65 @@ STATE. Both final models and all segment states kept under
 3-residual_3D/ab_deriv_A and ab_deriv_B; per-frame evaluation arrays in
 claude/2-1D_PB/exp_ab_deriv/logs/ab_eval_{A,B,A_livepos}.npz.
 
+### next line of work (user, 2026-09-13): fast B as the basis; a limited change to the nonlinear electron-energy head; charging energy as a metric only
+
+DESIGN (code 48d7679 .. 106a3da). The existing head (OneBodyMLPFieldReadout)
+feeds the per-atom charge coefficients and the field features through
+equivariant linears and a tensor product with the node features before its
+MLP; the charge state reaches the MLP only through those products. The
+new residual branch (ChargeScalarBranch, constructed from
+field_readout_config {"charge_branch": true, "charge_branch_hidden": 64})
+gives the MLP the charge directly: per atom, the six l=0 coefficients of
+the total and of the induced density (3 sigmas x 2 spins each), the two
+potential invariants and two field magnitudes (2 spin channels x 1 width),
+and the 64 scalar node features -> 80 -> 64 -> 64 -> 1, SiLU, 9409
+parameters, last layer zero so energies and forces are unchanged at
+attachment; per-atom output added to electron_energy; no extra PB solve.
+Exported as charge_branch_energy for diagnostics. Resume with new
+parameters (--resume_new_param_prefix): every other parameter, Adam
+moment, EMA entry, scheduler and RNG stream resumes from the same state;
+the branch gets its own optimizer group and EMA entries. Per-epoch
+parameter tracking (|w|, |dw|, mean |grad|) for charge_branch, the head's
+mlp and pb1d_head in the accounting line.
+
+PRE-TRAINING CHECKS (job 3435428, arm B's final model with the branch
+attached post hoc; LIVE_POS=1, GRAD_PASSES=2, AREA_EPS=1e-12):
+(a) zero-initialised branch: |dE| <= 9.9e-10 eV, max|dF| <= 5.6e-8 eV/A on
+    28/628/30/630 (NiN44) and 202/203 (NiN88) -- the solve floor; branch
+    energy exactly 0.
+(b) inputs, charged frame vs neutral partner (same geometry): sum over
+    atoms of the induced l=0 coefficients equals the frame charge (-1.3205
+    vs total_charge -1.3205; 0.0000 on the neutral frame); per atom the
+    charge coefficients differ by only mean 1.2e-3 / max 1.9e-2 on a
+    magnitude 0.153 (~1%), the potential invariants by mean 1.95 / max 6.35
+    on 3.5 (56%), |field| by 0.34 on 1.49 (23%), and the 64 node scalars by
+    3e-18 on 2e-2 -- identical to round-off. The structure features carry
+    no charge information at all; the charge state is in the potential,
+    the field and, weakly, the coefficients. That is the input the branch
+    now exposes to the MLP directly.
+(c) output layer set to N(0, 0.05): branch energy -0.02 .. -2.40 eV
+    (up to -7 meV/atom), pair difference -1.28 / -1.17 eV (charged -
+    neutral), max |dF| 2.6-6.1 eV/A -- the branch responds to the charge
+    state; training-loss gradients on lin1 / lin2 / out.w 3.6e2-5.0e3,
+    out.b 1e-2-1e-1, one Adam step |dw| 0.42-0.97 (Adam-normalised).
+(d) FD with the branch active: per-term force split (smoke, 4 cells) --
+    local_electron D_k RMS 0.01-0.24 meV/A, closed; D_total 1.36-1.37
+    (train), 2.59 / 1.55 (deploy), the known energy-head and E_bl
+    remainders. Second order at gp=2: local_electron_energy group (85954
+    params incl. branch) v.dE 1.6e-7 / 1.8e-7, v.dL_F 8.9e-6 / 9.5e-6
+    against FD -- exact at both orders; density maps / pb1d_head /
+    products as before.
+
+TWO-ARM SHORT RUN, submitted: ab_head_ref (3-residual_3D/ab_head_ref) and
+ab_head_nn, both resumed from arm B's epoch-39 segment state (raw weights,
+Adam, EMA, scheduler, RNG streams), fast B switches, MACE_STEP_TIMING for
+the phase costs, save_all_checkpoints for per-epoch EMA checkpoints,
+epochs 40-44 (5 full-PB epochs, no re-warm-up), same data order and
+budget; nn adds the branch via --resume_new_param_prefix
+local_electron_energy.charge_branch. Per-epoch evaluation
+(exp_ab_head/job_eval.sh: per-state E/F with the full energy derivative,
+paired charging energy on matched pairs, NiN88 unpaired) follows.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
