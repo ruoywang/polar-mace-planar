@@ -303,6 +303,26 @@ class Solver1D:
 
         dphi = torch.linalg.solve(J_c, -resid)
         phi = phi_star + dphi
+        # grad_passes >= 2 (2026-09-13): further differentiable Newton
+        # corrections on the LIVE phi with the same frozen J_c. One pass
+        # gives exact first derivatives (IFT) but a wrong second derivative:
+        # for phi^2 = theta at theta = 1 the one-step map is (1 + theta)/2,
+        # whose second derivative is 0 against the true -1/4. A second pass
+        # phi2 = phi1 - J^-1 r(phi1, theta) repairs it: with phi1' exact and
+        # J = r_phi(phi*) the frozen Jacobian, d2 phi2 = -J^-1 (r_phiphi phi'^2
+        # + 2 r_phitheta phi' + r_thetatheta) -- the implicit second derivative
+        # -- because the phi1'' terms cancel (phi1'' - J^-1 r_phi phi1'').
+        # The k-th pass makes the k-th derivative exact; the frozen J_c may
+        # stay frozen (its own derivative multiplies r(phi*) = 0). Cost per
+        # extra pass: one residual + one dense solve, no unrolling.
+        for _ in range(int(grad_passes) - 1):
+            charge_k = B @ phi + nb_off + ion_density_values(phi, s_ion, self.params, self.volume)
+            dip_k = (val_ion_dipole_z + (charge_k * self.z).mean()
+                     - charge_k.mean() * center_z)
+            cvdip_k = cdipol_potential_1d(nz, self.lz, c_unit * torch.clamp(dip_k, -20.0, 20.0), indmin, dev)
+            phi_sol = cvhar_z + cvdip_k
+            resid_k, _, _ = self.residual(phi, phi_sol, s_ion, B, nb_off, q_sol)
+            phi = phi + torch.linalg.solve(J_c, -resid_k)
         n_b = B @ phi + nb_off
         n_ion = ion_density_values(phi, s_ion, self.params, self.volume)
         with torch.no_grad():

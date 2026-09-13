@@ -66,7 +66,7 @@ def batch(sid):
 B = {s: batch(s) for s in FR}
 print(f"model {os.path.basename(mp)} @ {os.path.basename(cp)}  LIVE_POS=1  frames {FR}  atoms/frame {[len(atoms[s]) for s in FR]}  total_charge {[round(float(atoms[s].info.get('total_charge', 0.0)), 3) for s in FR]}")
 print(f"{'GRAD_PASSES':>12} {'frame':>6} {'fwd+loss+bwd s':>15} {'peak GiB':>9} {'loss':>14}")
-for gp in (1, 0, 1):   # 1 twice: the first pass pays warm-up costs
+for gp in [int(x) for x in os.environ.get("KIT_GPS", "1,0,1").split(",")]:   # first entry pays warm-up costs
     os.environ["MACE_PB1D_GRAD_PASSES"] = str(gp)
     for s in FR:
         model.zero_grad(set_to_none=True); torch.cuda.synchronize()

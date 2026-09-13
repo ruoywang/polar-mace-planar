@@ -67,7 +67,7 @@ SMOKE = bool(int(os.environ.get("KIT_SMOKE", "0")))
 GROUPS_ALL = ["field_dependent_charges_maps", "pb1d_head", "products",
               "local_electron_energy"]
 GROUPS = GROUPS_ALL[:1] + GROUPS_ALL[-1:] if SMOKE else GROUPS_ALL
-GPS = [1] if SMOKE else [1, 0]
+GPS = [1] if SMOKE else [int(x) for x in os.environ.get("KIT_GPS", "1,0").split(",")]
 EPS_REL = [1e-4] if SMOKE else [1e-4, 3e-5]
 NFRAMES = 1 if SMOKE else 2
 SEED = 7

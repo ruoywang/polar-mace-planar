@@ -32,7 +32,7 @@ sys.path.insert(0, os.environ.get("KIT_PB_REPO", "/work/08384/tg876840/ls6/repos
 sys.path.insert(0, os.environ.get("KIT_MACE_REPO", "/scratch/08384/tg876840/tmp/c-MACEsol/claude/2-1D_PB/pmp-s3denergy"))
 os.environ.setdefault("MACE_PB1D_NO_PRELOAD", "1")
 assert os.environ.get("MACE_PB1D_LIVE_POS") and not os.environ.get("MACE_PB1D_DFORCE")
-assert os.environ.get("MACE_PB1D_GRAD_PASSES") == "0", "run with MACE_PB1D_GRAD_PASSES=0"
+assert os.environ.get("MACE_PB1D_GRAD_PASSES") in ("0", "2", "3"), "run with MACE_PB1D_GRAD_PASSES=0 (reference) or 2/3 (k-pass adjoint under test)"
 from ase.io import read
 from mace import data as mace_data, tools
 from mace.data.utils import KeySpecification, update_keyspec_from_kwargs
