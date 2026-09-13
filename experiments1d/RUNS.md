@@ -1381,6 +1381,49 @@ did not continue.
 B3 (3435035) started at 05:33; B4 (3435247) queued; the evaluation
 (3435143) runs after B3 by queue age (scontrol top is not permitted here).
 
+### arm B, third segment  (B3 3435035; epochs 28-35; code 97efd17 at start)
+
+B3: 05:33 -> 07:13, wall 6001 s, resumed at 28 (lowest_loss carried over),
+stopped by the budget after epoch 35 (5891 s elapsed, last epoch 587 s).
+State + model object at 35. Epoch wall 14.8 / 12.8 / 12.7 / 9.7 / 8.75 /
+9.25 / 9.8 min -- falling through the segment with n_outer unchanged:
+
+| epoch | step time mean / max s | CUDA peak GiB | mmap reads | RAM cache | n_outer mean / max | at cap |
+|---|---|---|---|---|---|---|
+| 24 | 4.49 / 13.0 | 24.07 | 110 | 286 | 7.79 / 10 | 0 |
+| 25 | 4.50 / 10.5 | 24.07 | 71 | 357 | 7.68 / 10 | 0 |
+| 26 | 4.21 / 12.8 | 24.08 | 53 | 410 | 7.91 / 10 | 0 |
+| 27 | 4.19 / 10.3 | 24.08 | 26 | 436 | 7.84 / 10 | 0 |
+| 28 | 3.51 / 45.5 | 24.10 | 160 | 161 | 7.80 / 10 | 0 |
+| 29 | 3.99 / 9.8 | 24.10 | 106 | 287 | 7.73 / 10 | 0 |
+| 30 | 3.47 / 10.8 | 24.10 | 73 | 360 | 7.81 / 9 | 0 |
+| 31 | 3.45 / 8.4 | 24.10 | 42 | 402 | 7.79 / 10 | 0 |
+| 32 | 2.60 / 10.3 | 24.10 | 31 | 433 | 7.76 / 10 | 0 |
+| 33 | 2.28 / 6.9 | 24.10 | 19 | 452 | 7.73 / 10 | 0 |
+| 34 | 2.47 / 6.0 | 24.10 | 17 | 469 | 7.83 / 10 | 0 |
+| 35 | 2.55 / 6.5 | 24.10 | 10 | 479 | 7.78 / 10 | 0 |
+
+READING: 2.3-4.5 s per step at the same 7.7-7.9 outer iterations and the
+same 24.1 GiB -- the variation is not the solver and not memory; with the
+mmap reads down to 17-31 per epoch it is not the baseline cache either. It
+tracks something outside the step (node / filesystem load at the hour).
+B's intrinsic cost at this stage is the low end, ~2.3 s/step = 8.2 min per
+epoch (A: 1.05 s, 4.1 min): 2.2x, not the 4x read from B2's worst epochs.
+
+| val | A ep 28-35 | B ep 28-35 |
+|---|---|---|
+| loss | 0.815 / 0.805 / 0.794 / 0.791 / 0.794 / 0.789 / 0.779 / 0.775 | 0.922 / 0.908 / 0.890 / 0.880 / 0.875 / 0.874 / 0.860 / 0.865 |
+| E meV/atom | 11.1 / 10.9 / 10.9 / 10.5 / 10.5 / 10.3 / 10.3 / 10.1 | 11.8 / 11.5 / 11.3 / 11.3 / 11.1 / 11.2 / 11.1 / 11.2 |
+| F meV/A | 33.9 / 33.5 / 32.9 / 32.9 / 32.5 / 32.2 / 31.7 / 31.3 | 40.5 / 39.3 / 38.6 / 38.3 / 37.9 / 37.2 / 36.9 / 36.7 |
+| potential eV | 0.170 / 0.120 / 0.128 / 0.157 / 0.149 / 0.147 / 0.145 / 0.139 | 0.150 / 0.147 / 0.140 / 0.134 / 0.141 / 0.140 / 0.144 / 0.152 |
+| fermi eV | 0.110 / 0.098 / 0.089 / 0.104 / 0.098 / 0.098 / 0.090 / 0.086 | 0.118 / 0.106 / 0.101 / 0.110 / 0.106 / 0.109 / 0.105 / 0.121 |
+
+B's force RMSE (its energy's true slope vs DFT) closes on A's (its
+truncated-path force vs DFT): 47 -> 36.7 against 38 -> 31.3, ratio 1.24 ->
+1.17; energies within 1 meV/atom; potential now equal or better in B.
+Evaluation 3435143 (A final vs B at 35, structural metrics) started 07:13;
+fast-B acceptance 3435296 queued behind B4 (3435247).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
