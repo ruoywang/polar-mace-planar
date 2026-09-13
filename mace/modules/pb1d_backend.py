@@ -115,7 +115,12 @@ class PB1DBackend:
         self._bl_ram: Dict[int, torch.Tensor] = {}
         self._rt_tables_path = None
         self._rt_tables = None
-        self._bl_ram_max = int(os.environ.get("MACE_PB1D_PRELOAD_MAX", "512"))
+        # default raised 512 -> 1024 (2026-09-13): the 800-frame set has 720
+        # train+val sids per rank in DDP (the sampler reshuffles across ranks),
+        # so at 512 about 29% of every epoch's frames re-read the 9.6 GB
+        # baseline file over BeeGFS; ~24 MB/sample pinned, 720 -> ~17 GB/rank.
+        self._bl_ram_max = int(os.environ.get("MACE_PB1D_PRELOAD_MAX", "1024"))
+        self._bl_miss = 0   # read-only accounting: baseline rows fetched from the mmap
         if os.environ.get("MACE_PB1D_NO_PRELOAD"):
             self._bl_ram_max = 0
         if baseline_cache:
@@ -369,6 +374,7 @@ class PB1DBackend:
           with self._Phase(self, "1_baseline", device):
             ram = self._bl_ram.get(sample_id)
             if ram is None:
+                self._bl_miss += 1
                 ram = torch.from_numpy(
                     np.ascontiguousarray(self._bl_arr[bl_row][self._bl_take])
                 )

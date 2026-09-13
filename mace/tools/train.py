@@ -655,6 +655,7 @@ def train_one_epoch(
         _raw = model.module if hasattr(model, "module") else model
         _be = getattr(_raw, "_pb1d_backend", None)
         _t_sum = _t_max = 0.0; _n = 0; _no = []
+        _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
         for batch in data_loader:
             _, opt_metrics = take_step(
                 model=model_to_train,
@@ -678,7 +679,8 @@ def train_one_epoch(
             _cap = int(getattr(_be, "max_outer", 0) or 0) if _be is not None else 0
             _pk = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else float("nan")
             _msg = (f"epoch {epoch} accounting (rank 0): {_n} steps, step time mean {_t_sum/_n:.2f} s max {_t_max:.1f} s, "
-                    f"CUDA peak {_pk:.2f} GiB")
+                    f"CUDA peak {_pk:.2f} GiB, baseline mmap reads {int(getattr(_be, '_bl_miss', 0)) - _miss0 if _be is not None else 0}"
+                    f" (RAM cache {len(getattr(_be, '_bl_ram', {})) if _be is not None else 0}/{getattr(_be, '_bl_ram_max', 0) if _be is not None else 0})")
             if _no:
                 _msg += (f", pb1d n_outer mean {sum(_no)/len(_no):.2f} max {max(_no)}"
                          + (f" at-cap {sum(1 for x in _no if x >= _cap)}/{len(_no)}" if _cap else ""))
