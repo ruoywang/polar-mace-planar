@@ -1541,6 +1541,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "every other parameter, moment, scheduler and RNG stream resumes",
     )
     parser.add_argument(
+        "--resume_reset_plateau", action="store_true", default=False,
+        help="with --resume_state: the loss scale changes (new loss weights), so "
+        "reset what compares losses across epochs -- best validation loss, "
+        "patience, the ReduceLROnPlateau best/num_bad_epochs/cooldown -- and "
+        "take no scheduler step at the first resumed epoch; Adam moments and "
+        "the restored learning rate are kept",
+    )
+    parser.add_argument(
         "--skip_final_eval", action="store_true", default=False,
         help="after the last epoch save the model files but do not compute the "
         "train/valid/test error tables (run them separately)",

@@ -396,7 +396,8 @@ def train(
         epoch_t0 = time.time()
         # LR scheduler and SWA update
         if swa is None or epoch < swa.start:
-            if epoch > start_epoch or (resumed and epoch == start_epoch and epoch > 0):
+            if epoch > start_epoch or (resumed and epoch == start_epoch and epoch > 0
+                                       and not resume_state.get("_reset_plateau")):
                 lr_scheduler.step(
                     metrics=valid_loss
                 )  # Can break if exponential LR, TODO fix that!

@@ -1477,6 +1477,32 @@ def run(args) -> None:
             f"Resuming from segment state {args.resume_state}: raw weights, optimizer, "
             f"scheduler and EMA loaded; next epoch {start_epoch}"
         )
+        if getattr(args, "resume_reset_plateau", False):
+            # the loss scale changes with new loss weights: nothing that compares
+            # losses across the boundary may survive; Adam moments and the lr do
+            sch = getattr(lr_scheduler, "lr_scheduler", lr_scheduler)
+            for attr, val in (("best", float("inf")), ("num_bad_epochs", 0), ("cooldown_counter", 0)):
+                if hasattr(sch, attr):
+                    setattr(sch, attr, val)
+            resume_state["lowest_loss"] = float("inf")
+            resume_state["valid_loss"] = float("inf")
+            resume_state["patience_counter"] = 0
+            resume_state["_reset_plateau"] = True
+            logging.info("resume_reset_plateau: best loss, patience and the plateau scheduler's best/num_bad_epochs/cooldown reset; no scheduler step at the first resumed epoch")
+        # one-time print of what is actually in effect (user requirement 2026-09-13)
+        cb_flag = getattr(getattr(model, "local_electron_energy", None), "charge_branch", None) is not None
+        lrs = [(g.get("name", "?"), g["lr"]) for g in optimizer.param_groups]
+        wts = {k: getattr(args, k) for k in ("energy_weight", "forces_weight", "potential_weight", "fermi_level_weight",
+                                            "density_3d_weight", "solvent3d_weight", "charge_density_1d_weight",
+                                            "potential_1d_profile_weight", "solvent_rhob_1d_weight", "occ_aug_weight") if hasattr(args, k)}
+        lw = {k: (float(getattr(loss_fn, k)) if torch.is_tensor(getattr(loss_fn, k)) else getattr(loss_fn, k))
+              for k in ("energy_weight", "forces_weight") if hasattr(loss_fn, k)}
+        logging.info(
+            f"IN EFFECT: code {commit}; state {os.path.abspath(args.resume_state)}; start epoch {start_epoch}; "
+            f"charge_branch {cb_flag}; lr per group {lrs}; loss weights (args) {wts}; loss_fn weights {lw or 'n/a'}; "
+            f"LIVE_POS={os.environ.get('MACE_PB1D_LIVE_POS')} GRAD_PASSES={os.environ.get('MACE_PB1D_GRAD_PASSES')} "
+            f"AREA_EPS={os.environ.get('MACE_PB1D_AREA_EPS')} DFORCE={os.environ.get('MACE_PB1D_DFORCE')}"
+        )
     elif args.ema:
         ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
 
