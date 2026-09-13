@@ -1235,6 +1235,62 @@ resuming from its arm's segment state, 6000 s budget guard, epoch 39's
 segment writing the model files; job_seg.sh refuses to start a first
 segment over existing states or a resume without its file.
 
+### joint A/B, first segments  (A1 3434530, B1 3434531; code dfc1005 at start; dev queue, 3 GPUs)
+
+Both arms: gate_le config with warmup_encounters 20, 40 epochs, seed 123,
+restart_latest off, empty cache dirs; A: LIVE_POS unset / GRAD_PASSES 1 /
+AREA_EPS 1e-12; B: LIVE_POS=1 / GRAD_PASSES=0 / AREA_EPS 1e-12. Segments run
+until the 6000 s budget stops them at an epoch boundary (STOP=39); queued
+segments carry no dependency so they accrue age and start back-to-back
+(B1 started the minute A1 ended; the earlier dependency chain would have
+re-queued ~2 h per segment -- dev waits today: 1 h 52 min, then ~2 h).
+
+A1: 23:11:53 -> 00:48, wall 5795 s, startup 7 min, epochs 0-27, state
+written (next 28). Warm-up epochs 2.2 min; full-PB epochs 5:40 (first),
+then 4:07-4:10.
+B1: 00:49 -> 02:32, wall 6198 s, epochs 0-22, state written (next 23).
+Full-PB epochs 8:27, 10:11, 14:22 -- growing each epoch; A's stayed at 4.1.
+The 862 s last epoch pushed B1 105 s past its 6000 s budget (the guard
+predicts with 1.15 x the previous epoch); still 1000 s inside the 2 h wall.
+
+THE WARM-UP IS THE SAME COMPUTATION IN BOTH ARMS, AND STILL DIVERGES:
+per-step training loss, A vs B: step 1 108169.233836661 = 108169.233836661;
+step 2 38848119523.526 vs .556 (1e-12 relative); step 100 1779.8385 vs
+1779.8503 (7e-6); step 200 228.77 vs 38.25 (fully apart). CUDA round-off
+amplified by the early dynamics (a 3.9e10 loss transient at step 2) --
+the run-to-run floor of this training is O(1) on the validation curves.
+
+| val | A ep 19 | B ep 19 | A ep 20 | B ep 20 | A ep 21 | B ep 21 | A ep 22 | B ep 22 |
+|---|---|---|---|---|---|---|---|---|
+| loss | 4.04 | 6.62 | 0.993 | 1.481 | 0.941 | 1.152 | 0.902 | 1.079 |
+| E meV/atom | 21.6 | 19.4 | 15.3 | 16.3 | 15.0 | 12.9 | 14.9 | 12.3 |
+| F meV/A | 44.4 | 162.2 | 40.7 | 68.0 | 39.5 | 52.2 | 37.9 | 47.3 |
+| potential eV | 1.30 | 1.34 | 0.211 | 0.290 | 0.200 | 0.213 | 0.161 | 0.181 |
+| fermi eV | 1.34 | 1.39 | 0.203 | 0.314 | 0.172 | 0.206 | 0.128 | 0.161 |
+
+A epochs 23-27: loss 0.874 / 0.859 / 0.850 / 0.828 / 0.822; E 13.8 / 12.8 /
+12.7 / 11.8 / 11.6; F 36.8 / 36.3 / 35.6 / 34.9 / 34.4; potential 0.158 /
+0.164 / 0.158 / 0.154 / 0.156.
+
+READING SO FAR. At the end of warm-up the two arms differ by 3.7x in force
+RMSE (44 vs 162) with identical computation -- that difference is the
+floor, not the switches, and B's warm-up trajectory sat in a worse basin
+(its force error ROSE 138 -> 150 -> 162 over epochs 9-19 while A's fell).
+Entering the full PB path B's force error fell 162 -> 68 -> 52 -> 47 in
+three epochs while A's moved 44 -> 38; B's energy is now better than A's
+(12.3 vs 14.9). Note that "F" is a different object in the two arms: B
+returns the actual slope of its energy, A the truncated-path force. No
+verdict on the switches can be read from these curves: the same-computation
+divergence is as large as any A/B difference so far. The structural
+readout (paired charging energy, per-state forces, ab_eval.py on the
+segment states with EMA weights; the state now also carries the model
+object, 7594b58) is what decides, and a second seed is the only way to
+separate the switch effect from basin selection if the end states differ
+by amounts of this size.
+
+OPEN: why B's full-PB epoch time grows (8.5 -> 10.2 -> 14.4 min). Solve
+iteration counts are not logged in training; watch B2.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
