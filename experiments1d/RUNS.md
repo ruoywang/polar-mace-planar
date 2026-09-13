@@ -1491,6 +1491,69 @@ decisive; on the charging-energy axis it changes nothing (previous entry).
 The 1723-1738 meV/A maxima on the neutral training frames appear in every
 column: one frame's outlier, not a derivative matter.
 
+### fast B accepted: GRAD_PASSES=2 reproduces the unrolled training gradient  (job 3435296, code 3eaac31; solver 7df9d40)
+
+WHAT IT IS. The analytic adjoint converges the PB solve under no_grad and
+then applies differentiable Newton corrections with the coupled Jacobian
+J_c frozen at phi*. One correction (the old GRAD_PASSES=1) gives exact
+first derivatives (IFT) and a wrong second derivative -- the user's
+counter-example phi^2 = theta: one step gives (1+theta)/2, second
+derivative 0 against -1/4. A SECOND correction on the live phi_1 (charge,
+dipole feedback, residual recomputed; same frozen J_c) gives
+d2 phi_2 = -J^-1 (r_phiphi phi'^2 + 2 r_phitheta phi' + r_thetatheta),
+the implicit second derivative, because phi_1'' cancels between the two
+terms; in the example phi_2 = (-theta^2 + 6 theta + 3)/8, second
+derivative -1/4. J_c may stay frozen: its own derivative multiplies
+r(phi*) = 0. Cost per extra pass: one residual + one dense solve. gp=1 and
+gp=0 paths are bit-identical to before.
+
+1. SAME CHECKPOINT (gate_le epoch 39), SAME FRAMES, LIVE_POS=1, AREA_EPS=1e-12:
+
+second_order_check, relative error against FD (eps 1e-4), gp=1 / gp=2 / gp=0:
+| group | quantity | sid 28 | sid 628 |
+|---|---|---|---|
+| density maps | v.dE | 4.9e-6 / 4.9e-6 / 4.9e-6 | 3.6e-3 / 3.6e-3 / 3.6e-3 (FD step) |
+| density maps | v.dL_F | 89.5 / 4.2e-3 / 4.2e-3 | 1.82 / 1.03 / 1.03 (FD unreadable at these eps) |
+| pb1d_head | v.dL_F | 13.3 / 1.25e-4 / 1.26e-4 | 4.50 / 2.5e-7 / 2.5e-7 |
+| products | v.dL_F | 9.8e-2 / 1.04e-5 / 1.04e-5 | 5.76 / 1.19e-5 / 1.19e-5 |
+| control local_e | v.dL_F | 1.06e-5 / 1.06e-5 / 1.06e-5 | 5.4e-7 / 5.4e-7 / 5.4e-7 |
+   gp=2 equals gp=0 to the 7 printed digits on every autograd value
+   (e.g. 6.124710e-05 vs 6.124711e-05).
+floss_grad_by_term at gp=2 (eps 1e-5): density maps D_total -0.04% (sid 28)
+   / -0.10% (sid 628), cavity D_k within its drift; control +0.22% / 0.00%.
+grad_passes_cost, values gp=2 vs gp=0: 207-atom frames |dE| <= 7.1e-10 eV,
+   max|dF| <= 2.1e-7 eV/A, |dloss| <= 6.8e-8; 339-atom frames |dE| <= 5.9e-12,
+   max|dF| <= 7.7e-12 (solve-tolerance floor; gp=1 sits at the same floor).
+THE FULL TRAINING-LOSS GRADIENT (what the optimizer uses), gp=2 vs gp=0,
+   all 1.02 M parameters: relative error 4.4e-7 / 1.5e-7 / 1.3e-6 (207-atom
+   frames 1/2/3), 9.1e-11 / 6.4e-11 / 7.3e-11 (339-atom 202/203/204),
+   cosine 1.00000000 in every parameter group; worst group 5.9e-6
+   (fukui_source_map, ||g0|| 0.41). The same comparison for gp=1: relative
+   error 12.3 / 12.2 / 13.8 and 1.49 / 1.74 / 1.08, overall cosine 0.04 /
+   0.55 / 0.61 and -0.23 / 0.15 / 0.69; pb1d_head cosine -0.97 / -0.83 /
+   -0.87, density maps relative error 15-25 -- the one-step adjoint's
+   training gradient for the solve-dependent parameters was not off by
+   percent, it pointed the wrong way (this is the gradient arm A would have
+   had on those paths had they been live; in A they were detached).
+
+2. COST. Per frame, fwd + loss + bwd, steady pass: gp=2 1.42 / 1.43 / 1.44 s
+   (207 atoms), 1.65 / 1.66 / 1.65 s (339); gp=0 in the same table 1.5-4.3
+   s (noisy first passes); peak memory gp=2 20.5 / 23.9 GiB against gp=0
+   20.6 / 24.0 and gp=1 20.5 / 23.8 -- the graph memory is the grid terms
+   and stage 1, not the unrolled solve. One 3-GPU DDP epoch, full-PB path
+   from scratch, same setup as the gp=0 gate (3433252, 16.0 min): 12.25 min
+   (07:36:44 -> 07:48:59), step time mean 2.77 s at n_outer mean 9.54 on the
+   cold model with 159 baseline mmap reads, per-GPU peak 27.4 / 27.5 / 27.5
+   GiB (gp=0: 27.8). Projection, not measurement: at the trained model's
+   n_outer 7.8 and a warm cache, ~1.5 s/step = ~5.5 min/epoch against A's
+   4.1 and full B's 8-9 (best segment) -- to be read off the first fast-B
+   segment.
+
+DECISION. gp=2 replaces gp=0 for NEW runs (env MACE_PB1D_GRAD_PASSES=2 with
+LIVE_POS=1, AREA_EPS=1e-12). The running chain is not switched: B4 stays at
+gp=0 so arm B finishes as the full reference. Every future segment logs
+CODE and the switches in its header (job_seg.sh does).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
