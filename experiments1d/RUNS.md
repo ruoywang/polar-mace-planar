@@ -1554,6 +1554,45 @@ LIVE_POS=1, AREA_EPS=1e-12). The running chain is not switched: B4 stays at
 gp=0 so arm B finishes as the full reference. Every future segment logs
 CODE and the switches in its header (job_seg.sh does).
 
+### arm B complete: 40 epochs in four segments  (B1 3434531, B2 3434845, B3 3435035, B4 3435247; final model 3-residual_3D/ab_deriv_B/models/ab_deriv_B.model)
+
+B4: 07:49 -> 08:32, wall 2600 s, epochs 36-39 at gp=0, then the completion
+path: best checkpoint = epoch 39 (EMA), model files written, tables
+skipped. Total B training wall over four segments 5245 + 6198 + 6001 +
+2600 s = 5 h 34 min plus four startups, against A's 5795 + 5231 s = 3 h 4
+min in two. Full validation history of both arms on the full-PB path
+(loss / E meV/atom / F meV/A / potential eV / fermi eV):
+
+| epoch | A loss / E / F / pot / fermi | B loss / E / F / pot / fermi |
+|---|---|---|
+| 19 | 4.045 / 21.6 / 44.4 / 1.298 / 1.339 | 6.625 / 19.4 / 162.2 / 1.345 / 1.386 |
+| 20 | 0.993 / 15.2 / 40.7 / 0.211 / 0.203 | 1.481 / 16.3 / 68.0 / 0.290 / 0.314 |
+| 21 | 0.941 / 15.0 / 39.5 / 0.200 / 0.172 | 1.152 / 12.9 / 52.2 / 0.213 / 0.206 |
+| 22 | 0.902 / 14.9 / 37.9 / 0.161 / 0.128 | 1.079 / 12.3 / 47.3 / 0.181 / 0.161 |
+| 23 | 0.874 / 13.8 / 36.8 / 0.158 / 0.123 | 1.056 / 12.0 / 46.0 / 0.229 / 0.182 |
+| 24 | 0.859 / 12.8 / 36.3 / 0.164 / 0.116 | 1.043 / 12.2 / 45.7 / 0.236 / 0.191 |
+| 25 | 0.850 / 12.7 / 35.6 / 0.158 / 0.105 | 0.973 / 11.9 / 42.8 / 0.189 / 0.145 |
+| 26 | 0.828 / 11.8 / 34.9 / 0.154 / 0.101 | 0.946 / 11.8 / 41.7 / 0.147 / 0.120 |
+| 27 | 0.822 / 11.6 / 34.4 / 0.156 / 0.103 | 0.932 / 11.7 / 41.2 / 0.147 / 0.119 |
+| 28 | 0.815 / 11.1 / 33.9 / 0.170 / 0.110 | 0.922 / 11.8 / 40.5 / 0.150 / 0.118 |
+| 29 | 0.805 / 10.9 / 33.5 / 0.120 / 0.098 | 0.908 / 11.5 / 39.2 / 0.147 / 0.106 |
+| 30 | 0.794 / 10.9 / 32.9 / 0.128 / 0.089 | 0.890 / 11.3 / 38.6 / 0.140 / 0.101 |
+| 31 | 0.791 / 10.5 / 32.9 / 0.157 / 0.104 | 0.880 / 11.3 / 38.3 / 0.134 / 0.110 |
+| 32 | 0.794 / 10.4 / 32.5 / 0.149 / 0.098 | 0.875 / 11.1 / 37.9 / 0.141 / 0.106 |
+| 33 | 0.789 / 10.3 / 32.1 / 0.147 / 0.098 | 0.874 / 11.2 / 37.1 / 0.140 / 0.109 |
+| 34 | 0.779 / 10.3 / 31.7 / 0.145 / 0.090 | 0.860 / 11.1 / 36.9 / 0.144 / 0.105 |
+| 35 | 0.775 / 10.1 / 31.3 / 0.139 / 0.086 | 0.865 / 11.2 / 36.7 / 0.152 / 0.121 |
+| 36 | 0.771 / 10.2 / 31.2 / 0.143 / 0.087 | 0.853 / 11.2 / 36.1 / 0.148 / 0.112 |
+| 37 | 0.775 / 10.0 / 31.1 / 0.134 / 0.081 | 0.854 / 11.3 / 35.8 / 0.146 / 0.103 |
+| 38 | 0.757 / 9.9 / 30.5 / 0.148 / 0.085 | 0.856 / 11.4 / 35.6 / 0.143 / 0.103 |
+| 39 | 0.751 / 9.7 / 30.0 / 0.133 / 0.076 | 0.834 / 11.3 / 35.1 / 0.142 / 0.104 |
+
+End points: A 0.751 / 9.66 / 30.0 / 0.133 / 0.076; B 0.834 / 11.27 / 35.1
+/ 0.142 / 0.104. Read against the same-computation warm-up divergence
+(A 44 vs B 162 meV/A in force at epoch 19), these curves carry no verdict on
+the switches by themselves; the structural evaluation of the two final
+models (job 3435324, running) does.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
