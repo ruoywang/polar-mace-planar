@@ -670,6 +670,9 @@ def train_one_epoch(
             opt_metrics["mode"] = "opt"
             opt_metrics["epoch"] = epoch
             _t = float(opt_metrics.get("time", 0.0)); _t_sum += _t; _t_max = max(_t_max, _t); _n += 1
+            if _be is None:   # the backend is created lazily on the first forward
+                _be = getattr(_raw, "_pb1d_backend", None)
+                _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
             _d = getattr(_be, "last_diagnostics", None) if _be is not None else None
             if isinstance(_d, dict) and _d.get("n_outer") is not None:
                 _no.append(int(_d["n_outer"]))
