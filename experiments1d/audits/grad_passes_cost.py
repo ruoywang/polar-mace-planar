@@ -79,7 +79,15 @@ for gp in [int(x) for x in os.environ.get("KIT_GPS", "1,0,1").split(",")]:   # f
             torch.cuda.synchronize(); dt = time.perf_counter() - t0
             pk = torch.cuda.max_memory_allocated() / 2**30
             print(f"{gp:>12} {s:>6} {dt:15.2f} {pk:9.2f} {float(L):14.6f}", flush=True)
-            REC.setdefault((gp, s), (float(out["energy"].sum()), out["forces"].detach().clone(), float(L)))
+            if (gp, s) not in REC:
+                # the FULL training-loss gradient, per top-level parameter group
+                # (what the optimizer step actually uses); compared across gp
+                G = {}
+                for n, prm in model.named_parameters():
+                    if prm.grad is not None:
+                        G.setdefault(n.split(".")[0], []).append(prm.grad.detach().flatten().clone())
+                G = {k: torch.cat(v) for k, v in G.items()}
+                REC[(gp, s)] = (float(out["energy"].sum()), out["forces"].detach().clone(), float(L), G)
         except RuntimeError as e:
             torch.cuda.synchronize()
             print(f"{gp:>12} {s:>6} {'FAILED':>15} {'-':>9}  {str(e)[:80]}", flush=True)
@@ -91,6 +99,25 @@ if 0 in gps and len(gps) > 1:
         if g == 0: continue
         for s in FR:
             if (g, s) in REC and (0, s) in REC:
-                E1, F1, L1 = REC[(g, s)]; E0, F0, L0 = REC[(0, s)]
+                E1, F1, L1, G1 = REC[(g, s)]; E0, F0, L0, G0 = REC[(0, s)]
                 print(f"  gp={g} frame {s}: |dE| {abs(E1-E0):.3e}   max|dF| {float((F1-F0).abs().max()):.3e}   rms dF {float(((F1-F0)**2).mean().sqrt()):.3e}   |dloss| {abs(L1-L0):.3e}")
+    print(f"\nTRAINING-LOSS GRADIENT vs GRAD_PASSES=0, per parameter group: rel err ||g-g0||/||g0||, cosine, ||g0||")
+    for g in gps:
+        if g == 0: continue
+        for s in FR:
+            if (g, s) not in REC or (0, s) not in REC: continue
+            G1, G0 = REC[(g, s)][3], REC[(0, s)][3]
+            allk = sorted(set(G0) | set(G1)); tot1 = []; tot0 = []
+            print(f"  gp={g} frame {s}:")
+            for k in allk:
+                a = G1.get(k); b = G0.get(k)
+                if a is None or b is None or a.numel() != b.numel():
+                    print(f"    {k:>32}: present in gp={g}: {a is not None}, in gp=0: {b is not None}"); continue
+                tot1.append(a); tot0.append(b)
+                n0 = float(b.norm()); rel = float((a - b).norm()) / max(n0, 1e-300)
+                cos = float((a * b).sum() / max(a.norm() * b.norm(), 1e-300))
+                print(f"    {k:>32}: rel err {rel:.3e}   cos {cos:.8f}   ||g0|| {n0:.3e}   ({a.numel()} params)")
+            if tot1:
+                a = torch.cat(tot1); b = torch.cat(tot0)
+                print(f"    {'ALL':>32}: rel err {float((a-b).norm()/b.norm()):.3e}   cos {float((a*b).sum()/(a.norm()*b.norm())):.8f}   ||g0|| {float(b.norm()):.3e}")
 print("DONE")
