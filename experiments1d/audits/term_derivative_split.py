@@ -104,7 +104,7 @@ if os.environ.get("KIT_ATTACH_CHARGE_BRANCH"):
     with torch.no_grad():
         _cb.out.weight.copy_(torch.randn(_cb.out.weight.shape, generator=_g, dtype=torch.float64).to(device) * float(os.environ["KIT_ATTACH_CHARGE_BRANCH"]))
         _cb.out.bias.zero_()
-    print(f"charge branch attached: {sum(p.numel() for p in _cb.parameters())} params, output layer std {os.environ[\"KIT_ATTACH_CHARGE_BRANCH\"]}")
+    print("charge branch attached: %d params, output layer std %s" % (sum(p.numel() for p in _cb.parameters()), os.environ["KIT_ATTACH_CHARGE_BRANCH"]))
 model.eval()
 for p in model.parameters():
     p.requires_grad = False
