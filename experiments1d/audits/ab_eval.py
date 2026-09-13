@@ -34,11 +34,30 @@ os.chdir(RUN)
 device = torch_tools.init_device("cuda"); torch_tools.set_default_dtype("float64")
 args = tools.build_default_arg_parser().parse_args(["--config", "config_pb1d.yaml", "--name", NAME, "--seed", "123", "--work_dir", ".", "--device", "cuda"])
 args.key_specification = KeySpecification(); update_keyspec_from_kwargs(args.key_specification, vars(args))
-mp = [p for p in sorted(glob.glob(os.path.join(RUN, "models", "*.model"))) if "compiled" not in p][-1]
-cp = sorted(glob.glob(os.path.join(RUN, "checkpoints", "*_epoch-*.pt")), key=lambda p: int(p.rsplit("epoch-",1)[1].split(".")[0]))[-1]
-EPOCH = int(cp.rsplit("epoch-", 1)[1].split(".")[0])
-model = torch.load(f=mp, map_location=device).to(device)
-model.load_state_dict(torch.load(cp, map_location=device)["model"], strict=False)
+STATE = os.environ.get("KIT_STATE")          # a segment state: mid-run evaluation
+if STATE:
+    # model object written next to the state; weights from the state (EMA by
+    # default -- what mace validates and saves -- or raw)
+    mp = os.environ.get("KIT_MODEL_OBJ") or sorted(glob.glob(os.path.join(os.path.dirname(STATE), "*_model_epoch*.pt")),
+                                                  key=lambda p: int(p.rsplit("epoch", 1)[1].split(".")[0]))[-1]
+    try: st = torch.load(STATE, map_location="cpu", weights_only=False)
+    except TypeError: st = torch.load(STATE, map_location="cpu")
+    EPOCH = int(st["next_epoch"]) - 1
+    model = torch.load(f=mp, map_location=device).to(device)
+    model.load_state_dict(st["model"], strict=True)
+    WEIGHTS = os.environ.get("KIT_WEIGHTS", "ema")
+    if WEIGHTS == "ema":
+        shadow = st["ema"]["shadow_params"]; params = [p for p in model.parameters() if p.requires_grad]
+        assert len(shadow) == len(params), (len(shadow), len(params))
+        with torch.no_grad():
+            for p, sp in zip(params, shadow): p.copy_(sp.to(p.device, p.dtype))
+    cp = f"{STATE} [{WEIGHTS} weights]"
+else:
+    mp = [p for p in sorted(glob.glob(os.path.join(RUN, "models", "*.model"))) if "compiled" not in p][-1]
+    cp = sorted(glob.glob(os.path.join(RUN, "checkpoints", "*_epoch-*.pt")), key=lambda p: int(p.rsplit("epoch-",1)[1].split(".")[0]))[-1]
+    EPOCH = int(cp.rsplit("epoch-", 1)[1].split(".")[0])
+    model = torch.load(f=mp, map_location=device).to(device)
+    model.load_state_dict(torch.load(cp, map_location=device)["model"], strict=False)
 model.eval(); model._pb1d_epoch = EPOCH
 for p in model.parameters(): p.requires_grad_(False)
 z_table = tools.AtomicNumberTable([int(z) for z in model.atomic_numbers])
@@ -52,7 +71,7 @@ def _evict():
             d = getattr(b, at, None)
             if isinstance(d, dict): d.clear()
 env = {k: os.environ.get(k, "unset") for k in ("MACE_PB1D_LIVE_POS", "MACE_PB1D_GRAD_PASSES", "MACE_PB1D_DFORCE")}
-print(f"[{TAG}] model {os.path.basename(mp)} @ epoch {EPOCH}   env {env}   train stride {STRIDE}")
+print(f"[{TAG}] model {os.path.basename(mp)} @ epoch {EPOCH} ({os.path.basename(str(cp))})   env {env}   train stride {STRIDE}")
 
 def state_of(a):
     q = float(a.info.get("total_charge", 0.0)); n = len(a)

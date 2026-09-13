@@ -287,6 +287,13 @@ def _save_segment_state(path, epoch, model, optimizer, lr_scheduler, ema, lowest
         os.replace(tmp, path)
         root, ext = os.path.splitext(path)
         torch.save(state, f"{root}_epoch{int(epoch)}{ext}")
+        # the model OBJECT too (architecture + data-derived buffers), so a
+        # mid-run evaluation can load it and put the state's raw or EMA
+        # weights in, without rebuilding the model from the training data
+        try:
+            torch.save(m, f"{root}_model_epoch{int(epoch)}.pt")
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning(f"segment model object not saved: {exc}")
         logging.info(
             f"Segment state written: {path} (next epoch {int(epoch) + 1}, "
             f"{len(gathered)} ranks' RNG streams, raw weights + EMA + optimizer + scheduler)"
