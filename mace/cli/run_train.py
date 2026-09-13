@@ -1437,17 +1437,29 @@ def run(args) -> None:
                     new_params.append(prm)
                     new_ids.add(id(prm))
             # optimizer: drop the new tensors from the groups the builder put
-            # them in (restores the saved parameter order), load the moments,
-            # then give them their own fresh group
+            # them in (restores the saved parameter order) and give them their
+            # own group. FIRST segment: the state has no such group -> load,
+            # then add. CONTINUATION: the state already carries the group
+            # "resume_new_params" (written by the first segment) -> add first
+            # so the structures match, then load everything incl. its moments.
             for g in optimizer.param_groups:
                 g["params"] = [prm for prm in g["params"] if id(prm) not in new_ids]
-            optimizer.load_state_dict(resume_state["optimizer"])
-            optimizer.add_param_group(
-                {"name": "resume_new_params", "params": new_params, "weight_decay": 0.0, "lr": args.lr}
-            )
+            has_extra = any(g.get("name") == "resume_new_params" for g in resume_state["optimizer"].get("param_groups", []))
+            if has_extra:
+                optimizer.add_param_group(
+                    {"name": "resume_new_params", "params": new_params, "weight_decay": 0.0, "lr": args.lr}
+                )
+                optimizer.load_state_dict(resume_state["optimizer"])
+            else:
+                optimizer.load_state_dict(resume_state["optimizer"])
+                optimizer.add_param_group(
+                    {"name": "resume_new_params", "params": new_params, "weight_decay": 0.0, "lr": args.lr}
+                )
             logging.info(
                 f"Resume with new parameters under '{new_prefix}': {len(new_params)} tensors, "
-                f"{sum(prm.numel() for prm in new_params)} parameters, fresh optimizer group and EMA entries"
+                f"{sum(prm.numel() for prm in new_params)} parameters, "
+                f"{'moments restored (continuation)' if has_extra else 'fresh optimizer group'}; "
+                f"{'missing from the state: ' + str(len(missing)) + ' tensors' if missing else 'all present in the state'}"
             )
         else:
             model.load_state_dict(resume_state["model"], strict=True)
@@ -1457,13 +1469,23 @@ def run(args) -> None:
             if resume_state.get("ema") is None:
                 raise RuntimeError("segment state has no EMA but this run uses EMA")
             if new_params:
+                # EMA order = old parameters, then the new ones appended -- the
+                # order the first segment saved; a continuation's state already
+                # holds shadows for all of them
                 old_list = [prm for n, prm in model.named_parameters() if not n.startswith(new_prefix)]
-                ema = ExponentialMovingAverage(old_list, decay=args.ema_decay)
-                ema.load_state_dict(resume_state["ema"])
                 import weakref
-                for prm in new_params:   # torch_ema keeps weakrefs + shadow tensors in step
-                    ema._params_refs.append(weakref.ref(prm))
-                    ema.shadow_params.append(prm.detach().clone())
+                n_saved = len(resume_state["ema"]["shadow_params"])
+                if n_saved == len(old_list) + len(new_params):
+                    ema = ExponentialMovingAverage(old_list + new_params, decay=args.ema_decay)
+                    ema.load_state_dict(resume_state["ema"])
+                elif n_saved == len(old_list):
+                    ema = ExponentialMovingAverage(old_list, decay=args.ema_decay)
+                    ema.load_state_dict(resume_state["ema"])
+                    for prm in new_params:   # torch_ema keeps weakrefs + shadow tensors in step
+                        ema._params_refs.append(weakref.ref(prm))
+                        ema.shadow_params.append(prm.detach().clone())
+                else:
+                    raise RuntimeError(f"EMA state has {n_saved} shadows; model has {len(old_list)} old + {len(new_params)} new parameters")
             else:
                 ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
                 ema.load_state_dict(resume_state["ema"])
