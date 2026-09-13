@@ -1424,6 +1424,47 @@ truncated-path force vs DFT): 47 -> 36.7 against 38 -> 31.3, ratio 1.24 ->
 Evaluation 3435143 (A final vs B at 35, structural metrics) started 07:13;
 fast-B acceptance 3435296 queued behind B4 (3435247).
 
+### A/B structural evaluation, first read  (job 3435143; A = final model epoch 39, B = segment state epoch 35 with EMA weights; training-cache path; val complete, train every 3rd frame)
+
+| per-state | A: E rmse / bias (meV/atom) | A: F rmse / max (meV/A) | B: E rmse / bias | B: F rmse / max |
+|---|---|---|---|---|
+| train charged NiN44 (54) | 17.18 / +16.97 | 28.1 / 253 | 19.61 / +19.36 | 35.1 / 257 |
+| train charged NiN88 (53) | 3.29 / -3.12 | 27.5 / 253 | 5.15 / -5.04 | 33.4 / 412 |
+| train neutral NiN44 (107) | 6.00 / -5.91 | 40.1 / 1723 | 7.02 / -6.98 | 44.2 / 1738 |
+| val charged NiN44 (20) | 16.73 / +16.46 | 29.1 / 191 | 19.01 / +18.64 | 37.2 / 296 |
+| val charged NiN88 (20) | 3.36 / -3.19 | 28.0 / 280 | 5.14 / -5.03 | 34.5 / 315 |
+| val neutral NiN44 (40) | 6.15 / -6.04 | 31.9 / 685 | 7.12 / -7.07 | 38.0 / 531 |
+
+Paired charging energy dE = E(k) - E(k+600), model - DFT (eV):
+
+| | pairs | A rmse / bias / mean-removed | B rmse / bias / mean-removed |
+|---|---|---|---|
+| train | 54 | 4.6655 / 4.6266 / 0.6012 | 5.4581 / 5.4201 / 0.6427 |
+| val | 20 | 4.5804 / 4.5208 / 0.7361 | 5.3386 / 5.2790 / 0.7951 |
+
+PAIR BY PAIR (the numbers that decide): B's residual = A's residual + a
+near-constant shift, val +0.758 eV (std 0.125 over 20 pairs), train +0.794
+(std 0.117 over 54); corr(A, B) = 0.990 / 0.984; B larger on 20/20 and
+54/54 pairs. Per-frame energy error B - A: charged NiN44 +2.18 meV/atom
+(std 0.96), charged NiN88 -1.84 (0.22), neutral NiN44 -1.04 (0.75).
+
+READING. Both arms show the known defect in the same shape: charged NiN44
+frames +17-19 meV/atom high, neutral -6 to -7 low, and a 4.5-5.4 eV
+charging-energy bias with a 0.6-0.8 eV spread -- the one-constant-per-
+electron picture (a = -5.27 eV/e from the head-fit chapter). The derivative
+repair moved that constant by ~+0.76 eV (B at epoch 35 vs A at 39; B has
+four epochs less, so part of the shift may be training stage -- A's
+epoch-35 state was not saved, only 27 and 39) and left the structure
+untouched (corr 0.99, spread 0.60 -> 0.64). It did NOT change what the
+model knows about the charge state. That is what was expected from the
+charge-blind-descriptor finding: the fix makes the force the energy's
+slope and gives the density maps and pb1d_head their gradients, but the
+energy head still cannot tell a charged frame from its neutral partner.
+Forces vs DFT: B 33-44 meV/A against A 28-40 -- B's force is a different
+object (the true slope); the third table (A evaluated under LIVE_POS=1,
+i.e. A's own true slope vs DFT) is the fair comparison and is being
+computed.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
