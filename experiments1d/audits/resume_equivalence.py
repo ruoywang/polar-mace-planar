@@ -27,6 +27,7 @@ def tstats(a, b):
 def group_stats(pairs):
     mx, ss, n, vs = 0.0, 0.0, 0, 0.0
     for a, b in pairs:
+        if a.numel() == 0: continue   # empty buffers (e.g. unused heads) have no statistics
         m, r, v = tstats(a, b); mx = max(mx, m); ss += r * r * a.numel(); n += a.numel(); vs += v * v * a.numel()
     return mx, (ss / n) ** 0.5 if n else float("nan"), (vs / n) ** 0.5 if n else float("nan")
 

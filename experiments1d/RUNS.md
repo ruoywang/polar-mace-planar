@@ -1193,6 +1193,48 @@ False, save_latest_every 0, an empty cache dir per arm; env A: LIVE_POS
 unset, GRAD_PASSES default, AREA_EPS=1e-12; env B: LIVE_POS=1,
 GRAD_PASSES=0, AREA_EPS=1e-12; DFORCE unset in both.
 
+### resume equivalence: PASSED at the run-to-run floor  (job 3434309, code dfc1005; compare db4dda7 + empty-tensor fix)
+
+Four 3-GPU runs on 12 train / 6 val frames, arm-B switches, warmup 1, epochs
+0-2 (1-2 on the full PB path): X and X2 continuous, Y = stop after epoch 1
+(state written), resume, epoch 2. Wall: X 243 s (first run pays the data
+warm-up), X2 59 s, Y1 49 s, Y2 40 s; every run rc 0; Y2's log shows the
+resume line and no repeated epoch (epochs 0, 1 in Y1; epoch 2 only in Y2).
+
+| quantity | X vs Y (resumed) | X vs X2 (floor) |
+|---|---|---|
+| raw parameters max / rms diff (rms value 0.293) | 1.065e-2 / 2.479e-5 | 1.021e-2 / 2.283e-5 |
+| EMA shadow params max / rms (rms value 0.659) | 4.345e-3 / 2.337e-5 | 4.167e-3 / 2.154e-5 |
+| EMA num_updates | 12 / 12 | 12 / 12 |
+| Adam exp_avg max / rms (rms value 1.4e-3) | 5.56e-8 / 2.26e-10 | 5.28e-8 / 1.93e-10 |
+| Adam exp_avg_sq, max_exp_avg_sq max | 5.1e-15 | 4.7e-15 |
+| Adam step counts | [4, 12] = [4, 12] | [4, 12] = [4, 12] |
+| scheduler (last_epoch 2, num_bad_epochs 1, lr 0.01) | identical; best differs 1.4e-12 | identical; best differs 2.5e-12 |
+| lowest_loss / valid_loss | 108.2338233817 vs 108.2338233974 | vs 108.2338233972 |
+| epoch-2 validation (loss, E, F) | 108.2338234 / 1180.0 / 927.99 | same on all three |
+| RNG streams, ranks 0-2 | numpy, torch CPU, torch CUDA, train + valid loader generators, density_3d_rng, solvent3d_rng all IDENTICAL | same |
+
+The resumed run sits at the floor two continuous runs set between themselves
+(ratios 1.04-1.17 on every diff), every saved RNG stream is bit-identical,
+the optimizer step counts and the scheduler agree, the EMA update count
+agrees. The one stream that differs -- python's global `random` -- differs
+between the two CONTINUOUS runs as well: mace's set_seeds seeds numpy and
+torch only, so that state is process-specific in every run; the loss's
+sample-point RNGs are separate seeded instances and match. Nothing in the
+training path draws from the global stream (or X and X2 would not agree to
+1e-9 on the loss), so it is recorded, not fixed.
+
+The run-to-run floor itself (raw params rms 2.3e-5 on 0.29 after 12 Adam
+steps) is the CUDA scatter/index_add non-determinism amplified by training;
+it is what any two arms differ by before their switches do anything, and is
+the reference against which A/B differences must be read.
+
+DECISION: the segmented protocol is accepted; the A/B chain starts on dev:
+A1 (epochs 0-19), B1 (0-19), A2 (20-24), ... alternating, each segment
+resuming from its arm's segment state, 6000 s budget guard, epoch 39's
+segment writing the model files; job_seg.sh refuses to start a first
+segment over existing states or a resume without its file.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
