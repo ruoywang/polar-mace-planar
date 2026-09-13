@@ -1465,6 +1465,32 @@ object (the true slope); the third table (A evaluated under LIVE_POS=1,
 i.e. A's own true slope vs DFT) is the fair comparison and is being
 computed.
 
+### A/B structural evaluation, second read: the force that is the energy's slope  (job 3435143, third table)
+
+Arm A's final model evaluated under LIVE_POS=1, GRAD_PASSES=0, i.e. the
+force returned is the actual derivative of the energy A returns (energies
+identical to the first table, as they must be). Force RMSE / max vs DFT
+(meV/A):
+
+| state | A, trained (truncated) force | A, its energy's slope | B (ep 35), its energy's slope |
+|---|---|---|---|
+| train charged NiN44 | 28.1 / 253 | 129.4 / 973 | 35.1 / 257 |
+| train charged NiN88 | 27.5 / 253 | 74.8 / 725 | 33.4 / 412 |
+| train neutral NiN44 | 40.1 / 1723 | 179.4 / 1709 | 44.2 / 1738 |
+| val charged NiN44 | 29.1 / 191 | 134.7 / 770 | 37.2 / 296 |
+| val charged NiN88 | 28.0 / 280 | 81.0 / 684 | 34.5 / 315 |
+| val neutral NiN44 | 31.9 / 685 | 179.5 / 1304 | 38.0 / 531 |
+
+READING. The 28-40 meV/A that arm A (and every earlier run) reported as
+its force error is the error of an object that is not the derivative of
+its energy; the slope of A's energy is 3-5x farther from DFT (75-180
+meV/A), largest on the neutral frames (179). B's energy slope sits at 33-44
+meV/A -- B trains a consistent energy/force pair, A trains an energy whose
+gradient it never saw. On the force-consistency axis the repair is
+decisive; on the charging-energy axis it changes nothing (previous entry).
+The 1723-1738 meV/A maxima on the neutral training frames appear in every
+column: one frame's outlier, not a derivative matter.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
