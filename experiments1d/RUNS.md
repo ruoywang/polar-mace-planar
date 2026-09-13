@@ -1593,6 +1593,50 @@ End points: A 0.751 / 9.66 / 30.0 / 0.133 / 0.076; B 0.834 / 11.27 / 35.1
 the switches by themselves; the structural evaluation of the two final
 models (job 3435324, running) does.
 
+### A/B FINAL: both arms at epoch 39  (job 3435324, 11m51s; final models, EMA weights, training-cache path; val complete, train every 3rd frame)
+
+| per-state | A: E rmse / bias (meV/atom) | B: E rmse / bias | A trained force rmse / max (meV/A) | A energy-slope force | B force (= its energy's slope) |
+|---|---|---|---|---|---|
+| train charged NiN44 (54) | 17.18 / +16.97 | 20.31 / +20.08 | 28.1 / 253 | 129.4 / 973 | 33.5 / 253 |
+| train charged NiN88 (53) | 3.29 / -3.12 | 5.58 / -5.47 | 27.5 / 253 | 74.8 / 725 | 32.1 / 356 |
+| train neutral NiN44 (107) | 6.00 / -5.91 | 6.27 / -6.22 | 40.1 / 1723 | 179.4 / 1709 | 43.0 / 1735 |
+| val charged NiN44 (20) | 16.73 / +16.46 | 19.69 / +19.34 | 29.1 / 191 | 134.7 / 770 | 35.5 / 286 |
+| val charged NiN88 (20) | 3.36 / -3.19 | 5.54 / -5.45 | 28.0 / 280 | 81.0 / 684 | 33.3 / 303 |
+| val neutral NiN44 (40) | 6.15 / -6.04 | 6.37 / -6.31 | 31.9 / 685 | 179.5 / 1304 | 36.3 / 435 |
+
+Paired charging energy, model - DFT (eV): A train 4.6655 / 4.6266 / 0.6012
+(rmse / bias / mean-removed), val 4.5804 / 4.5208 / 0.7361; B train 5.4476
+/ 5.4102 / 0.6367, val 5.3239 / 5.2644 / 0.7940. Pair by pair: B - A =
++0.744 eV (std 0.117, 20 val pairs), +0.784 (std 0.113, 54 train pairs);
+corr(A, B) 0.991 / 0.985; |B| > |A| on 20/20 and 54/54. At equal epochs
+the shift is the same as at B's epoch 35 (+0.758), so it is not a training-
+stage effect.
+
+CONCLUSIONS OF THE JOINT A/B (one seed each; the same-computation warm-up
+of the two arms diverged to 44 vs 162 meV/A in force before any switch
+acted, which bounds what single trajectories can show):
+1. Force-energy consistency: decided. Arm A's reported force error (28-40
+   meV/A) belongs to a force that is not its energy's derivative; that
+   derivative is 75-180 meV/A from DFT. Arm B's energy has a slope 33-43
+   meV/A from DFT -- an energy surface whose gradient is DFT-quality.
+2. Charging energy: unchanged in kind. Both arms miss the paired charging
+   energy by one per-electron constant (4.5 / 5.3 eV bias against a 0.6-0.8
+   eV spread), with identical pair-to-pair structure (corr 0.99). The
+   repair moved the constant by +0.74 eV and nothing else. The energy head
+   still does not separate a charged frame from its neutral partner; the
+   descriptor-is-charge-blind / one-constant findings stand, and the
+   derivative path was never where that defect lived.
+3. Absolute energies: B's charged-NiN44 bias is 3 meV/atom larger than
+   A's (+19.3 vs +16.5), NiN88 2.3 larger (-5.5 vs -3.2), neutral the same
+   (-6.3 vs -6.0) -- B carries the same per-electron offset as A plus the
+   0.74 eV / ~0.9 e shift, spread over the atoms.
+4. Cost: full B (gp=0) 2.2-4x A per step; fast B (gp=2) reproduces full
+   B's training gradient to 1e-7..1e-11 and is the setting for new runs.
+
+STATE. Both final models and all segment states kept under
+3-residual_3D/ab_deriv_A and ab_deriv_B; per-frame evaluation arrays in
+claude/2-1D_PB/exp_ab_deriv/logs/ab_eval_{A,B,A_livepos}.npz.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
