@@ -92,6 +92,18 @@ model.eval()
 model.solvent3d_energy = model.solvent_cavity_energy = True
 model.solvent_baseline_coupling = True
 model._pb1d_epoch = 39
+
+# KIT_ATTACH_CHARGE_BRANCH=<std> (2026-09-13): attach the charge-scalar residual branch to the
+# loaded model and give its (zero-initialised) output layer N(0, std) weights, so the checks
+# run on a branch that actually contributes (a zero output would pass any check trivially).
+if os.environ.get("KIT_ATTACH_CHARGE_BRANCH"):
+    from mace.modules.field_blocks import attach_charge_branch
+    _cb = attach_charge_branch(model, int(os.environ.get("KIT_CHARGE_BRANCH_HIDDEN", "64")))
+    _g = torch.Generator(device="cpu").manual_seed(11)
+    with torch.no_grad():
+        _cb.out.weight.copy_(torch.randn(_cb.out.weight.shape, generator=_g, dtype=torch.float64).to(device) * float(os.environ["KIT_ATTACH_CHARGE_BRANCH"]))
+        _cb.out.bias.zero_()
+    print(f"charge branch attached: {sum(p.numel() for p in _cb.parameters())} params, output layer std {os.environ[\"KIT_ATTACH_CHARGE_BRANCH\"]}")
 z_table = tools.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 
 SOLVES = {"n": 0}
