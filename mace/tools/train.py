@@ -656,6 +656,17 @@ def train_one_epoch(
         _be = getattr(_raw, "_pb1d_backend", None)
         _t_sum = _t_max = 0.0; _n = 0; _no = []
         _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
+        # parameter tracking (read-only): |w| at epoch start/end, |dw|, mean |grad|
+        # for the name prefixes in MACE_TRACK_PARAM_PREFIXES -- does a new input
+        # channel actually take part in learning?
+        _prefixes = [x for x in os.environ.get(
+            "MACE_TRACK_PARAM_PREFIXES",
+            "local_electron_energy.charge_branch,local_electron_energy.mlp,pb1d_head").split(",") if x]
+        _track = {}
+        for _pref in _prefixes:
+            _ps = [prm for n, prm in _raw.named_parameters() if n.startswith(_pref)]
+            if _ps:
+                _track[_pref] = {"params": _ps, "w0": [prm.detach().clone() for prm in _ps], "gsum": 0.0, "gn": 0}
         for batch in data_loader:
             _, opt_metrics = take_step(
                 model=model_to_train,
@@ -676,9 +687,19 @@ def train_one_epoch(
             _d = getattr(_be, "last_diagnostics", None) if _be is not None else None
             if isinstance(_d, dict) and _d.get("n_outer") is not None:
                 _no.append(int(_d["n_outer"]))
+            for _pref, _tr in _track.items():
+                _gs = [prm.grad for prm in _tr["params"] if prm.grad is not None]
+                if _gs:
+                    _tr["gsum"] += float(torch.sqrt(sum((g.double() ** 2).sum() for g in _gs))); _tr["gn"] += 1
             if rank == 0:
                 logger.log(opt_metrics)
         if rank == 0 and _n:
+            for _pref, _tr in _track.items():
+                _w0 = float(torch.sqrt(sum((w.double() ** 2).sum() for w in _tr["w0"])))
+                _w1 = float(torch.sqrt(sum((prm.detach().double() ** 2).sum() for prm in _tr["params"])))
+                _dw = float(torch.sqrt(sum(((prm.detach() - w).double() ** 2).sum() for prm, w in zip(_tr["params"], _tr["w0"]))))
+                _mg = _tr["gsum"] / max(1, _tr["gn"])
+                logging.info(f"epoch {epoch} param track {_pref}: |w| {_w0:.4e} -> {_w1:.4e}, |dw| {_dw:.4e}, mean |grad| {_mg:.4e} over {_tr['gn']} steps, {sum(prm.numel() for prm in _tr['params'])} params")
             _cap = int(getattr(_be, "max_outer", 0) or 0) if _be is not None else 0
             _pk = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else float("nan")
             _msg = (f"epoch {epoch} accounting (rank 0): {_n} steps, step time mean {_t_sum/_n:.2f} s max {_t_max:.1f} s, "

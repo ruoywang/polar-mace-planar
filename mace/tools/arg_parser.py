@@ -1534,6 +1534,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "state and exit; 0 = off",
     )
     parser.add_argument(
+        "--resume_new_param_prefix", type=str, default=None,
+        help="with --resume_state: the model may have parameters the state lacks, "
+        "all under this name prefix (a newly added branch); they start from "
+        "their own initialisation with fresh optimizer and EMA state while "
+        "every other parameter, moment, scheduler and RNG stream resumes",
+    )
+    parser.add_argument(
         "--skip_final_eval", action="store_true", default=False,
         help="after the last epoch save the model files but do not compute the "
         "train/valid/test error tables (run them separately)",

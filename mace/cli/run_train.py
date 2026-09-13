@@ -1413,27 +1413,72 @@ def run(args) -> None:
             start_epoch = opt_start_epoch
 
     ema: Optional[ExponentialMovingAverage] = None
-    if args.ema:
-        ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
     # segmented running: a resume that is the continuous run (see arg_parser)
     resume_state = None
+    new_prefix = getattr(args, "resume_new_param_prefix", None)
     if getattr(args, "resume_state", None):
         try:
             resume_state = torch.load(args.resume_state, map_location="cpu", weights_only=False)
         except TypeError:
             resume_state = torch.load(args.resume_state, map_location="cpu")
-        model.load_state_dict(resume_state["model"], strict=True)
-        optimizer.load_state_dict(resume_state["optimizer"])
+        new_params = []
+        if new_prefix:
+            # a branch the state does not know: everything else resumes exactly
+            missing, unexpected = model.load_state_dict(resume_state["model"], strict=False)
+            bad = [k for k in missing if not k.startswith(new_prefix)]
+            if bad or unexpected:
+                raise RuntimeError(
+                    f"resume with new parameters: unexpected {list(unexpected)[:5]}, "
+                    f"missing outside prefix {new_prefix}: {bad[:5]}"
+                )
+            new_ids = set()
+            for n, prm in model.named_parameters():
+                if n.startswith(new_prefix):
+                    new_params.append(prm)
+                    new_ids.add(id(prm))
+            # optimizer: drop the new tensors from the groups the builder put
+            # them in (restores the saved parameter order), load the moments,
+            # then give them their own fresh group
+            for g in optimizer.param_groups:
+                g["params"] = [prm for prm in g["params"] if id(prm) not in new_ids]
+            optimizer.load_state_dict(resume_state["optimizer"])
+            optimizer.add_param_group(
+                {"name": "resume_new_params", "params": new_params, "weight_decay": 0.0, "lr": args.lr}
+            )
+            logging.info(
+                f"Resume with new parameters under '{new_prefix}': {len(new_params)} tensors, "
+                f"{sum(prm.numel() for prm in new_params)} parameters, fresh optimizer group and EMA entries"
+            )
+        else:
+            model.load_state_dict(resume_state["model"], strict=True)
+            optimizer.load_state_dict(resume_state["optimizer"])
         lr_scheduler.load_state_dict(resume_state["lr_scheduler"])
-        if ema is not None:
+        if args.ema:
             if resume_state.get("ema") is None:
                 raise RuntimeError("segment state has no EMA but this run uses EMA")
-            ema.load_state_dict(resume_state["ema"])
+            if new_params:
+                old_list = [prm for n, prm in model.named_parameters() if not n.startswith(new_prefix)]
+                ema = ExponentialMovingAverage(old_list, decay=args.ema_decay)
+                ema.load_state_dict(resume_state["ema"])
+                import weakref
+                for prm in new_params:   # torch_ema keeps weakrefs + shadow tensors in step
+                    ema._params_refs.append(weakref.ref(prm))
+                    ema.shadow_params.append(prm.detach().clone())
+            else:
+                ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
+                ema.load_state_dict(resume_state["ema"])
+        # the saved best-checkpoint path belongs to the run that wrote the state;
+        # a different run directory must not delete that file on its next best
+        old_path = resume_state.get("ckpt_old_path")
+        if old_path and os.path.abspath(os.path.dirname(old_path)) != os.path.abspath(args.checkpoints_dir):
+            resume_state["ckpt_old_path"] = None
         start_epoch = int(resume_state["next_epoch"])
         logging.info(
             f"Resuming from segment state {args.resume_state}: raw weights, optimizer, "
             f"scheduler and EMA loaded; next epoch {start_epoch}"
         )
+    elif args.ema:
+        ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
 
     if args.lbfgs:
         logging.info("Switching optimizer to LBFGS")

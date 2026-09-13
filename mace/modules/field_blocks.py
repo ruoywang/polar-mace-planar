@@ -654,9 +654,120 @@ class PostScfReadout(torch.nn.Module):
 
 
 @compile_mode("script")
+class ChargeScalarBranch(torch.nn.Module):
+    """Nonlinear residual branch of the electron-energy head (2026-09-13).
+
+    The existing head feeds the per-atom charge coefficients and the field
+    features through equivariant linears and a tensor product with the node
+    features before its MLP sees anything: the charge state enters only
+    through those products. This branch gives the MLP the charge DIRECTLY:
+    per atom, the l = 0 (monopole) coefficients of the total and of the
+    induced charge density, the l = 0 (potential) and |l = 1| (field
+    magnitude) invariants of the field features, and the scalar (0e) node
+    features, concatenated -> Linear -> SiLU -> Linear -> SiLU -> Linear(1).
+    The last layer is ZERO-initialised, so a model with the branch attached
+    returns exactly the energies and forces of the model without it; the
+    network is free to learn a linear or nonlinear response. Reuses the SCF
+    results already in the head's inputs; no extra PB solve.
+    All inputs are expected in the mul_ir layout (the readout converts).
+    """
+
+    def __init__(
+        self,
+        node_feats_irreps: o3.Irreps,
+        potential_irreps: o3.Irreps,
+        charges_irreps: o3.Irreps,
+        hidden: int = 64,
+    ) -> None:
+        super().__init__()
+        n_idx, q_idx, v0_idx, v1_idx = [], [], [], []
+        off = 0
+        for mul, ir in o3.Irreps(node_feats_irreps):
+            if ir.l == 0:
+                n_idx += list(range(off, off + mul))
+            off += mul * ir.dim
+        off = 0
+        for mul, ir in o3.Irreps(charges_irreps):
+            if ir.l == 0:
+                q_idx += list(range(off, off + mul))
+            off += mul * ir.dim
+        off = 0
+        for mul, ir in o3.Irreps(potential_irreps):
+            if ir.l == 0:
+                v0_idx += list(range(off, off + mul))
+            elif ir.l == 1:
+                v1_idx += list(range(off, off + 3 * mul))
+            off += mul * ir.dim
+        self.register_buffer("node_scalar_idx", torch.tensor(n_idx, dtype=torch.long))
+        self.register_buffer("charge_l0_idx", torch.tensor(q_idx, dtype=torch.long))
+        self.register_buffer("field_l0_idx", torch.tensor(v0_idx, dtype=torch.long))
+        self.register_buffer("field_l1_idx", torch.tensor(v1_idx, dtype=torch.long))
+        self.n_field_l1 = len(v1_idx) // 3
+        n_in = len(n_idx) + 2 * len(q_idx) + len(v0_idx) + self.n_field_l1
+        self.n_in = n_in
+        self.lin1 = torch.nn.Linear(n_in, hidden, bias=True)
+        self.lin2 = torch.nn.Linear(hidden, hidden, bias=True)
+        self.out = torch.nn.Linear(hidden, 1, bias=True)
+        torch.nn.init.zeros_(self.out.weight)
+        torch.nn.init.zeros_(self.out.bias)
+
+    def inputs(
+        self,
+        node_feats: torch.Tensor,
+        q_total: torch.Tensor,
+        q_induced: torch.Tensor,
+        field_feats: torch.Tensor,
+    ) -> torch.Tensor:
+        parts = [
+            torch.index_select(q_total, 1, self.charge_l0_idx),
+            torch.index_select(q_induced, 1, self.charge_l0_idx),
+            torch.index_select(field_feats, 1, self.field_l0_idx),
+        ]
+        if self.n_field_l1 > 0:
+            v1 = torch.index_select(field_feats, 1, self.field_l1_idx)
+            v1 = v1.view(v1.shape[0], self.n_field_l1, 3)
+            parts.append(torch.sqrt((v1 * v1).sum(dim=-1) + 1.0e-30))
+        parts.append(torch.index_select(node_feats, 1, self.node_scalar_idx))
+        return torch.cat(parts, dim=-1)
+
+    def forward(
+        self,
+        node_feats: torch.Tensor,
+        q_total: torch.Tensor,
+        q_induced: torch.Tensor,
+        field_feats: torch.Tensor,
+    ) -> torch.Tensor:
+        x = self.inputs(node_feats, q_total, q_induced, field_feats)
+        h = torch.nn.functional.silu(self.lin1(x))
+        h = torch.nn.functional.silu(self.lin2(h))
+        return self.out(h).squeeze(-1)
+
+
+def attach_charge_branch(model: torch.nn.Module, hidden: int = 64) -> ChargeScalarBranch:
+    """Attach the branch to an EXISTING model object's electron-energy head
+    (for checks on a trained model without rebuilding it). Zero output until
+    the last layer is changed; training runs construct it from
+    field_readout_config instead."""
+    head = model.local_electron_energy
+    if head is None:
+        raise ValueError("model has no local_electron_energy head")
+    dev = next(head.parameters()).device
+    dt = next(head.parameters()).dtype
+    cb = ChargeScalarBranch(
+        head.node_feats_irreps, head.potential_irreps, head.charges_irreps, hidden
+    ).to(device=dev, dtype=dt)
+    head.charge_branch = cb
+    return cb
+
+
 class OneBodyMLPFieldReadout(PostScfReadout):
-    def _setup(self, **kwargs) -> None:
+    def _setup(self, charge_branch: bool = False, charge_branch_hidden: int = 64, **kwargs) -> None:
         _ = kwargs
+        if charge_branch:
+            self.charge_branch = ChargeScalarBranch(
+                self.node_feats_irreps, self.potential_irreps, self.charges_irreps,
+                int(charge_branch_hidden),
+            )
         invar_irreps = o3.Irreps(f"{self.node_feats_irreps.count(o3.Irrep(0, 1))}x0e")
         self.linear_up_q = o3.Linear(
             self.charges_irreps, self.node_feats_irreps, biases=True
@@ -754,7 +865,18 @@ class OneBodyMLPFieldReadout(PostScfReadout):
             ],
             dim=-1,
         )
-        return self.mlp(invar_feats).squeeze(-1)
+        out = self.mlp(invar_feats).squeeze(-1)
+        cb = getattr(self, "charge_branch", None)
+        if cb is not None:
+            q_ind = charges_induced
+            if q_to_mul_ir is not None:
+                q_ind = q_to_mul_ir(q_ind)
+            # node_feats arrive in the model's layout; the branch reads the 0e
+            # block, whose position is layout-independent for these irreps
+            e_branch = cb(node_feats, q_in, q_ind, v_in)
+            self._branch_e = e_branch
+            out = out + e_branch
+        return out
 
 
 # Registries used by config files that pass strings

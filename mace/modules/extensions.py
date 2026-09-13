@@ -2634,8 +2634,17 @@ class PolarMACE(ScaleShiftMACE):
                 src=local_q_e, index=data["batch"], dim=-1, dim_size=num_graphs
             )
             total_energy = total_energy + le_total
+            # diagnostics: the charge-scalar branch's share of electron_energy
+            _cb_e = getattr(self.local_electron_energy, "_branch_e", None)
+            if _cb_e is not None and getattr(self.local_electron_energy, "charge_branch", None) is not None:
+                charge_branch_energy = scatter_sum(
+                    src=_cb_e, index=data["batch"], dim=-1, dim_size=num_graphs
+                )
+            else:
+                charge_branch_energy = torch.zeros_like(total_energy)
         else:
             le_total = torch.zeros_like(total_energy)
+            charge_branch_energy = torch.zeros_like(total_energy)
 
         charge_density = spin_charge_density.sum(dim=1)
         spin_density = spin_charge_density[:, 0, :] - spin_charge_density[:, 1, :]
@@ -3132,6 +3141,7 @@ class PolarMACE(ScaleShiftMACE):
             "compensation_periodic_1d_energy": compensation_periodic_1d_energy,
             "compensation_slab_correction_energy": compensation_slab_correction_energy,
             "electron_energy": le_total,
+            "charge_branch_energy": charge_branch_energy,
             "electrostatic_potentials": esps,
             "spin_charge_density": spin_charge_density_mul_ir,
         }
