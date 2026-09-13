@@ -1727,6 +1727,29 @@ Per-epoch EMA checkpoints kept for 41-44; epoch 40's file was deleted by
 the epoch-41 best save (keep_last was False at that moment; fixed for
 later runs). Evaluation of 41-44 for both arms queued behind ab_head_nn.
 
+### ab_head_ref, per-epoch structural evaluation  (job 3435483; EMA checkpoints 41-44; val complete, train every 6th frame; LIVE_POS=1 GRAD_PASSES=2)
+
+Starting point = arm B epoch 39 (final model, job 3435324).
+
+| val | E bias charged NiN44 / NiN88 / neutral NiN44 (meV/atom) | F rmse 44 / 88 / neutral (meV/A) | paired dE rmse / bias / mean-removed (20 pairs, eV) |
+|---|---|---|---|
+| B ep 39 | +19.34 / -5.45 / -6.31 | 35.5 / 33.3 / 36.3 | 5.3239 / 5.2644 / 0.7940 |
+| ref ep 41 | +18.65 / -6.07 / -6.17 | 34.6 / 32.9 / 35.8 | 5.1581 / 5.0986 / 0.7809 |
+| ref ep 42 | +18.35 / -6.72 / -6.53 | 34.4 / 32.4 / 35.5 | 5.1549 / 5.0967 / 0.7724 |
+| ref ep 43 | +18.25 / -6.34 / -6.38 | 34.3 / 32.2 / 35.3 | 5.1030 / 5.0447 / 0.7695 |
+| ref ep 44 | +18.65 / -4.76 / -6.41 | 34.0 / 32.1 / 35.2 | 5.2134 / 5.1552 / 0.7771 |
+
+train subset (27 pairs): dE bias 5.2306 / 5.2235 / 5.1758 / 5.2894,
+mean-removed 0.644 / 0.637 / 0.638 / 0.649; E bias charged NiN44 +19.4 ..
++18.9; F 32.5 -> 31.6 (44), 31.7 -> 31.2 (88), 49.9 -> 49.4 (neutral).
+
+READING (the "continued training" baseline the nn arm is read against):
+five more epochs of the reference move the charging-energy bias by -0.11
+to -0.22 eV (5.26 -> 5.04..5.16, fluctuating, not trending), the
+mean-removed error by -0.02, the charged-NiN44 energy bias by -0.7 to -1.1
+meV/atom, forces by -1.1 to -1.5 meV/A. Whatever the nn arm shows beyond
+these amounts is the branch.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
