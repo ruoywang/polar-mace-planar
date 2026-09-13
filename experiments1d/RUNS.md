@@ -1696,6 +1696,37 @@ local_electron_energy.charge_branch. Per-epoch evaluation
 (exp_ab_head/job_eval.sh: per-state E/F with the full energy derivative,
 paired charging energy on matched pairs, NiN88 unpaired) follows.
 
+### ab_head_ref done: fast B's first real segment  (job 3435440; epochs 40-44 from B's epoch-39 state; LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12)
+
+Resume: next epoch 40, lowest_loss 0.83392360 carried over, no jump at the
+gp=0 -> gp=2 switch (epoch 40: 0.846 / 11.00 / 34.99 / 0.157 against B's
+epoch 39: 0.834 / 11.27 / 35.14 / 0.142).
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV | step s (mean/max) | mmap reads | wall |
+|---|---|---|---|---|---|---|---|---|
+| 40 | 0.846 | 11.00 | 34.99 | 0.157 | 0.107 | 2.73 / 44.0 | 152 | 8.5 min (cold) |
+| 41 | 0.833 | 11.00 | 34.60 | 0.142 | 0.099 | 2.37 / 6.4 | 116 | 8.9 |
+| 42 | 0.828 | 11.06 | 34.27 | 0.134 | 0.101 | 2.31 / 7.0 | 71 | 8.7 |
+| 43 | 0.817 | 10.92 | 34.06 | 0.138 | 0.097 | 2.30 / 7.1 | 52 | 8.7 |
+| 44 | 0.824 | 10.91 | 33.93 | 0.146 | 0.102 | 2.06 / 5.3 | 23 | 7.8 |
+
+Job wall 3146 s for 5 epochs + 9 min startup; CUDA peak 23.94 GiB; n_outer
+7.72-7.79, cap never hit. MEASURED PHASE COSTS (MACE_STEP_TIMING, rank 0,
+per step, average over 1000 steps): data 414-422 ms, forward 962-979 ms,
+loss 198-218 ms, backward 751 ms, optimizer 7 ms -- 2.35 s. Against arm A
+(gp=1, LIVE_POS off) at 1.05 s/step the remaining 2.2x is NOT the solve
+(gp=2 costs one extra residual + solve): forward 0.97 s carries stage 1 and
+the grid terms with their graphs, backward 0.75 s runs through them, and
+0.42 s per step is data preparation (sample-point attachment for the 3-D
+density and solvent3D losses, read per step) that no derivative setting
+touches. The 5.5 min/epoch projection was wrong: 7.8-8.9 min measured; the
+next speed-up target by these numbers is the forward/backward of the grid
+terms and stage 1 (1.7 s) and the 0.42 s data path, in that order.
+
+Per-epoch EMA checkpoints kept for 41-44; epoch 40's file was deleted by
+the epoch-41 best save (keep_last was False at that moment; fixed for
+later runs). Evaluation of 41-44 for both arms queued behind ab_head_nn.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
