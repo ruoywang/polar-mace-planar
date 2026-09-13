@@ -1812,6 +1812,35 @@ both arms, same state, same 5 epochs; the ref arm then answers "is it the
 weight alone", the nn arm "does the branch use the signal once it exists".
 The charging energy stays a metric.
 
+### energy_weight 1 -> 1000, 20 epochs, same model and start as ab_head_nn  (run 3-residual_3D/ab_head_nn_e1000; user plan 2026-09-13; code 4e48d5f)
+
+WHAT: arm B's epoch-39 state (raw weights, Adam, EMA, scheduler, RNG
+streams) + the charge-scalar branch (fresh, zero output, the same
+construction-time initialisation as ab_head_nn: |w| 6.6288 at start),
+fast B switches (LIVE_POS=1, GRAD_PASSES=2, AREA_EPS=1e-12), all 640
+training frames, epochs 40-59, no warm-up, all parameters trainable.
+energy_weight 1000, forces_weight 100, every other weight and setting as
+before; learning rate as restored (0.01, ReduceLROnPlateau untouched
+except that best / num_bad_epochs / cooldown, the best validation loss
+and patience are reset because the loss scale changed
+(--resume_reset_plateau); no scheduler step at the first resumed epoch).
+Not stage two / SWA. One-time IN EFFECT line in run.log: commit, state
+path, start epoch, branch flag, lr per group, loss weights, switches.
+Segments on the 6000 s budget (FIRST=1 then continuations; a completed
+state makes a queued continuation exit 0). Evaluation at the start (B
+epoch 39, already measured), +5 (44), +10 (49), +20 (59): full val, EMA
+weights, per-state E RMSE / bias and F RMSE / max with the full energy
+derivative, the 20 matched pairs' dE RMSE / bias / mean-removed.
+
+WHAT IT TESTS: whether strengthening the existing total-energy
+supervision lets an energy head that can see the charge state learn it.
+The 0.04% loss share was the reason to try, not a proof of suppression.
+Epoch 44 is compared with the energy_weight=1 nn arm; epoch 59 reports the
+accuracy reached -- with no old-weight control of the same budget, gains
+are not attributed wholly to the weight, and the branch is not thereby
+proven. If the pair residual is still mostly a bias afterwards: the
+offline diagnostic E + a * dN_e fitted on training energies only.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
