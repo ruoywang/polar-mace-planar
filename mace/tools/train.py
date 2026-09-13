@@ -339,7 +339,7 @@ def train(
     valid_loss = np.inf
     patience_counter = 0
     swa_start = True
-    keep_last = False
+    keep_last = bool(save_all_checkpoints)   # with save_all_checkpoints no save may delete the previous file
     rolling_latest_path: Optional[str] = None
     resumed = resume_state is not None
     segment_stopped = False
@@ -347,7 +347,7 @@ def train(
         lowest_loss = float(resume_state["lowest_loss"])
         valid_loss = float(resume_state["valid_loss"])
         patience_counter = int(resume_state["patience_counter"])
-        keep_last = bool(resume_state["keep_last"])
+        keep_last = bool(resume_state["keep_last"]) or bool(save_all_checkpoints)
         rolling_latest_path = resume_state.get("rolling_latest_path")
         checkpoint_handler.io.old_path = resume_state.get("ckpt_old_path")
         rng_states = resume_state["rng"]
