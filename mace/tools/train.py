@@ -648,6 +648,13 @@ def train_one_epoch(
         if rank == 0:
             logger.log(opt_metrics)
     else:
+        # read-only per-epoch accounting (2026-09-13): step wall time, the PB
+        # solve's outer-iteration count of each step (backend.last_diagnostics)
+        # and the CUDA peak, logged as ONE line by rank 0 -- to see why an
+        # epoch's cost changes across a run. Touches no computation.
+        _raw = model.module if hasattr(model, "module") else model
+        _be = getattr(_raw, "_pb1d_backend", None)
+        _t_sum = _t_max = 0.0; _n = 0; _no = []
         for batch in data_loader:
             _, opt_metrics = take_step(
                 model=model_to_train,
@@ -661,8 +668,21 @@ def train_one_epoch(
             )
             opt_metrics["mode"] = "opt"
             opt_metrics["epoch"] = epoch
+            _t = float(opt_metrics.get("time", 0.0)); _t_sum += _t; _t_max = max(_t_max, _t); _n += 1
+            _d = getattr(_be, "last_diagnostics", None) if _be is not None else None
+            if isinstance(_d, dict) and _d.get("n_outer") is not None:
+                _no.append(int(_d["n_outer"]))
             if rank == 0:
                 logger.log(opt_metrics)
+        if rank == 0 and _n:
+            _cap = int(getattr(_be, "max_outer", 0) or 0) if _be is not None else 0
+            _pk = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else float("nan")
+            _msg = (f"epoch {epoch} accounting (rank 0): {_n} steps, step time mean {_t_sum/_n:.2f} s max {_t_max:.1f} s, "
+                    f"CUDA peak {_pk:.2f} GiB")
+            if _no:
+                _msg += (f", pb1d n_outer mean {sum(_no)/len(_no):.2f} max {max(_no)}"
+                         + (f" at-cap {sum(1 for x in _no if x >= _cap)}/{len(_no)}" if _cap else ""))
+            logging.info(_msg)
 
 
 def take_step(
