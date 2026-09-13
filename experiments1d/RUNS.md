@@ -1841,6 +1841,49 @@ are not attributed wholly to the weight, and the branch is not thereby
 proven. If the pair residual is still mostly a bias afterwards: the
 offline diagnostic E + a * dN_e fitted on training energies only.
 
+### ab_head_nn_e1000, segment 1 (epochs 40-43)  (job 3436118 after a stalled first attempt 3436074; code 4cda3f5)
+
+FIRST ATTEMPT STALLED (3436074, node c301-003): 59 steps in 22 min, one
+step of 450 s, then no step for 7+ min; disk-read counters flat. Cause
+consistent with BeeGFS random page faults on the per-sample mmap of the
+9.6 GB baseline cache (first epoch after a restart reads ~150 rows). The
+user noticed before my monitor did: it only read epoch-end lines. Fixes:
+(1) pb1d_backend preloads the whole baseline cache sequentially at startup
+when the RAM cache can hold it (600 rows, 8.94 GiB per rank, 48 s; no file
+access per step afterwards; MACE_PB1D_NO_FULL_PRELOAD=1 restores the lazy
+mode); (2) the monitor now checks step-level progress (results file idle >
+8 min; any step > 60 s) -- rule recorded in memory. The attempt was
+cancelled (no state written) and the chain resubmitted.
+
+SEGMENT 1 (3436118, again c301-003): IN EFFECT line confirmed energy_weight
+1000.0 / forces_weight 100.0 in the loss function, lr 0.01 in every group,
+charge_branch True, start epoch 40, lowest_loss reset to inf; branch
+initial |w| 6.6288 = the ab_head_nn initialisation exactly. Wall 5569 s,
+4 epochs, stopped by the budget (5340 s, last epoch 1054 s). Per step
+(rank 0, cumulative averages): data 2.4-2.6 s, forward 2.0-2.2 s, loss
+0.2 s, backward 0.75 s -- 5.5-6.0 s; the data phase (3D-density grid mmap,
+54 MB per sid, 1024 random points; solvent3D points 5.7 MB; LRU of 32 sids)
+is 0.28-0.42 s on other nodes and 2.4 s here, one slow step of 127 s at
+step 604, no stall. Epoch wall 17-21 min. n_outer 7.7-7.9, cap never hit.
+
+| epoch | loss (new scale) | E meV/atom | F meV/A | potential eV | fermi eV | branch |w| -> | mean |grad| |
+|---|---|---|---|---|---|---|---|
+| 39 start (B) | 0.834 (old) | 11.27 | 35.14 | 0.142 | 0.104 | 6.63 | -- |
+| 40 | 1.143 | 14.24 | 43.52 | 0.199 | 0.143 | 13.46 | 6.49 |
+| 41 | 1.012 | 9.74 | 41.70 | 0.157 | 0.111 | 13.60 | 6.61 |
+| 42 | 1.048 | 12.21 | 40.34 | 0.130 | 0.097 | 14.82 | 6.50 |
+| 43 | 1.000 | 7.66 | 42.34 | 0.126 | 0.140 | 18.68 | 6.27 |
+
+READING SO FAR (validation lines only; the per-state / paired evaluation
+runs at 44): the energy RMSE swings 14.2 / 9.7 / 12.2 / 7.7 -- with the
+x1000 weight the per-frame offsets move by several meV/atom per epoch --
+and reaches 7.66, below anything before (B 11.27, ref 10.9); the force
+RMSE sits at 40-43 against 34-35 before (+20%), the price the user asked to
+watch; potential improves, fermi fluctuates. The branch's gradient is now
+6.3-6.6 per step against 2.1 -> 0.2 under energy_weight 1: the energy term
+reaches it. Whether the charging bias moves is the epoch-44 evaluation
+(3436274, queued behind the continuations 3436119 / 3436120).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
