@@ -138,6 +138,25 @@ class PB1DBackend:
             )
             rt_path = os.path.join(bl, "runtime_baseline_tables.npz")
             self._rt_tables_path = rt_path if os.path.exists(rt_path) else None
+            # full sequential preload (2026-09-13): the lazy per-sample mmap
+            # reads hit BeeGFS random page faults -- measured stalls of 450 s
+            # on one training step (ab_head_nn_e1000). When the RAM cache can
+            # hold every row, read the two used fields once, in row order,
+            # at startup instead. Same bytes, no per-step file access.
+            # MACE_PB1D_NO_FULL_PRELOAD=1 restores the lazy behaviour.
+            if (self._bl_ram_max >= len(self._bl_index) and len(self._bl_index) > 0
+                    and not os.environ.get("MACE_PB1D_NO_FULL_PRELOAD")):
+                try:
+                    import time as _time
+                    _t0 = _time.time()
+                    block = np.ascontiguousarray(self._bl_arr[:, self._bl_take])
+                    for _sid, _row in self._bl_index.items():
+                        self._bl_ram[_sid] = torch.from_numpy(block[_row])
+                    print(f"pb1d: baseline cache fully preloaded: {len(self._bl_index)} rows, "
+                          f"{block.nbytes / 2**30:.2f} GiB, {_time.time() - _t0:.1f} s", flush=True)
+                except Exception as _exc:  # pylint: disable=broad-except
+                    print(f"pb1d: full baseline preload failed ({_exc}); lazy mmap reads stay", flush=True)
+                    self._bl_ram = {}
 
     def _get_runtime_baseline(self):
         if self._rt_tables is None and self._rt_tables_path is not None:
