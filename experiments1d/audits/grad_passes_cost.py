@@ -66,6 +66,7 @@ def batch(sid):
 B = {s: batch(s) for s in FR}
 print(f"model {os.path.basename(mp)} @ {os.path.basename(cp)}  LIVE_POS=1  frames {FR}  atoms/frame {[len(atoms[s]) for s in FR]}  total_charge {[round(float(atoms[s].info.get('total_charge', 0.0)), 3) for s in FR]}")
 print(f"{'GRAD_PASSES':>12} {'frame':>6} {'fwd+loss+bwd s':>15} {'peak GiB':>9} {'loss':>14}")
+REC = {}   # (gp, frame) -> (E, F, loss) of the first pass at that gp: value comparison across gp settings
 for gp in [int(x) for x in os.environ.get("KIT_GPS", "1,0,1").split(",")]:   # first entry pays warm-up costs
     os.environ["MACE_PB1D_GRAD_PASSES"] = str(gp)
     for s in FR:
@@ -78,8 +79,18 @@ for gp in [int(x) for x in os.environ.get("KIT_GPS", "1,0,1").split(",")]:   # f
             torch.cuda.synchronize(); dt = time.perf_counter() - t0
             pk = torch.cuda.max_memory_allocated() / 2**30
             print(f"{gp:>12} {s:>6} {dt:15.2f} {pk:9.2f} {float(L):14.6f}", flush=True)
+            REC.setdefault((gp, s), (float(out["energy"].sum()), out["forces"].detach().clone(), float(L)))
         except RuntimeError as e:
             torch.cuda.synchronize()
             print(f"{gp:>12} {s:>6} {'FAILED':>15} {'-':>9}  {str(e)[:80]}", flush=True)
         _evict(); torch.cuda.empty_cache()
+gps = sorted({g for g, _ in REC})
+if 0 in gps and len(gps) > 1:
+    print(f"\nVALUES vs GRAD_PASSES=0 (the unrolled reference), same frame: |dE| eV, max|dF| eV/A, |dloss|")
+    for g in gps:
+        if g == 0: continue
+        for s in FR:
+            if (g, s) in REC and (0, s) in REC:
+                E1, F1, L1 = REC[(g, s)]; E0, F0, L0 = REC[(0, s)]
+                print(f"  gp={g} frame {s}: |dE| {abs(E1-E0):.3e}   max|dF| {float((F1-F0).abs().max()):.3e}   rms dF {float(((F1-F0)**2).mean().sqrt()):.3e}   |dloss| {abs(L1-L0):.3e}")
 print("DONE")
