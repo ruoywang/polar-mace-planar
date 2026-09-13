@@ -35,7 +35,13 @@ device = torch_tools.init_device("cuda"); torch_tools.set_default_dtype("float64
 args = tools.build_default_arg_parser().parse_args(["--config", "config_pb1d.yaml", "--name", NAME, "--seed", "123", "--work_dir", ".", "--device", "cuda"])
 args.key_specification = KeySpecification(); update_keyspec_from_kwargs(args.key_specification, vars(args))
 STATE = os.environ.get("KIT_STATE")          # a segment state: mid-run evaluation
-if STATE:
+CKPT = os.environ.get("KIT_CKPT")            # a mace checkpoint (EMA weights) of a given epoch + a model object
+if CKPT:
+    mp = os.environ.get("KIT_MODEL_OBJ") or [p for p in sorted(glob.glob(os.path.join(RUN, "models", "*.model"))) if "compiled" not in p][-1]
+    model = torch.load(f=mp, map_location=device).to(device)
+    model.load_state_dict(torch.load(CKPT, map_location=device)["model"], strict=True)
+    EPOCH = int(CKPT.rsplit("epoch-", 1)[1].split(".")[0]); cp = CKPT
+elif STATE:
     # model object written next to the state; weights from the state (EMA by
     # default -- what mace validates and saves -- or raw)
     mp = os.environ.get("KIT_MODEL_OBJ") or sorted(glob.glob(os.path.join(os.path.dirname(STATE), "*_model_epoch*.pt")),
