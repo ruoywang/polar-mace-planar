@@ -1342,6 +1342,45 @@ under GRAD_PASSES=1, B from its latest segment state + model object under
 LIVE_POS=1 GRAD_PASSES=0 (skipped if none yet), and A under LIVE_POS=1 to
 see its energy's actual slope as a force; val complete, train stride 3.
 
+### arm B, second segment  (B2 3434845, code 97efd17 at start; epochs 23-27)
+
+B2: 04:05 -> 05:33, wall 5245 s, resumed at 23 (lowest_loss 1.07870029
+carried over, no repeated epoch), stopped by the budget after epoch 27
+(5134 s elapsed, last epoch 926 s). Segment state + model object at 27.
+Epoch wall 14.2 / 16.7 / 16.5 / 15.1 / 15.4 min.
+
+Per-epoch accounting (rank 0), the first numbers of their kind:
+
+| epoch | step time mean / max s | CUDA peak GiB | baseline mmap reads | RAM cache | n_outer mean / max | at cap |
+|---|---|---|---|---|---|---|
+| 24 | 4.49 / 13.0 | 24.07 | 110 | 286/1024 | 7.79 / 10 | 0/213 |
+| 25 | 4.50 / 10.5 | 24.07 | 71 | 357/1024 | 7.68 / 10 | 0/213 |
+| 26 | 4.21 / 12.8 | 24.08 | 53 | 410/1024 | 7.91 / 10 | 0/213 |
+| 27 | 4.19 / 10.3 | 24.08 | 26 | 436/1024 | 7.84 / 10 | 0/213 |
+
+(epoch 23's line printed 0/0: the backend is created on the first forward
+and was looked up too early -- fixed in 0cf2f4e; its step time was 3.33 s
+mean, 43.8 s max.) READING: the PB solve converges by its criterion in every
+step (cap 12 never reached, mean 7.7-7.9, stable), so the epoch cost is not
+a convergence problem and not growing with the model any more; B's step
+time has plateaued at 4.2-4.5 s (A's steady state 1.05, i.e. B costs 4x per
+step: unrolled backward through ~8 outer iterations plus stage 1 and the
+grid terms in the graph). The mmap reads fall as the enlarged RAM cache
+fills (110 -> 26 per epoch); the earlier growth 2.2 -> 3.8 s in B1 and
+1.05 -> 1.78 in A1 remains unexplained in detail (no accounting then) but
+did not continue.
+
+| val | A | B |   (epochs 23-27)
+|---|---|---|
+| loss | 0.874 / 0.859 / 0.850 / 0.828 / 0.822 | 1.056 / 1.043 / 0.973 / 0.946 / 0.932 |
+| E meV/atom | 13.8 / 12.8 / 12.7 / 11.8 / 11.6 | 12.0 / 12.2 / 11.9 / 11.8 / 11.7 |
+| F meV/A | 36.8 / 36.3 / 35.6 / 34.9 / 34.4 | 46.0 / 45.7 / 42.8 / 41.7 / 41.2 |
+| potential eV | 0.158 / 0.164 / 0.158 / 0.154 / 0.156 | 0.229 / 0.236 / 0.189 / 0.147 / 0.147 |
+| fermi eV | 0.123 / 0.116 / 0.105 / 0.101 / 0.103 | 0.182 / 0.191 / 0.145 / 0.120 / 0.119 |
+
+B3 (3435035) started at 05:33; B4 (3435247) queued; the evaluation
+(3435143) runs after B3 by queue age (scontrol top is not permitted here).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
