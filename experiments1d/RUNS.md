@@ -1750,6 +1750,68 @@ mean-removed error by -0.02, the charged-NiN44 energy bias by -0.7 to -1.1
 meV/atom, forces by -1.1 to -1.5 meV/A. Whatever the nn arm shows beyond
 these amounts is the branch.
 
+### two-arm short run: the charge-scalar branch changes nothing in five epochs  (ab_head_ref 3435440 / ab_head_nn 3435486; evaluations 3435483 / 3435779)
+
+Both arms from arm B's epoch-39 state, fast B switches, epochs 40-44, same
+data order and budget; nn = the same + the branch (9409 params, fresh
+optimizer group and EMA). nn's validation lines track ref's within noise
+(epoch 44: 0.822 / 10.90 / 33.86 / 0.140 against 0.824 / 10.91 / 33.93 /
+0.146). The branch DID learn: |w| 6.63 -> 10.91 -> 12.22 -> 13.36 -> 13.66
+-> 14.30 over the five epochs, mean |grad| 2.13 -> 0.40 -> 0.30 -> 0.21 ->
+0.21 (converging, not stuck). Its training finished; the final model save
+then crashed in deepcopy on a graph-attached attribute of the branch
+(fixed, 58c6ffb) -- all per-epoch EMA checkpoints and the segment state +
+model object were already written.
+
+Structural evaluation, val (20 matched pairs; E bias in meV/atom for
+charged NiN44 / charged NiN88 / neutral NiN44; F rmse meV/A; paired dE
+rmse / bias / mean-removed in eV):
+
+| epoch | arm | E bias | F | dE |
+|---|---|---|---|---|
+| 39 (start) | B | +19.34 / -5.45 / -6.31 | 35.5 / 33.3 / 36.3 | 5.324 / 5.264 / 0.794 |
+| 41 | ref | +18.65 / -6.07 / -6.17 | 34.6 / 32.9 / 35.8 | 5.158 / 5.099 / 0.781 |
+| 41 | nn | +17.46 / -5.80 / -7.50 | 34.9 / 33.1 / 35.9 | 5.189 / 5.129 / 0.783 |
+| 42 | ref | +18.35 / -6.72 / -6.53 | 34.4 / 32.4 / 35.5 | 5.155 / 5.097 / 0.772 |
+| 42 | nn | +18.35 / -5.79 / -6.64 | 34.5 / 32.5 / 35.6 | 5.182 / 5.123 / 0.777 |
+| 43 | ref | +18.25 / -6.34 / -6.38 | 34.3 / 32.2 / 35.3 | 5.103 / 5.045 / 0.770 |
+| 43 | nn | +18.09 / -6.40 / -6.72 | 34.3 / 32.5 / 35.3 | 5.152 / 5.093 / 0.777 |
+| 44 | ref | +18.65 / -4.76 / -6.41 | 34.0 / 32.1 / 35.2 | 5.213 / 5.155 / 0.777 |
+| 44 | nn | +18.15 / -5.14 / -6.93 | 34.0 / 32.0 / 35.1 | 5.216 / 5.157 / 0.782 |
+
+Train subset (27 pairs) the same picture: epoch 44 dE bias 5.289 (ref) vs
+5.293 (nn), mean-removed 0.649 vs 0.654; neutral-frame F 49.4 in both.
+Pair by pair on val: epoch 41 nn - ref = +0.030 eV (std 0.007, corr 1.000,
+nn closer on 0/20); epoch 44 +0.0015 eV (std 0.009, corr 1.000, nn closer
+on 8/20 -- a coin flip). Density, fermi, potential: identical to ref.
+
+READING by the user's rules: no improvement of the charging energy (delta
+0.0015 eV against a 0.11-0.22 eV continued-training drift and a 5.16 eV
+bias), no improvement of the absolute energies beyond +-0.5 meV/atom, no
+force degradation. The inputs carry the charge state (potential 56%, |E|
+23%, coefficients ~1% -- checks entry) and the parameters moved (|w| x2.2,
+gradients converging), so it is NOT "the input is unused" and NOT "no
+update". What the branch learned it learned for the force term: the
+per-frame energy offset is nearly invisible to the loss as weighted. With
+per-atom energy normalisation and energy_weight 1 / forces_weight 100, an
+18 meV/atom bias contributes (0.018)^2 = 3.2e-4 to a per-frame loss of
+about 0.8 (0.04%); measured on the gate_le checkpoint the energy term was
+3.5e-4 / 3.3e-4 / 3.5e-4 on three frames against a force term of 3.16 /
+2.10 / 1.91 (loss_terms_identity, job 3432998). A constant 4.5-5 eV shift
+of every charged frame costs the optimizer almost nothing; an energy-head
+structure that CAN represent the charge state (the branch) has no signal
+telling it to. This is the update-scale / signal question the user's last
+rule points to, not an input-utilisation one, and it is consistent with the
+force-weight arms of 2026-09-12 (the head moved common-mode only) -- there
+the head could not represent the state; here it can and still is not asked.
+
+NEXT (proposal, user decides): the same two arms with the energy term made
+visible -- energy_weight raised (mace's own stage-two value is 1000, which
+puts the 18 meV/atom bias at 0.32 against a force term of order 0.1-0.3),
+both arms, same state, same 5 epochs; the ref arm then answers "is it the
+weight alone", the nn arm "does the branch use the signal once it exists".
+The charging energy stays a metric.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
