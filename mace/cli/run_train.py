@@ -401,6 +401,14 @@ def _fit_train_solvent_center_mean_shift(
 ) -> float:
     if args.model != "PolarMACE":
         return 0.0
+    fixed = getattr(args, "solvent_center_mean_shift_fixed", None)
+    if fixed is not None:
+        # the density fit re-reads every solvated training grid at start-up
+        # (5.3 min on a quiet node, 11.5 min on a loaded one, ab_head_nn_e1000
+        # 2026-09-13) and returns the same number every time for a given
+        # training set; a configured value skips it
+        logging.info("Using configured solvent_center_mean_shift_fixed=%.6f Å (start-up fit skipped).", float(fixed))
+        return float(fixed)
     use_density_shift = float(getattr(args, "density_3d_weight", 0.0)) > 1.0e-12
     use_partition_shift = float(getattr(args, "charges_weight", 0.0)) > 1.0e-12
     if use_density_shift and use_partition_shift:
