@@ -1942,6 +1942,22 @@ Decision rule agreed with the user: if segment 3's epochs are still far
 slower than the good-node reference (~8-9 min), stop the run and fix
 speed first.
 
+### solvent_center_mean_shift is now a constant, 0.5 A  (user decision 2026-09-13; code 5087a5d)
+
+Never fitted, never supervised, not a parameter: run_train sets 0.5 in
+code. This removes the 5-12 min start-up fit (and the interim
+--solvent_center_mean_shift_fixed argument of c5abba2). The value is used
+on every forward (comp_center_init, extensions.py 2151; solv_center, 2834),
+so it is a model convention that changes values slightly against the
+fitted 0.448714 -- and ab_head_nn_e1000 switches from 0.448714 (segments 1-2,
+epochs 40-46) to 0.5 from segment 3 (epoch 47) on. The +5 evaluation
+(epoch 44) is unaffected; the +10 / +20 evaluations carry the change.
+
+Also recorded: the density-loader change (a4f0bd2) was reverted (0a3c5f0)
+after a second measurement contradicted the first (13 s vs 0.7 s per cold
+file); the attribution of the slow data phase to the 3-D density memmap
+reads is NOT established and no run-time forecasts are made.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
