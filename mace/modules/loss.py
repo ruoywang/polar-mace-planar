@@ -491,7 +491,7 @@ class Density3DGridTargets:
             # of the 54 MB file into RAM is 0.1-0.4 s and goes through the
             # client cache (the same recipe the solvent3d loader uses). The
             # array is identical, the sampled points are identical.
-            rho = np.asarray(np.load(path, mmap_mode="r"))
+            rho = np.load(path, mmap_mode="r")  # memmap kept (materialisation under test: cold reads may be slower)
             meta_path = Path(entry["meta_path"])
             if not meta_path.is_absolute():
                 meta_path = self.manifest_path.parent / meta_path
