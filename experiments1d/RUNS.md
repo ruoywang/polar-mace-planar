@@ -2664,6 +2664,42 @@ segment-state resume, continuations submitted by exp_ab_w1000/chain.sh
 at least at epoch 59 and at PB-phase epochs for both arms; report per-state E/F and
 the paired charging energy, arm against arm.
 
+### w1000_ref, segment 1 (epochs 0-29)  (job 3438142, c301-002, 15:33 -> 17:09, wall 5760 s; code 98624ae)
+
+Budget stop after epoch 29 (5686 s elapsed, last epoch 322 s): 20 warm-up
+epochs at 0.40-0.53 s per step (CUDA peak 9.85 GiB) and 10 full-PB epochs
+at 1.41-1.42 s per step (CUDA peak 23.94 GiB, n_outer 7.7, no slow steps)
+-- the sped-up code in production. Continuation 3439084 submitted by the
+chain watcher (next epoch 30); the branch arm 3438143 started at 17:10 on
+the same node.
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV | fast-B (weight 1) same epoch: E / F / pot / fermi |
+|---|---|---|---|---|---|---|
+| 0 | 79.664 | 21.32 | 853.0 | 1.086 | 1.050 | 108.23 / 650.0 / 2.347 / 2.342 |
+| 5 | 9.001 | 26.93 | 184.4 | 1.639 | 1.639 | 31.77 / 152.9 / 1.613 / 1.626 |
+| 10 | 8.263 | 21.15 | 175.6 | 1.565 | 1.604 | 25.13 / 130.1 / 1.434 / 1.463 |
+| 15 | 8.459 | 18.80 | 190.5 | 1.492 | 1.529 | 20.52 / 148.9 / 1.401 / 1.441 |
+| 19 | 8.252 | 18.92 | 180.6 | 1.520 | 1.564 | 19.39 / 162.2 / 1.345 / 1.386 |
+| 20 | 1.689 | 11.13 | 73.1 | 0.287 | 0.298 | 16.27 / 68.0 / 0.290 / 0.314 |
+| 21 | 1.410 | 10.36 | 60.8 | 0.264 | 0.246 | 12.88 / 52.2 / 0.213 / 0.206 |
+| 22 | 1.321 | 9.76 | 56.6 | 0.207 | 0.203 | 12.31 / 47.3 / 0.181 / 0.161 |
+| 23 | 1.281 | 9.55 | 55.2 | 0.224 | 0.200 | 11.98 / 46.0 / 0.229 / 0.182 |
+| 24 | 1.198 | 8.60 | 53.1 | 0.205 | 0.182 | 12.15 / 45.7 / 0.236 / 0.191 |
+| 25 | 1.164 | 8.28 | 52.3 | 0.192 | 0.172 | 11.93 / 42.8 / 0.189 / 0.145 |
+| 26 | 1.131 | 7.85 | 50.4 | 0.178 | 0.158 | 11.75 / 41.7 / 0.147 / 0.120 |
+| 27 | 1.117 | 7.25 | 50.0 | 0.187 | 0.165 | 11.71 / 41.2 / 0.147 / 0.119 |
+| 28 | 1.084 | 7.23 | 48.2 | 0.164 | 0.151 | 11.77 / 40.5 / 0.150 / 0.118 |
+| 29 | 1.062 | 6.65 | 47.1 | 0.173 | 0.158 | 11.50 / 39.2 / 0.147 / 0.106 |
+
+Reading so far (ref only; branch not yet started): with energy_weight 1000
+the warm-up forces run 20-40% above B's at equal energy (E dominates the
+loss); once PB is on, energy is 32-45% better than B at every epoch
+(7.23 vs 11.5-12.2 meV/atom by epoch 28) and the force gap closes from
++7% (epoch 20) to +23% at epoch 28 (48.2 vs 39.3)... i.e. forces are worse
+than B by 15-23% in the PB phase at this weight; potential / fermi track
+B. The paired charging energy is not in these numbers -- evaluation at the
+end.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
