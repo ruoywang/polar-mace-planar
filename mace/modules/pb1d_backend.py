@@ -273,6 +273,8 @@ class PB1DBackend:
             self.backend, self.name, self.device = backend, name, device
 
         def __enter__(self):
+            self._rf = torch.autograd.profiler.record_function(f"pb1d/{self.name}")   # profiler marker only
+            self._rf.__enter__()
             if self.backend._timing_on:
                 import time
                 if self.device.type == "cuda":
@@ -281,6 +283,7 @@ class PB1DBackend:
             return self
 
         def __exit__(self, *exc):
+            self._rf.__exit__(None, None, None)
             if self.backend._timing_on:
                 import time
                 if self.device.type == "cuda":
@@ -795,7 +798,8 @@ class PB1DBackend:
                 outs = _ckpt2(_stage2_energy, radial_coeffs, cb, ci,
                               pf_e, use_reentrant=False)
             else:
-                outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
+                with torch.autograd.profiler.record_function("pb1d/stage2_energy"):   # profiler marker only
+                    outs = _stage2_energy(radial_coeffs, cb, ci, pf_e)
             (area, e_xsol_raw, e_self_raw, d_b_pl, d_i_pl,
              r_sup_b, r_sup_i, d_sup_b, d_sup_i,
              d_grid_b, d_grid_i, m_grid_b, m_grid_i) = outs

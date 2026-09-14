@@ -436,6 +436,9 @@ def train(
             distributed_model=distributed_model,
             rank=rank,
         )
+        if _PROFILE_DONE:
+            logging.info("profiler window written; this was a diagnostic run -- stopping before validation")
+            return {"segment_stopped": False, "next_epoch": int(epoch), "profiled": True}
         if distributed:
             torch.distributed.barrier()
 
@@ -658,6 +661,7 @@ def train_one_epoch(
         _t_sum = _t_max = 0.0; _n = 0; _no = []
         _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
         _io0 = _proc_io()   # this process's file-read counters at epoch start (loader workers are separate processes)
+        _prof_steps = int(os.environ.get("MACE_PROFILE_STEPS", "0")); _prof_skip = int(os.environ.get("MACE_PROFILE_SKIP", "10")); _prof = None
         # parameter tracking (read-only): |w| at epoch start/end, |dw|, mean |grad|
         # for the name prefixes in MACE_TRACK_PARAM_PREFIXES -- does a new input
         # channel actually take part in learning?
@@ -689,12 +693,28 @@ def train_one_epoch(
             _d = getattr(_be, "last_diagnostics", None) if _be is not None else None
             if isinstance(_d, dict) and _d.get("n_outer") is not None:
                 _no.append(int(_d["n_outer"]))
-            for _pref, _tr in _track.items():
-                _gs = [prm.grad for prm in _tr["params"] if prm.grad is not None]
-                if _gs:
-                    _tr["gsum"] += float(torch.sqrt(sum((g.double() ** 2).sum() for g in _gs))); _tr["gn"] += 1
+            with torch.autograd.profiler.record_function("epoch/grad_tracking"):
+                for _pref, _tr in _track.items():
+                    _gs = [prm.grad for prm in _tr["params"] if prm.grad is not None]
+                    if _gs:
+                        _tr["gsum"] += float(torch.sqrt(sum((g.double() ** 2).sum() for g in _gs))); _tr["gn"] += 1
             if rank == 0:
-                logger.log(opt_metrics)
+                with torch.autograd.profiler.record_function("epoch/metrics_log"):
+                    logger.log(opt_metrics)
+            # ---- env-gated short profiler window (diagnostic runs only) ----
+            if _prof_steps > 0:
+                if _n == _prof_skip:
+                    _prof = torch.profiler.profile(
+                        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                        record_shapes=False, profile_memory=False, with_stack=False)
+                    _prof.__enter__()
+                    logging.info(f"profiler: started after {_n} warm-up steps, {_prof_steps} steps to record")
+                elif _prof is not None and _n == _prof_skip + _prof_steps:
+                    _prof.__exit__(None, None, None)
+                    _write_profile(_prof, _prof_steps, rank)
+                    global _PROFILE_DONE
+                    _PROFILE_DONE = True
+                    break
         if rank == 0 and _n:
             for _pref, _tr in _track.items():
                 _w0 = float(torch.sqrt(sum((w.double() ** 2).sum() for w in _tr["w0"])))
@@ -732,6 +752,52 @@ def _proc_io() -> Dict[str, int]:
         return {}
 
 
+_PROFILE_DONE = False
+
+
+def _write_profile(prof, n_steps: int, rank: int) -> None:
+    """Per-rank profiler export (diagnostic runs, MACE_PROFILE_STEPS>0): chrome
+    trace, key_averages tables, and a per-step summary of the record_function
+    markers (step/*, model/*, pb1d/*, epoch/*), collectives, host-device syncs
+    and FFT calls. Times are per step (divided by n_steps)."""
+    out_dir = os.environ.get("MACE_PROFILE_DIR", "prof")
+    os.makedirs(out_dir, exist_ok=True)
+    prof.export_chrome_trace(os.path.join(out_dir, f"rank{rank}_trace.json"))
+    ka = prof.key_averages()
+    def _dev(e):
+        return float(getattr(e, "device_time_total", getattr(e, "cuda_time_total", 0.0)))
+    with open(os.path.join(out_dir, f"rank{rank}_keyavg.txt"), "w") as fh:
+        try:
+            fh.write(ka.table(sort_by="self_device_time_total", row_limit=80)); fh.write("\n\n")
+        except Exception:
+            fh.write(ka.table(sort_by="self_cuda_time_total", row_limit=80)); fh.write("\n\n")
+        fh.write(ka.table(sort_by="cpu_time_total", row_limit=80))
+    lines = [f"PROFILE rank {rank}: {n_steps} steps; times in ms PER STEP (cpu_total = wall span incl. children on the CPU side; device_total = GPU kernel time attributed)"]
+    lines.append(f"{'marker':40s} {'count/step':>10s} {'cpu_total':>10s} {'device_total':>12s}")
+    for e in sorted(ka, key=lambda e: e.key):
+        if e.key.startswith(("step/", "model/", "pb1d/", "epoch/", "loss/")):
+            lines.append(f"{e.key:40s} {e.count / n_steps:10.2f} {e.cpu_time_total / 1e3 / n_steps:10.1f} {_dev(e) / 1e3 / n_steps:12.1f}")
+    groups = {
+        "collectives (all_reduce/nccl/broadcast/allgather)": lambda k: any(x in k.lower() for x in ("all_reduce", "allreduce", "nccl", "broadcast", "allgather", "all_gather", "barrier")),
+        "host<->device syncs (item/_local_scalar_dense/cudaStreamSynchronize/cudaDeviceSynchronize)": lambda k: any(x in k for x in ("aten::item", "_local_scalar_dense", "cudaStreamSynchronize", "cudaDeviceSynchronize")),
+        "device->host copies (Memcpy DtoH / aten::_to_copy / aten::to / aten::cpu)": lambda k: any(x in k for x in ("Memcpy DtoH", "aten::_to_copy", "aten::cpu")),
+        "FFT ops (aten::_fft*/fft)": lambda k: "fft" in k.lower(),
+        "linalg solve/factorisation (linalg_solve/lu/cholesky)": lambda k: any(x in k.lower() for x in ("linalg_solve", "linalg_lu", "cholesky", "lu_solve", "getrf", "getrs")),
+        "autograd checkpoint recompute (CheckpointFunction)": lambda k: "checkpoint" in k.lower(),
+    }
+    lines.append("")
+    lines.append(f"{'group':90s} {'count/step':>10s} {'cpu_total':>10s} {'self_cpu':>10s} {'device_total':>12s}")
+    for name, fn in groups.items():
+        es = [e for e in ka if fn(e.key)]
+        lines.append(f"{name:90s} {sum(e.count for e in es) / n_steps:10.1f} {sum(e.cpu_time_total for e in es) / 1e3 / n_steps:10.1f} {sum(e.self_cpu_time_total for e in es) / 1e3 / n_steps:10.1f} {sum(_dev(e) for e in es) / 1e3 / n_steps:12.1f}")
+        for e in sorted(es, key=lambda e: -e.count)[:6]:
+            lines.append(f"    {e.key[:84]:86s} {e.count / n_steps:10.1f} {e.cpu_time_total / 1e3 / n_steps:10.1f} {e.self_cpu_time_total / 1e3 / n_steps:10.1f} {_dev(e) / 1e3 / n_steps:12.1f}")
+    txt = "\n".join(lines)
+    with open(os.path.join(out_dir, f"rank{rank}_summary.txt"), "w") as fh:
+        fh.write(txt + "\n")
+    print(txt, flush=True)
+
+
 def _proc_mem() -> str:
     """', host RSS x GiB (peak y)' from /proc/self/status; '' where unavailable."""
     try:
@@ -766,12 +832,16 @@ def take_step(
         return 0.0
 
     start_time = time.time()
+    _rf = torch.autograd.profiler.record_function   # profiler markers only (no-ops without an active profiler)
     t0 = tick()
-    batch = batch.to(device)
+    with _rf("step/data_to_device"):
+        batch = batch.to(device)
     t0a = tick()   # timing only: split of the data phase (to device / density-3d sample files / solvent3d sample files)
-    attach_density_3d_samples_to_batch(batch, loss_fn)
+    with _rf("step/data_density3d_attach"):
+        attach_density_3d_samples_to_batch(batch, loss_fn)
     t0b = tick()
-    attach_solvent3d_samples_to_batch(batch, loss_fn)
+    with _rf("step/data_solvent3d_attach"):
+        attach_solvent3d_samples_to_batch(batch, loss_fn)
     batch_dict = batch.to_dict()
     t1 = tick()
 
@@ -780,30 +850,36 @@ def take_step(
     def closure():
         optimizer.zero_grad(set_to_none=True)
         ta = tick()
-        output = model(
-            batch_dict,
-            training=True,
-            compute_force=output_args["forces"],
-            compute_virials=output_args["virials"],
-            compute_stress=output_args["stress"],
-        )
+        with _rf("step/forward_energy_and_forces"):
+            output = model(
+                batch_dict,
+                training=True,
+                compute_force=output_args["forces"],
+                compute_virials=output_args["virials"],
+                compute_stress=output_args["stress"],
+            )
         tb = tick()
-        loss = loss_fn(pred=output, ref=batch)
+        with _rf("step/loss"):
+            loss = loss_fn(pred=output, ref=batch)
         tc = tick()
-        loss.backward()
+        with _rf("step/backward"):
+            loss.backward()
         td = tick()
         if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            with _rf("step/grad_clip"):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         if timing:
             phases.update(fwd=tb - ta, loss=tc - tb, bwd=td - tc)
         return loss
 
     loss = closure()
     t2 = tick()
-    optimizer.step()
+    with _rf("step/optimizer"):
+        optimizer.step()
 
     if ema is not None:
-        ema.update()
+        with _rf("step/ema"):
+            ema.update()
     t3 = tick()
 
     if timing:
