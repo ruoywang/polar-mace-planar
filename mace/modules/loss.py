@@ -8,6 +8,7 @@ import ast
 import csv
 import json
 import math
+import os
 import random
 from collections import OrderedDict
 from pathlib import Path
@@ -477,6 +478,47 @@ class Density3DGridTargets:
     def __contains__(self, sample_id: int) -> bool:
         return int(sample_id) in self.entries
 
+    def _read_planes(self, sid: int):
+        """One grid's sampled planes as an independent RAM array, by a direct
+        sequential read() of the contiguous byte range (login-node measurement
+        2026-09-14: 59-107 MiB/s against 22-29 MiB/s for copying a memmap
+        slice; on the compute node the memmap copy ran at 10 MiB/s with three
+        ranks reading). Falls back to the memmap copy for a non-contiguous
+        valid_iz or a non-float32 / non-C-order file."""
+        entry = self.entries[sid]
+        path = Path(entry["path"])
+        if not path.is_absolute():
+            path = self.manifest_path.parent / path
+        meta_path = Path(entry["meta_path"])
+        if not meta_path.is_absolute():
+            meta_path = self.manifest_path.parent / meta_path
+        with np.load(meta_path) as meta:
+            lattice = np.asarray(meta["lattice"], dtype=np.float64)
+            valid_iz = np.asarray(meta["valid_iz"], dtype=np.int64)
+        mm = np.load(path, mmap_mode="r")
+        nz, ny, nx = mm.shape
+        contiguous = bool(valid_iz.size) and valid_iz.size == int(valid_iz[-1] - valid_iz[0]) + 1 and bool((np.diff(valid_iz) == 1).all())
+        if contiguous and mm.dtype == np.float32 and mm.flags.c_contiguous:
+            lo, hi = int(valid_iz[0]), int(valid_iz[-1])
+            sub = np.empty((hi - lo + 1, ny, nx), dtype=np.float32)          # owns its memory
+            plane_bytes = ny * nx * 4
+            with open(path, "rb", buffering=0) as fh:
+                fh.seek(int(mm.offset) + lo * plane_bytes)
+                view = memoryview(sub).cast("B")
+                got = 0
+                while got < len(view):
+                    n = fh.readinto(view[got:])
+                    if not n:
+                        raise IOError(f"density3d preload: short read on {path} ({got} of {len(view)} bytes)")
+                    got += n
+        elif contiguous:
+            sub = np.array(mm[int(valid_iz[0]):int(valid_iz[-1]) + 1], dtype=np.float32, copy=True, order="C")
+        else:
+            sub = np.array(mm[valid_iz], dtype=np.float32, copy=True, order="C")
+        if np.shares_memory(sub, mm) or not sub.flags.owndata or not sub.flags.c_contiguous:
+            raise RuntimeError(f"density3d preload: sid {sid} is not an independent RAM copy")
+        return sid, sub, lattice, valid_iz, int(nz), mm
+
     def preload(self, sample_ids, log=print) -> None:
         """Hold the sampled planes of these grids in process RAM (2026-09-14).
 
@@ -489,39 +531,37 @@ class Density3DGridTargets:
         rank for 720 frames) replaces the random faults. Values, indices and
         the RNG stream are unchanged: sample_points draws the same linear
         index, maps it to the same (plane, iy, ix) and reads the same float32
-        from sub[plane] == rho[valid_iz[plane]]. MACE_DENSITY3D_NO_PRELOAD=1
-        restores the memmap path."""
+        from sub[plane] == rho[valid_iz[plane]]. Files are read by
+        MACE_DENSITY3D_PRELOAD_THREADS (default 8) threads with direct
+        read(); the first three copies are compared element-wise against the
+        memmap slice. MACE_DENSITY3D_NO_PRELOAD=1 restores the memmap path."""
         import time as _time
+        from concurrent.futures import ThreadPoolExecutor
         t0 = _time.time()
-        n_new = 0
-        n_bytes = 0
-        t_max = 0.0
-        sid_max = -1
         todo = [int(s) for s in sample_ids]
         todo = [s for s in dict.fromkeys(todo) if s in self.entries and s not in self._ram]
-        for i, sid in enumerate(todo):
+        n_threads = max(1, int(os.environ.get("MACE_DENSITY3D_PRELOAD_THREADS", "8")))
+        n_bytes = 0
+        n_checked = 0
+        t_file = []
+        def _job(sid):
             t1 = _time.time()
-            rho, lattice, valid_iz = self._load(sid)
-            valid_iz = np.asarray(valid_iz, dtype=np.int64)
-            # EXPLICIT COPY (user review 2026-09-14): np.ascontiguousarray of an
-            # already-contiguous memmap slice returns a VIEW that still shares
-            # the file mapping, so the pages would still be faulted in per
-            # step. np.array(copy=True) allocates process memory; checked below.
-            if valid_iz.size and valid_iz.size == int(valid_iz[-1] - valid_iz[0]) + 1 and bool((np.diff(valid_iz) == 1).all()):
-                sub = np.array(rho[int(valid_iz[0]):int(valid_iz[-1]) + 1], dtype=np.float32, copy=True, order="C")   # one contiguous region, sequential read
-            else:
-                sub = np.array(rho[valid_iz], dtype=np.float32, copy=True, order="C")
-            if np.shares_memory(sub, rho) or not sub.flags.owndata or not sub.flags.c_contiguous:
-                raise RuntimeError(f"density3d preload: sid {sid} is not an independent RAM copy")
-            self._ram[sid] = (sub, np.asarray(lattice, dtype=np.float64), valid_iz, int(rho.shape[0]))
-            self._cache.pop(sid, None)   # drop the memmap; the RAM copy is what sample_points uses
-            n_new += 1
-            n_bytes += sub.nbytes
-            dt = _time.time() - t1
-            if dt > t_max:
-                t_max, sid_max = dt, sid
-            if (i + 1) % 100 == 0:
-                log(f"density3d preload: {i + 1}/{len(todo)} grids, {n_bytes / 2**30:.2f} GiB, {_time.time() - t0:.0f} s")
+            out = self._read_planes(sid)
+            return out, _time.time() - t1
+        with ThreadPoolExecutor(max_workers=n_threads) as ex:
+            for i, ((sid, sub, lattice, valid_iz, nz, mm), dt) in enumerate(ex.map(_job, todo)):
+                if n_checked < 3:   # element-wise identity against the memmap slice, first three files
+                    ref = mm[valid_iz]
+                    if not np.array_equal(sub, ref):
+                        raise RuntimeError(f"density3d preload: sid {sid} RAM copy differs from the memmap planes")
+                    n_checked += 1
+                del mm
+                self._ram[sid] = (sub, lattice, valid_iz, nz)
+                self._cache.pop(sid, None)   # drop any memmap; the RAM copy is what sample_points uses
+                n_bytes += sub.nbytes
+                t_file.append(dt)
+                if (i + 1) % 100 == 0:
+                    log(f"density3d preload: {i + 1}/{len(todo)} grids, {n_bytes / 2**30:.2f} GiB, {_time.time() - t0:.0f} s")
         rss = ""
         try:
             with open("/proc/self/status") as fh:
@@ -530,9 +570,11 @@ class Density3DGridTargets:
                         k, v = line.split(":"); rss += f" {k} {int(v.split()[0]) / 2**20:.2f} GiB"
         except Exception:
             pass
-        log(f"density3d: sampled planes of {n_new} grids copied into RAM ({n_bytes / 2**30:.2f} GiB, "
-            f"{_time.time() - t0:.0f} s; slowest file {t_max:.2f} s, sid {sid_max}); "
-            f"{len(self._ram)} grids resident; process{rss}")
+        wall = _time.time() - t0
+        log(f"density3d: sampled planes of {len(t_file)} grids copied into RAM ({n_bytes / 2**30:.2f} GiB, {wall:.0f} s, "
+            f"{n_bytes / 2**20 / max(wall, 1e-9):.0f} MiB/s with {n_threads} reader threads; per-file read "
+            f"{min(t_file) if t_file else 0:.2f}-{max(t_file) if t_file else 0:.2f} s; {n_checked} copies checked element-wise "
+            f"against the memmap); {len(self._ram)} grids resident; process{rss}")
 
     def _load(self, sample_id: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         sample_id = int(sample_id)
