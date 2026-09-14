@@ -2415,6 +2415,31 @@ grids in this job chain since the e1000 segment 4): 720 grids, 15.05 GiB,
 16 s, 940 MiB/s with 8 threads, per file 0.08-1.05 s -- against 932 s for
 the single-thread memmap copy on c301-002.
 
+### sync call sites, Python level  (job 3437375, c301-001, 5 steps after 10 warm-up; audits/profile_e56_rank0_sync_sites.txt)
+
+Wrapping .item/.cpu/.tolist/.numpy/float()/int()/bool() on CUDA tensors and
+recording the caller: 234 / 198 / 277 syncs per step on ranks 0 / 1 / 2
+(the profiler counted 690 aten::item per step, so about two thirds of the
+item() calls are issued INSIDE torch functions, not by our Python -- the
+stack-grouped profile below is for those, and for the 320 nonzero /
+mask-index syncs per step).
+
+Rank 0, calls per step by file: pb1d_solver.py 108.8, solvent_charge_layer.py
+28.0, pb1d_localfield.py 24.0, loss.py 18.6, pb1d_backend.py 17.6,
+extensions.py 15.8, scatter.py 6.0, features.py 4.0, gl_jit_compat.py 3.0,
+train.py 3.0, solvent3d.py 2.8. Top sites: pb1d_localfield.py:82 (24,
+the local-field fixed point's convergence test every 8 iterations),
+pb1d_solver.py:222 (24) / 211 (23) / 209 (11) / 227 (12) -- FOUR float()
+per Newton iteration where one convergence test would do (rms test,
+line-search accept as float(t_rms) <= float(rms), and _last_rms twice);
+pb1d_solver.py:384 (16) / 379 (8) / 411 (10) -- the fixsol secant loop's
+float() tests; solvent_charge_layer.py:114 + 120 (8 + 8, crossing index
+and a tiny-denominator test); pb1d_backend.py 524 / 564-566 / 856-858
+(1.6 each = per PB call, the health test and the seven diagnostic floats);
+extensions.py 1672-1679 (per-graph slab / solvated / sid / total_charge
+conversions); scatter.py:44 (6, int(index.max()) + 1 for the scatter
+size); train.py:702 (3, my gradient tracking).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
