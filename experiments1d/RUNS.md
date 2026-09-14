@@ -2509,6 +2509,31 @@ double arithmetic); _pb1d_run_graphs per-graph scalars read with one
 .tolist() before the loop; backend diagnostics read with one stack().tolist().
 Left alone: graph_longrange (dependency), occ_head (10/step), batch.to.
 
+### fix 2 implemented  (83f3832; verification jobs 3437392 equivalence, then timing and sync count)
+
+Changes (all meant to be value-identical): pb1d_localfield _g_rot /
+_g_rot_prime / the zero-field write via torch.where on a safe operand;
+pb1d_solver.newton one float() per iteration plus one per line-search
+trial, torch.linalg.solve_ex(check_errors=False) with one info test per
+solve (also the two analytic-path solves); fixsol loop one batched
+.tolist() per step; solvent3d._interp3_periodic grid-size and corner
+offsets cached per (shape, device, dtype); loss._gaussian_1d Python-float
+sigma; extensions._pb1d_run_graphs per-graph scalars read with one
+.tolist() each before the loop; pb1d_backend health test and the five
+diagnostic floats batched; train.py gradient tracking accumulated on the
+device. Untouched: graph_longrange (dependency), occ_head nonzero (10 per
+step), batch.to (27 syncs, 2.5 ms).
+
+CPU bitwise checks against the pre-fix tree (7424e71, worktree): _g_rot and
+_g_rot_prime on 30 000 values spanning both branches and zeros, the full
+local_field_factor forward AND its implicit backward on 3050 fields
+(torch.equal True, max |d| 0.0), _interp3_periodic on 4096 points
+(torch.equal True), _gaussian_1d for sigma 0.3 / 1.0 / 2.5 / 1e-15
+(torch.equal True). GPU: audits/code_equivalence.py runs the old tree twice
+(non-determinism floor) and the new tree once on val frames 28 (charged
+NiN44), 628 (its neutral pair) and 339 (charged NiN88): energy, full-
+derivative forces, n_outer and rms_last -- job 3437392.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
