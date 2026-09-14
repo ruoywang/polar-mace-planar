@@ -2329,6 +2329,84 @@ REMAINING PER-STEP COST, this node, after fix 1: backward 0.69-0.79 s
 loss 0.04-0.32 s, solvent3d attach 0.03-0.10 s. What is inside the forward
 and the backward is the profiler's job.
 
+### profiler diagnostic, 20 steps, epoch-57 of the branch model  (job 3437244, c301-002, code b9c4552; 06:39 -> 06:51, wall 693 s; run dir exp_speed/profile_e56; rank-0 summary in audits/profile_e56_rank0_summary.txt)
+
+Node facts: 128 cores, 251 GiB, OMP_NUM_THREADS=1 (Slurm default here: every
+rank's torch intra-op pool is ONE thread although 16 cores per task are
+allocated; CPU binding 0-127 for all ranks); GPUs at 210 MHz idle before,
+765 / 1410 / 1410 MHz SM at the end; load 1.9-2.9. The threaded preload
+took 25 s for 720 grids (617 MiB/s, per file 0.08-1.94 s) -- on the node
+that had just read the same files, so possibly warm; a cold node is still
+to be measured.
+
+Rank 0, per step, 20 steps after 10 warm-up (profiler on, so spans are
+inflated against the timing job's 1.46-1.72 s; the step wall here is
+2023 ms). From the chrome trace, GPU kernel time attributed to each marker
+by timestamp (any thread), spans on the CPU side:
+
+| marker | span ms | GPU kernels inside ms |
+|---|---|---|
+| step/forward_energy_and_forces | 736 | 437 |
+|   of which model/force_derivative | 348 | 228 |
+|   (energy part = the rest) | 388 | 208 |
+|   pb1d/4_closure (1.47 calls/step) | 80 | 66 |
+|   pb1d/5_solve1d | 72 | 28 |
+|   pb1d/1-3 | 10 | 13 |
+| step/loss | 244 | 212 |
+| step/backward | 885 | 678 (of which NCCL all_reduce 438) |
+| step/data_solvent3d_attach | 72 | 0 |
+| step/data_density3d_attach | 1.7 | 0 |
+| optimizer + ema + grad_clip | 15 | 2 |
+| epoch/grad_tracking + metrics_log | 5.6 | 0.1 |
+| uncovered (loader wait, python) | 61 | -- |
+| step | 2023 | 1332 = 66%, minus NCCL 438+41 -> compute kernels ~853 = 42% |
+
+Counts per step (rank 0): host-device syncs 2381 (aten::item 690,
+cudaStreamSynchronize 974, cudaDeviceSynchronize 25 -- the last are the
+timing instrumentation itself); Memcpy DtoH 770; c10d::allreduce_ 14 (13
+NCCL AllReduce kernels = DDP gradient buckets + the 4 count reductions in
+the loss) with 438 ms of NCCL kernel time, i.e. time in which this rank's
+GPU sits in the collective waiting for the others; FFT 233 calls
+(_fft_r2c 142, _fft_c2c 91; 137 ms of kernels); linalg_solve 28 + LU
+factor 28 + lu_solve 35 + triangular 46 (156 ms of kernels); elementwise
+kernel launches about 20 000 per step (five families: 5632 + 4417 + 3174 +
+3302 + 3032; 340 ms of kernel time in kernels that are each microseconds);
+complex-double tensor-op GEMMs (cutlass z884gemm) 36 per step, 158 ms.
+"CheckpointFunction" 0 -- the recompute is not visible under that name, so
+item 4 is not measured by this run.
+
+Per-rank STEPTIMING at step 30 (10 warm-up + 20 profiled, cumulative):
+rank 0 fwd 3128 / loss 322; ranks 1-2 fwd 2298-2322 / loss 1141-1175 --
+the ranks that finish the forward first wait INSIDE the loss (its first
+count all_reduce) for rank 0; the sum fwd+loss is equal within 2% across
+the ranks. In the full-epoch timing job the same pattern: per-rank fwd
+461-747 and loss 38-317 with fwd+loss 700-881 on every rank.
+
+READING (rank 0; the shares are what the user asked for, not causes):
+1. The GPU computes for about 42% of the step. The rest is CPU-side work
+   and synchronisation: 690 .item() calls per step (313 ms of CPU span
+   waiting on them), ~20 000 kernel launches per step, and OMP 1 thread.
+   The energy forward has 208 ms of kernels in a 388 ms span; the PB
+   solve1d 28 ms in 72; the loss 212 in 244 (that one is GPU-bound).
+2. Cross-rank waiting is 438 ms of NCCL kernel time per step on rank 0
+   (22% of its step) -- whichever rank is slower at each collective is
+   waited for; the imbalance comes from the forward (207- vs 339-atom
+   frames, batch 1).
+3. The force derivative is 228 ms of kernels; the backward 240 ms of
+   compute kernels (678 minus the 438 NCCL); the loss 212 ms -- these three
+   are the real GPU work, about 0.7 s of the 2.0 s.
+4. Item 5 (two solves on one J_c): all linalg together is 156 ms of
+   kernels per step across 28 factorisations; factoring once for the two
+   correction passes can save at most a fraction of the 28 ms LU part --
+   small, as anticipated.
+
+NEXT (largest first): the .item()/sync sites -- a call-site counter
+(MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
+issues the 690 syncs per step; then remove the ones that are not the
+solver's convergence test (keep values on the GPU, batch the diagnostics).
+Second: the cross-rank wait, once the forward is shorter (a size-paired
+sampler would change the data order -- not without the user).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
