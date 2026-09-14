@@ -1967,6 +1967,36 @@ after a second measurement contradicted the first (13 s vs 0.7 s per cold
 file); the attribution of the slow data phase to the 3-D density memmap
 reads is NOT established and no run-time forecasts are made.
 
+### ab_head_nn_e1000, +5 evaluation (epoch 44)  (job 3436652; EMA weights; val complete, train every 6th frame; LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12)
+
+| val | E rmse / bias charged NiN44 | charged NiN88 | neutral NiN44 | F rmse / max 44 | 88 | neutral | paired dE rmse / bias / mean-removed (20) |
+|---|---|---|---|---|---|---|---|
+| B ep 39 (start) | 16.73 / +19.34* | 3.36 / -5.45 | 6.15 / -6.31 | 35.5 / 286 | 33.3 / 303 | 36.3 / 435 | 5.324 / 5.264 / 0.794 |
+| nn e=1, ep 44 | 18.51 / +18.15 | 5.23 / -5.14 | 6.98 / -6.93 | 34.0 / -- | 32.0 / -- | 35.1 / -- | 5.216 / 5.157 / 0.782 |
+| nn e=1000, ep 44 | 7.03 / +6.51 | 5.51 / -5.48 | 9.86 / -9.81 | 41.0 / 334 | 36.7 / 322 | 41.0 / 790 | 3.317 / 3.262 / 0.601 |
+
+(*the start line's charged-NiN44 bias: 19.34 from the pairwise table; the
+per-state table of 3435324 gave rmse 19.69 / bias 19.34.)
+train subset: dE 3.426 / 3.392 / 0.484 (27 pairs) against 5.329 / 5.289 /
+0.649 at the start; E bias +7.13 / -5.46 / -9.70; F 38.2 / 36.3 / 53.3.
+
+Pair by pair on val: e1000@44 minus start = -2.002 eV (std 0.206, corr
+0.995), closer on 20/20 pairs. Per state: charged NiN44 frames moved by
+-12.8 meV/atom (+19.34 -> +6.51, ~ -2.65 eV per 207-atom frame), neutral
+NiN44 by -3.5 meV/atom (-6.31 -> -9.81, ~ -0.72 eV), NiN88 unchanged --
+the charging bias fell because the two states moved by different amounts.
+
+READING. Five epochs with the energy term at weight 1000 changed the
+charging energy by -2.0 eV out of 5.26 (-38%) and its configuration-
+dependent part by -24% (0.794 -> 0.601); the same five epochs at weight 1
+had changed it by -0.11 (nn) / -0.11 (ref). The cost: the full-derivative
+force RMSE +10-16% (35.5/33.3/36.3 -> 41.0/36.7/41.0 meV/A), the neutral-
+NiN44 energy bias worse by 3.5 meV/atom, the charged-NiN88 energies
+unchanged. Potential / fermi at the start's level (0.142 / 0.108). The
+charging error is still 3.3 eV: the problem is NOT solved at +5. Epochs
+49 (+10) and 59 (+20) decide the trend; the weight, not the branch, is the
+demonstrated lever here (no same-budget weight-1 control beyond epoch 44).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
