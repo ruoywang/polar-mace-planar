@@ -632,6 +632,7 @@ def train_one_epoch(
     distributed_model: Optional[DistributedDataParallel] = None,
     rank: Optional[int] = 0,
 ) -> None:
+    global _PROFILE_DONE
     model_to_train = model if distributed_model is None else distributed_model
 
     if isinstance(optimizer, LBFGS):
@@ -662,6 +663,7 @@ def train_one_epoch(
         _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
         _io0 = _proc_io()   # this process's file-read counters at epoch start (loader workers are separate processes)
         _prof_steps = int(os.environ.get("MACE_PROFILE_STEPS", "0")); _prof_skip = int(os.environ.get("MACE_PROFILE_SKIP", "10")); _prof = None
+        _sync_steps = int(os.environ.get("MACE_COUNT_SYNC_STEPS", "0")); _sync_orig = None
         # parameter tracking (read-only): |w| at epoch start/end, |dw|, mean |grad|
         # for the name prefixes in MACE_TRACK_PARAM_PREFIXES -- does a new input
         # channel actually take part in learning?
@@ -701,6 +703,15 @@ def train_one_epoch(
             if rank == 0:
                 with torch.autograd.profiler.record_function("epoch/metrics_log"):
                     logger.log(opt_metrics)
+            # ---- env-gated host-device SYNC CALL-SITE counter (diagnostic runs only) ----
+            if _sync_steps > 0:
+                if _n == _prof_skip:
+                    _sync_orig = _install_sync_counter()
+                    logging.info(f"sync counter: installed after {_n} warm-up steps for {_sync_steps} steps")
+                elif _sync_orig is not None and _n == _prof_skip + _sync_steps:
+                    _report_sync_counter(_sync_orig, _sync_steps, rank)
+                    _PROFILE_DONE = True
+                    break
             # ---- env-gated short profiler window (diagnostic runs only) ----
             if _prof_steps > 0:
                 if _n == _prof_skip:
@@ -712,7 +723,6 @@ def train_one_epoch(
                 elif _prof is not None and _n == _prof_skip + _prof_steps:
                     _prof.__exit__(None, None, None)
                     _write_profile(_prof, _prof_steps, rank)
-                    global _PROFILE_DONE
                     _PROFILE_DONE = True
                     break
         if rank == 0 and _n:
@@ -753,6 +763,56 @@ def _proc_io() -> Dict[str, int]:
 
 
 _PROFILE_DONE = False
+_SYNC_COUNTS: Dict[Tuple[str, str], int] = {}
+
+
+def _install_sync_counter():
+    """Diagnostic only (MACE_COUNT_SYNC_STEPS>0): wrap the Tensor methods that
+    force a host-device synchronisation on a CUDA tensor (.item(), .cpu(),
+    .tolist(), .numpy(), float()/int()/bool() conversions) and count the
+    CALLER file:line of each call. Returns the originals for restoring."""
+    import traceback
+    names = ["item", "cpu", "tolist", "numpy", "__float__", "__int__", "__bool__", "__index__"]
+    orig = {}
+    for name in names:
+        fn = getattr(torch.Tensor, name, None)
+        if fn is None:
+            continue
+        orig[name] = fn
+
+        def _make(name, fn):
+            def wrapped(self, *a, **k):
+                if self.is_cuda:
+                    fr = traceback.extract_stack(limit=3)[-2]
+                    key = (name, f"{os.path.basename(fr.filename)}:{fr.lineno}")
+                    _SYNC_COUNTS[key] = _SYNC_COUNTS.get(key, 0) + 1
+                return fn(self, *a, **k)
+            return wrapped
+        setattr(torch.Tensor, name, _make(name, fn))
+    return orig
+
+
+def _report_sync_counter(orig, n_steps: int, rank: int) -> None:
+    for name, fn in orig.items():
+        setattr(torch.Tensor, name, fn)
+    total = sum(_SYNC_COUNTS.values())
+    by_file: Dict[str, int] = {}
+    for (name, site), c in _SYNC_COUNTS.items():
+        by_file[site.split(":")[0]] = by_file.get(site.split(":")[0], 0) + c
+    lines = [f"SYNC CALL SITES rank {rank}: {total / n_steps:.1f} host-device syncs per step on CUDA tensors over {n_steps} steps"]
+    lines.append("  per file (calls/step): " + ", ".join(f"{f} {c / n_steps:.1f}" for f, c in sorted(by_file.items(), key=lambda x: -x[1])))
+    lines.append(f"  {'calls/step':>10s}  {'method':10s}  caller")
+    for (name, site), c in sorted(_SYNC_COUNTS.items(), key=lambda x: -x[1])[:45]:
+        lines.append(f"  {c / n_steps:10.1f}  {name:10s}  {site}")
+    txt = "\n".join(lines)
+    out_dir = os.environ.get("MACE_PROFILE_DIR", "prof")
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, f"rank{rank}_sync_sites.txt"), "w") as fh:
+            fh.write(txt + "\n")
+    except Exception:
+        pass
+    print(txt, flush=True)
 
 
 def _write_profile(prof, n_steps: int, rank: int) -> None:
