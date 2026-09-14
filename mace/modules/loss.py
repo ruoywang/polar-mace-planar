@@ -484,7 +484,14 @@ class Density3DGridTargets:
         if not path.is_absolute():
             path = self.manifest_path.parent / path
         if self.mmap_mode:
-            rho = np.load(path, mmap_mode="r")  # no decompress, no copy
+            # mmap + SEQUENTIAL MATERIALISATION (2026-09-13): keeping the memmap
+            # and fancy-indexing 1024 random points per step cost 1.8-2.6 s per
+            # step on a loaded BeeGFS client (ab_head_nn_e1000, c301-003) and
+            # produced minute-long page-fault stalls; a single sequential read
+            # of the 54 MB file into RAM is 0.1-0.4 s and goes through the
+            # client cache (the same recipe the solvent3d loader uses). The
+            # array is identical, the sampled points are identical.
+            rho = np.asarray(np.load(path, mmap_mode="r"))
             meta_path = Path(entry["meta_path"])
             if not meta_path.is_absolute():
                 meta_path = self.manifest_path.parent / meta_path
