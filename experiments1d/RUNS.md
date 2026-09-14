@@ -2651,14 +2651,17 @@ code (fix 1 + fix 2, code 98624ae; values identical to the pre-fix code):
 - w1000_branch : the same + field_readout_config charge_branch True,
                  hidden 64 (zero-init output), i.e. the ab_head_nn_e1000 head.
 Everything else as the A/B: seed 123, warm-up 20 (solvent_pb1d_warmup_
-encounters 20), 40 epochs, LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12, EMA 0.99,
+encounters 20), 60 EPOCHS = 20 warm-up + 40 full-PB (user correction
+2026-09-14 "一共60轮，40轮PB训练"; the first submissions 3438020/3438021 with
+max_num_epochs 40 were cancelled while queued and resubmitted as 3438142
+(ref) / 3438143 (branch) with max_num_epochs 60, STOP default 59),
+LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12, EMA 0.99,
 lr 0.01, batch 1, 3 ranks; segments of 6000 s on gpu-a100-dev with the
 segment-state resume, continuations submitted by exp_ab_w1000/chain.sh
 (one queued job per arm, so the arms alternate). Run dirs
-3-residual_3D/w1000_ref, w1000_branch; first segments 3438020 (ref),
-3438021 (branch). Evaluation: exp_ab_w1000/job_eval.sh (ab_eval.py, val
-complete, train stride 6) on the per-epoch EMA checkpoints, at least at
-epoch 39 and at PB-phase epochs for both arms; report per-state E/F and
+3-residual_3D/w1000_ref, w1000_branch. Evaluation: exp_ab_w1000/job_eval.sh
+(ab_eval.py, val complete, train stride 6) on the per-epoch EMA checkpoints,
+at least at epoch 59 and at PB-phase epochs for both arms; report per-state E/F and
 the paired charging energy, arm against arm.
 
 NEXT (largest first): the .item()/sync sites -- a call-site counter
