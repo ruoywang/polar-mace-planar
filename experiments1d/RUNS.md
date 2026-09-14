@@ -1913,6 +1913,35 @@ start's level; the branch's weights grow steadily (6.6 -> 22.8), its
 gradient stays at 6.2-6.6. The +5 structural evaluation (epoch 44, job
 3436652) runs next; segments 3 and 4 (3436653, 3436688) follow.
 
+### where the start-up minutes go, and two speed fixes with identical values  (2026-09-13 evening; code a4f0bd2, 5cf... see git)
+
+Start-up timeline of a segment (ab_head_nn_e1000 segment 2, c301-003):
+job start 18:31:39 -> python up 18:33:45 (2.1 min: srun, imports, CUDA) ->
+datasets loaded, E0s, average neighbours 18:34:03 (18 s) -> **solvent-
+centre mean-shift fit 18:34:03 -> 18:45:30 (11.5 min; 5.3 min on the quiet
+node of ab_head_ref)** -> model, optimizer, resume 18:45:41 (11 s) ->
+first step incl. baseline preload 66 s. The fit re-reads the 3-D density
+grid of every solvated training frame (320 x 54 MB) and returns the same
+value every run for this training set (0.448714 Å from 320 configs; the
+Fermi baseline fit, -4.330435 eV, is instantaneous). New argument
+--solvent_center_mean_shift_fixed 0.448714 in the run's config skips it:
+start-up ~3 min instead of 9-15.
+
+Per-step data phase: the 3-D density loss sampled 1024 random points by
+fancy-indexing a memmap of the 54 MB grid -- 1024 scattered small reads
+per step; on the loaded client 1.8-2.6 s per step and the origin of the
+minute-long stalls after the baseline preload had removed the other
+per-step file access. Measured on the login node for sid 1: memmap
+random-index 4.17 s, sequential materialisation of the whole file then
+indexing 0.14 s, arrays and sampled values identical (np.array_equal).
+loss.py now materialises the grid (np.asarray of the memmap), the recipe
+the solvent3D loader already used (its 2026-08-31 note: random faults 3-5
+s/graph, sequential 0.0-0.1 s). Segments 3+ pick both changes up.
+
+Decision rule agreed with the user: if segment 3's epochs are still far
+slower than the good-node reference (~8-9 min), stop the run and fix
+speed first.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
