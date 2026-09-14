@@ -1997,6 +1997,24 @@ charging error is still 3.3 eV: the problem is NOT solved at +5. Epochs
 49 (+10) and 59 (+20) decide the trend; the weight, not the branch, is the
 demonstrated lever here (no same-budget weight-1 control beyond epoch 44).
 
+### ab_head_nn_e1000, segment 3 (epochs 47-51)  (job 3436653, c301-003, 22:10 -> 23:35, wall 5050 s; code 5087a5d: solvent_center_mean_shift constant 0.5 from here -- warm-up-only quantity, no effect on these numbers)
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV | step s mean / max | branch |w| -> |
+|---|---|---|---|---|---|---|---|
+| 47 | 0.936 | 6.43 | 39.06 | 0.130 | 0.105 | 5.48 / 109 | 23.14 |
+| 48 | 0.908 | 5.44 | 38.16 | 0.138 | 0.105 | 4.69 / 45 | 23.49 |
+| 49 | 0.891 | 5.20 | 37.70 | 0.146 | 0.106 | 3.38 / 49 | 23.72 |
+| 50 | 0.898 | 5.79 | 37.52 | 0.145 | 0.105 | 3.49 / 37 | 24.03 |
+| 51 | 0.902 | 5.37 | 37.51 | 0.178 | 0.130 | 4.62 / 174 | 24.47 |
+
+Stopped by the budget after 51 (5027 s; state at 51, next 52). Slow steps
+2426: 137 s and 2460: 174 s (night, same node). n_outer 7.76-7.85, cap 0.
+Energy RMSE 6.4 -> 5.2-5.8 (start 11.27), force RMSE back to 37.5 (start
+35.1, +7%), potential / fermi at the start's level with one worse epoch
+(51: 0.178 / 0.130). Branch weights 22.8 -> 24.5, gradient 5.8-6.4.
+Segment 4 (3436688, c301-001) started 23:36; +10 evaluation (epoch 49,
+3436911) and segment 5 (3436981) queued.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
