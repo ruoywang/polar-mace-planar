@@ -2131,6 +2131,73 @@ retraining: (1) the speed measurement below; (2) a weight-1000 arm WITHOUT
 the branch for 5 epochs from the same state, so weight and branch are
 separated -- the one control this run lacks.
 
+## SPEED, measured  (2026-09-14; user: "跑完这个任务就不要训练了，先解决速度的问题")
+
+### timing_B: one full-PB epoch of the fast-B configuration with every timer on  (job 3437065, c301-002, 3 GPUs, 02:16 -> 02:50, wall 2032 s; code 0bffa87; exp_speed/job_timing.sh, run dir exp_speed/timing_B)
+
+Not a training run: B's epoch-39 segment state resumed, epoch 40 only,
+MACE_STEP_TIMING=1 (data phase split into to-device / density-3d sample
+files / solvent3d sample files; forward; loss; backward; optimizer, CUDA-
+synchronised), MACE_PB1D_TIMING=1 (backend forward phases), per-epoch
+/proc/self/io counters (e7e30e5). The computation is unchanged: epoch 40's
+validation line is the fast-B run's to 2e-7 (loss 0.84561902 vs 0.84561921,
+E 11.00, F 34.99, potential 0.1566, fermi 0.1066 identical). The job ended
+with rc 134 AFTER the epoch: the final checkpoint save found no
+checkpoints/ directory in the fresh run dir (mine; created now) -- no
+effect on the numbers. Node load 0.7-2.9 at start, GPUs idle at start.
+
+Step-time accounting (rank 0): 213 steps, mean 5.72 s, max 75.5 s (the first
+step), CUDA peak 23.92 GiB, n_outer 7.75, baseline mmap reads 0, and THIS
+PROCESS FETCHED 7.67 GiB FROM STORAGE DURING THE EPOCH (read_bytes; rchar,
+the read()-call volume, only 0.36 GiB -> the fetches are mmap page faults).
+7.67 GiB / 213 steps = 36 MB per step for 1024 sampled density points
+(4 KB of values).
+
+Per-step phases, 20-step window means over steps 101-200 (steady state),
+all three ranks (ms):
+
+| phase | rank 0 | rank 1 | rank 2 |
+|---|---|---|---|
+| data_den3d (density-3d sample attach: memmap fancy-index of 1024 points) | 2391-2976 | 2194-2944 | 2474-3036 |
+| data_solv3d (solvent3d sample attach: 2 x 5.7 MB materialised) | 56-83 | 74-145 | 49-116 |
+| data_dev (batch to GPU) | 2 | 2 | 2 |
+| fwd (model forward incl. PB solve) | 1039-1865 | 1660-1918 | 1233-1808 |
+| loss_fn | 190-309 | 44-195 | 77-337 |
+| bwd | 692-786 | 690-786 | 691-786 |
+| opt | 5-6 | 6-7 | 5-6 |
+| step total | 5029-5851 | 5031-5864 | 5032-5866 |
+
+PB backend forward (rank 0, cumulative mean per graph at 340 calls): 130 ms
+= baseline 2.8 + assembly 26.8 + poisson 4.4 + closure 57.3 + solve1d 39.0
+(the cumulative mean still falling; assembly alone dropped 46 -> 27 ms
+between calls 160 and 340, so its steady value is lower).
+
+READING (direct timers, this node, this job):
+1. The density-3d SAMPLE ATTACHMENT is 2.2-3.0 s of a 5.0-5.9 s step (40-55%).
+   It is the memmap fancy-index path (loss.py Density3DGridTargets._load /
+   sample_points) and it moves 36 MB per step from storage for 4 KB of
+   values. This is the first time the item is measured directly inside the
+   training step rather than inferred; on the quiet-node fast-B run
+   (ab_head_ref, epochs 41-44) the WHOLE data phase was 0.42 s, so the cost
+   depends on the node/filesystem state -- what does not depend on it is
+   that this path does 36 MB of page-fault I/O per step that nothing else
+   in the step does.
+2. Forward 1.0-1.9 s between windows while the PB solve inside it is a
+   steady 0.13 s/graph: the rest (MACE trunk, stage 1, stage-2 grid terms)
+   is 0.9-1.8 s and varies 2x between 20-step windows on the same node.
+   Not attributed; the earlier quiet-node number was 0.97 s.
+3. Backward is steady at 0.69-0.79 s, the optimizer 6 ms, batch-to-GPU 2 ms,
+   solvent3d attach 0.05-0.15 s.
+4. Start-up: job 02:16:08, first log 02:17:12, model 02:17:32, IN EFFECT
+   02:17:37, preload 30 s -> about 2 min to the first step.
+
+NEXT (values must stay identical): remove the per-step page-fault I/O of
+item 1 by holding the 640 grids (54 MB each, 34.6 GB) in node RAM once,
+shared by the three ranks through /dev/shm (one sequential copy per file at
+start-up, each rank copying a third; then every rank memmaps the RAM copy,
+so the sampled indices, values and RNG stream are unchanged). Test = the same
+timing job with the switch on, same node class, same tables. Then item 2.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
