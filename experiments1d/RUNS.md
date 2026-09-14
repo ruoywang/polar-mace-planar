@@ -2473,6 +2473,42 @@ loops over planes / graphs / components) and the backward pays a zeros +
 copy for each. The real compute is in bmm (224 ms GPU, 430 launches) and
 mul (209 ms, 7837 launches -- 27 microseconds each, launch-bound).
 
+### sync attribution from the stack trace  (job 3437386 trace, rank 0, 4 full steps; python_function events matched by time on the same thread)
+
+Per step: main thread 531 item + 208 nonzero + 219 index + 631
+cudaStreamSynchronize; autograd thread (backward) 161 item + 300 nonzero +
+257 index + 345 cudaStreamSynchronize. Attribution of the main-thread ones:
+
+| calls/step | op | issuer |
+|---|---|---|
+| ~250 | item (no stream sync) | torch/optim Adam `_get_value(step_t)`: CPU tensors, harmless |
+| 111 + 9 | nonzero, 55 index, 111 syncs | pb1d_localfield._g_rot: `u[~small]` / `out[~small] = ...` inside the fixed-point loop (and _g_rot_prime in the backward) |
+| 65 (+11 in linalg_solve) | item + sync | pb1d_solver.newton: float(rms)/float(t_rms)/_last_rms, and linalg.solve's singularity check |
+| 12 | item | pb1d_solver._solve_unrolled (fixsol tests) |
+| 27 | sync | solvent3d._interp3_periodic: torch.tensor(...) built on the device 9x per call |
+| 27 | sync | batch.to(device) (torch_geometric data.py:302) |
+| 13 | sync | loss._gaussian_1d: z_grid.new_tensor(sigma) |
+| 12 + 9 | sync, item | graph_longrange kspace.compute_k_vectors_flat (dependency) |
+| 12 + 10 | item, sync | extensions._pb1d_run_graphs per-graph scalar conversions |
+| 10 + 10 | nonzero, index | occ_head.forward: (node_z == z).nonzero() per element |
+| 10 | sync | graph_longrange energy._pbc_energy_batch (dependency) |
+| 9 | item | loss.forward |
+| 53 + 49 | item, sync | no enclosing frame recorded |
+
+The backward's 300 nonzero / 257 index per step are the autograd of the
+same boolean-mask indexing (index backward = index_put through nonzero),
+so removing the masks in the forward removes them too.
+
+FIX 2 (value-identical, all by construction): _g_rot / _g_rot_prime / the
+zero-field write as torch.where on a safe operand (same per-element
+arithmetic, no gather/scatter); newton: one float per iteration plus one
+per line-search trial, linalg.solve_ex(check_errors=False) with a single
+info check per solve; fixsol: one batched .tolist() per step; interp3
+offsets cached per device; _gaussian_1d with a Python float sigma (same
+double arithmetic); _pb1d_run_graphs per-graph scalars read with one
+.tolist() before the loop; backend diagnostics read with one stack().tolist().
+Left alone: graph_longrange (dependency), occ_head (10/step), batch.to.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
