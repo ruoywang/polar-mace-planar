@@ -2553,6 +2553,42 @@ per-frame times in this single-GPU script (old 2.2 / 0.8 / 3.2 s, new
 timing job 3437394 (c301-003, a different node from the two earlier
 timing jobs -- to be read with that caveat) and the sync count 3437395.
 
+### fix 2 timing: a SMALL gain  (job 3437394, c301-003 -- a different node from 3437065 / 3437217 on c301-002; 07:29:03 -> 07:39:13, wall 610 s; code 83f3832)
+
+Same footing (B epoch-39 state, epoch 40, 3 ranks, timers on).
+Validation loss 0.84561918 (0.84561902 / 0.84561921 / 0.84561925 before:
+identical within the CUDA floor); every other printed digit equal.
+
+| phase (steps 101-200, 20-step windows, ms) | fix 1 (3437217, c301-002) | fix 1 + 2 (3437394, c301-003) |
+|---|---|---|
+| data_den3d | 1-2 | 2-3 |
+| data_solv3d | 33-97 | 32-91 |
+| fwd (energy + force derivative) | 461-747 | 438-640 |
+| loss_fn | 38-317 | 34-283 |
+| bwd | 691-794 | 662-761 |
+| opt | 5-6 | 5-7 |
+| step total | 1463-1715 | 1402-1565 |
+
+Accounting: step mean 2.10 -> 1.93 s (max 89 -> 76 s, first step); n_outer
+7.75 both. Wall: start-up to first step 101 s (job 07:29:03 -> training
+07:30:44; density preload 17 s at 916 MiB/s with 8 threads, baseline 27 s)
+against 17.7 min with the single-thread preload and 2.0 min for the
+baseline job without any preload; training epoch 415 s (fix 1: 449 s,
+baseline 1222 s); validation 25 s (27 / 118); whole 1-epoch job 610 s
+(1599 / 2034). RSS 35.54 GiB (peak 43.96), read_bytes 3.24 GiB (the
+solvent3d attach), both unchanged.
+
+READING: the sync removals bought about 4-9% of the step (1463-1715 ->
+1402-1565 ms) -- a different node, so part of that may be the node; the
+count of syncs was a clue, not the time (as the user said). The remaining
+step is backward 0.66-0.76 s, forward 0.44-0.64 s, loss 0.03-0.28 s,
+solvent3d attach 0.03-0.09 s. Next question, from the launch table: where
+do the ~20 000 kernel launches per step come from, and which phase is
+launch-bound (GPU microseconds per launch) -- being attributed from the
+trace now. cuequivariance is NOT installed in this environment (the log
+says so at every start): the e3nn tensor products run as many small fx-
+generated elementwise kernels.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
