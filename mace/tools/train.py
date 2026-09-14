@@ -657,6 +657,7 @@ def train_one_epoch(
         _be = getattr(_raw, "_pb1d_backend", None)
         _t_sum = _t_max = 0.0; _n = 0; _no = []
         _miss0 = int(getattr(_be, "_bl_miss", 0)) if _be is not None else 0
+        _io0 = _proc_io()   # this process's file-read counters at epoch start (loader workers are separate processes)
         # parameter tracking (read-only): |w| at epoch start/end, |dw|, mean |grad|
         # for the name prefixes in MACE_TRACK_PARAM_PREFIXES -- does a new input
         # channel actually take part in learning?
@@ -709,7 +710,25 @@ def train_one_epoch(
             if _no:
                 _msg += (f", pb1d n_outer mean {sum(_no)/len(_no):.2f} max {max(_no)}"
                          + (f" at-cap {sum(1 for x in _no if x >= _cap)}/{len(_no)}" if _cap else ""))
+            _io1 = _proc_io()
+            if _io0 and _io1:
+                _msg += (f", rank-0 process file reads this epoch: read_bytes {(_io1['read_bytes'] - _io0['read_bytes']) / 2**30:.2f} GiB"
+                         f" rchar {(_io1['rchar'] - _io0['rchar']) / 2**30:.2f} GiB")
             logging.info(_msg)
+
+
+def _proc_io() -> Dict[str, int]:
+    """/proc/self/io counters (rchar = bytes requested by read calls, read_bytes = bytes
+    fetched from storage). Read-only accounting; {} where unavailable."""
+    try:
+        out = {}
+        with open("/proc/self/io") as fh:
+            for line in fh:
+                k, v = line.split(":")
+                out[k.strip()] = int(v)
+        return out
+    except Exception:
+        return {}
 
 
 def take_step(
@@ -734,7 +753,9 @@ def take_step(
     start_time = time.time()
     t0 = tick()
     batch = batch.to(device)
+    t0a = tick()   # timing only: split of the data phase (to device / density-3d sample files / solvent3d sample files)
     attach_density_3d_samples_to_batch(batch, loss_fn)
+    t0b = tick()
     attach_solvent3d_samples_to_batch(batch, loss_fn)
     batch_dict = batch.to_dict()
     t1 = tick()
@@ -774,7 +795,8 @@ def take_step(
         acc = take_step.__dict__.setdefault("_timing_acc", {})
         n = acc.get("_n", 0) + 1
         acc["_n"] = n
-        for key, val in (("data", t1 - t0), ("fwd", phases.get("fwd", 0.0)),
+        for key, val in (("data", t1 - t0), ("data_dev", t0a - t0), ("data_den3d", t0b - t0a), ("data_solv3d", t1 - t0b),
+                         ("fwd", phases.get("fwd", 0.0)),
                          ("loss_fn", phases.get("loss", 0.0)),
                          ("bwd", phases.get("bwd", 0.0)), ("opt", t3 - t2)):
             acc[key] = acc.get(key, 0.0) + val
