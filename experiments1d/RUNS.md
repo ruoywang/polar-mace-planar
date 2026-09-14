@@ -2534,6 +2534,25 @@ local_field_factor forward AND its implicit backward on 3050 fields
 NiN44), 628 (its neutral pair) and 339 (charged NiN88): energy, full-
 derivative forces, n_outer and rms_last -- job 3437392.
 
+### fix 2 GPU equivalence: PASSED  (job 3437392, c301-001; audits/code_equivalence_fix2_o3437392.txt)
+
+Epoch-56 branch model, LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12, single
+frames, energy + full-derivative forces:
+
+| sid | atoms | E (eV) | old-vs-old floor |dE| / max|dF| | new-vs-old |dE| / max|dF| | n_outer |
+|---|---|---|---|---|---|
+| 28 (charged NiN44) | 207 | -1309.74222277 | 5.9e-10 / 1.25e-8 | 3.2e-10 / 1.39e-8 | 9 = 9 |
+| 628 (neutral pair) | 207 | -1304.64380644 | 5.5e-12 / 1.9e-11 | 1.8e-12 / 3.8e-11 | 7 = 7 |
+| 339 (charged NiN88) | 339 | -1953.59207782 | 4.1e-12 / 2.6e-12 | 0.0 / 1.1e-12 | 9 = 9 |
+
+The new code differs from the old by no more than the old code differs
+from itself (CUDA non-determinism, sid 28 being the noisy one at 1e-8 in
+forces); Newton iteration counts equal; rms_last at the 1e-12 floor. The
+per-frame times in this single-GPU script (old 2.2 / 0.8 / 3.2 s, new
+2.0 / 0.74 / 3.1 s) are NOT the training-step measurement -- that is the
+timing job 3437394 (c301-003, a different node from the two earlier
+timing jobs -- to be read with that caveat) and the sync count 3437395.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
