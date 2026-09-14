@@ -714,6 +714,7 @@ def train_one_epoch(
             if _io0 and _io1:
                 _msg += (f", rank-0 process file reads this epoch: read_bytes {(_io1['read_bytes'] - _io0['read_bytes']) / 2**30:.2f} GiB"
                          f" rchar {(_io1['rchar'] - _io0['rchar']) / 2**30:.2f} GiB")
+            _msg += _proc_mem()
             logging.info(_msg)
 
 
@@ -729,6 +730,20 @@ def _proc_io() -> Dict[str, int]:
         return out
     except Exception:
         return {}
+
+
+def _proc_mem() -> str:
+    """', host RSS x GiB (peak y)' from /proc/self/status; '' where unavailable."""
+    try:
+        vals = {}
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith(("VmRSS", "VmHWM")):
+                    k, v = line.split(":")
+                    vals[k] = int(v.split()[0]) / 2**20
+        return f", host RSS {vals['VmRSS']:.2f} GiB (peak {vals['VmHWM']:.2f})"
+    except Exception:
+        return ""
 
 
 def take_step(

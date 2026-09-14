@@ -503,10 +503,16 @@ class Density3DGridTargets:
             t1 = _time.time()
             rho, lattice, valid_iz = self._load(sid)
             valid_iz = np.asarray(valid_iz, dtype=np.int64)
+            # EXPLICIT COPY (user review 2026-09-14): np.ascontiguousarray of an
+            # already-contiguous memmap slice returns a VIEW that still shares
+            # the file mapping, so the pages would still be faulted in per
+            # step. np.array(copy=True) allocates process memory; checked below.
             if valid_iz.size and valid_iz.size == int(valid_iz[-1] - valid_iz[0]) + 1 and bool((np.diff(valid_iz) == 1).all()):
-                sub = np.ascontiguousarray(rho[int(valid_iz[0]):int(valid_iz[-1]) + 1])   # one contiguous region
+                sub = np.array(rho[int(valid_iz[0]):int(valid_iz[-1]) + 1], dtype=np.float32, copy=True, order="C")   # one contiguous region, sequential read
             else:
-                sub = np.ascontiguousarray(rho[valid_iz])
+                sub = np.array(rho[valid_iz], dtype=np.float32, copy=True, order="C")
+            if np.shares_memory(sub, rho) or not sub.flags.owndata or not sub.flags.c_contiguous:
+                raise RuntimeError(f"density3d preload: sid {sid} is not an independent RAM copy")
             self._ram[sid] = (sub, np.asarray(lattice, dtype=np.float64), valid_iz, int(rho.shape[0]))
             self._cache.pop(sid, None)   # drop the memmap; the RAM copy is what sample_points uses
             n_new += 1
@@ -516,9 +522,17 @@ class Density3DGridTargets:
                 t_max, sid_max = dt, sid
             if (i + 1) % 100 == 0:
                 log(f"density3d preload: {i + 1}/{len(todo)} grids, {n_bytes / 2**30:.2f} GiB, {_time.time() - t0:.0f} s")
-        log(f"density3d: sampled planes of {n_new} grids held in RAM ({n_bytes / 2**30:.2f} GiB, "
+        rss = ""
+        try:
+            with open("/proc/self/status") as fh:
+                for line in fh:
+                    if line.startswith(("VmRSS", "VmHWM")):
+                        k, v = line.split(":"); rss += f" {k} {int(v.split()[0]) / 2**20:.2f} GiB"
+        except Exception:
+            pass
+        log(f"density3d: sampled planes of {n_new} grids copied into RAM ({n_bytes / 2**30:.2f} GiB, "
             f"{_time.time() - t0:.0f} s; slowest file {t_max:.2f} s, sid {sid_max}); "
-            f"{len(self._ram)} grids resident")
+            f"{len(self._ram)} grids resident; process{rss}")
 
     def _load(self, sample_id: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         sample_id = int(sample_id)
