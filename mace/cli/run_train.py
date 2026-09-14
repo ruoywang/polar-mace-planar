@@ -1294,6 +1294,21 @@ def run(args) -> None:
         )
 
     loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole)
+    # density-3d grids: hold the sampled planes of every train/valid frame in
+    # RAM once (measured 2.2-3.0 s per step of memmap page faults otherwise;
+    # values identical). MACE_DENSITY3D_NO_PRELOAD=1 keeps the memmap path.
+    _dt = getattr(loss_fn, "density_3d_targets", None)
+    if _dt is not None and hasattr(_dt, "preload") and not os.environ.get("MACE_DENSITY3D_NO_PRELOAD"):
+        _sids = []
+        for _hc in head_configs:
+            _col = getattr(_hc, "collections", None)
+            if _col is None:
+                continue
+            for _cfg in list(_col.train) + list(getattr(_col, "valid", []) or []):
+                _sid = _cfg.properties.get("sample_id", None)
+                if _sid is not None:
+                    _sids.append(int(np.asarray(_sid).reshape(-1)[0]))
+        _dt.preload(_sids, log=logging.info)
     args.avg_num_neighbors = get_avg_num_neighbors(head_configs, args, train_loader, device)
     # fixed convention (user decision 2026-09-13): 0.5 A, never fitted, never
     # supervised. The start-up fit re-read every solvated training grid (5-12

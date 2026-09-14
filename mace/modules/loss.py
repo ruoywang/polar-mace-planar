@@ -470,9 +470,55 @@ class Density3DGridTargets:
         self._cache: OrderedDict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = (
             OrderedDict()
         )
+        # RAM copies of the SAMPLED planes (rho[valid_iz]) filled by preload():
+        # sid -> (sub [n_valid_planes, ny, nx] float32, lattice, valid_iz, nz)
+        self._ram: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray, int]] = {}
 
     def __contains__(self, sample_id: int) -> bool:
         return int(sample_id) in self.entries
+
+    def preload(self, sample_ids, log=print) -> None:
+        """Hold the sampled planes of these grids in process RAM (2026-09-14).
+
+        Measured in the training step (timing_B, job 3437065): the per-step
+        memmap fancy-index of 1024 random points cost 2.2-3.0 s of a 5.0-5.9 s
+        step and fetched 36 MB per step from storage through page faults, for
+        4 KB of values. sample_points only ever touches the planes listed in
+        valid_iz (176-177 of 500 here, contiguous), so one sequential read of
+        those planes per file at start-up (19 MB per frame, about 14 GB per
+        rank for 720 frames) replaces the random faults. Values, indices and
+        the RNG stream are unchanged: sample_points draws the same linear
+        index, maps it to the same (plane, iy, ix) and reads the same float32
+        from sub[plane] == rho[valid_iz[plane]]. MACE_DENSITY3D_NO_PRELOAD=1
+        restores the memmap path."""
+        import time as _time
+        t0 = _time.time()
+        n_new = 0
+        n_bytes = 0
+        t_max = 0.0
+        sid_max = -1
+        todo = [int(s) for s in sample_ids]
+        todo = [s for s in dict.fromkeys(todo) if s in self.entries and s not in self._ram]
+        for i, sid in enumerate(todo):
+            t1 = _time.time()
+            rho, lattice, valid_iz = self._load(sid)
+            valid_iz = np.asarray(valid_iz, dtype=np.int64)
+            if valid_iz.size and valid_iz.size == int(valid_iz[-1] - valid_iz[0]) + 1 and bool((np.diff(valid_iz) == 1).all()):
+                sub = np.ascontiguousarray(rho[int(valid_iz[0]):int(valid_iz[-1]) + 1])   # one contiguous region
+            else:
+                sub = np.ascontiguousarray(rho[valid_iz])
+            self._ram[sid] = (sub, np.asarray(lattice, dtype=np.float64), valid_iz, int(rho.shape[0]))
+            self._cache.pop(sid, None)   # drop the memmap; the RAM copy is what sample_points uses
+            n_new += 1
+            n_bytes += sub.nbytes
+            dt = _time.time() - t1
+            if dt > t_max:
+                t_max, sid_max = dt, sid
+            if (i + 1) % 100 == 0:
+                log(f"density3d preload: {i + 1}/{len(todo)} grids, {n_bytes / 2**30:.2f} GiB, {_time.time() - t0:.0f} s")
+        log(f"density3d: sampled planes of {n_new} grids held in RAM ({n_bytes / 2**30:.2f} GiB, "
+            f"{_time.time() - t0:.0f} s; slowest file {t_max:.2f} s, sid {sid_max}); "
+            f"{len(self._ram)} grids resident")
 
     def _load(self, sample_id: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         sample_id = int(sample_id)
@@ -521,8 +567,14 @@ class Density3DGridTargets:
             raise ValueError(
                 "density_3d_samples must be > 0 when density_3d_file is a full-grid manifest"
             )
-        rho, lattice, valid_iz = self._load(sample_id)
-        nz, ny, nx = rho.shape
+        ram = self._ram.get(int(sample_id))
+        if ram is not None:
+            sub, lattice, valid_iz, nz = ram
+            rho = None
+            ny, nx = sub.shape[1], sub.shape[2]
+        else:
+            rho, lattice, valid_iz = self._load(sample_id)
+            nz, ny, nx = rho.shape
         n_valid = int(valid_iz.size) * ny * nx
         if n_points > n_valid:
             raise ValueError(
@@ -543,7 +595,7 @@ class Density3DGridTargets:
             ]
         )
         points = frac @ lattice
-        rho_ref = rho[iz, iy, ix]
+        rho_ref = sub[plane, iy, ix] if rho is None else rho[iz, iy, ix]   # identical values: sub[plane] == rho[valid_iz[plane]]
         return (
             torch.as_tensor(points, dtype=dtype, device=device),
             torch.as_tensor(rho_ref, dtype=dtype, device=device),
