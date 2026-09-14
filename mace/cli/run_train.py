@@ -1295,9 +1295,13 @@ def run(args) -> None:
 
     loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole)
     args.avg_num_neighbors = get_avg_num_neighbors(head_configs, args, train_loader, device)
-    args.solvent_center_mean_shift = _fit_train_solvent_center_mean_shift(
-        args, head_configs, z_table
-    )
+    # fixed convention (user decision 2026-09-13): 0.5 A, never fitted, never
+    # supervised. The start-up fit re-read every solvated training grid (5-12
+    # min per start) to return 0.4487 for this set; the value enters
+    # comp_center_init and solv_center on every forward, so it is a convention
+    # of the model, not a data statistic.
+    args.solvent_center_mean_shift = 0.5
+    logging.info("solvent_center_mean_shift fixed at 0.5 Å (constant in code; no fit, no supervision)")
     args.fermi_level_baseline = _fit_train_fermi_level_baseline(args, head_configs)
 
     # Model

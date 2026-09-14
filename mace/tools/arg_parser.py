@@ -1541,12 +1541,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "every other parameter, moment, scheduler and RNG stream resumes",
     )
     parser.add_argument(
-        "--solvent_center_mean_shift_fixed", type=float, default=None,
-        help="use this solvent_center_mean_shift (Angstrom) and skip the start-up "
-        "fit over the training densities (5-12 min per start on BeeGFS; the fit "
-        "is deterministic for a given training set -- 0.448714 for NiN-mix800)",
-    )
-    parser.add_argument(
         "--resume_reset_plateau", action="store_true", default=False,
         help="with --resume_state: the loss scale changes (new loss weights), so "
         "reset what compares losses across epochs -- best validation loss, "
