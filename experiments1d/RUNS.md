@@ -2694,10 +2694,10 @@ the same node.
 Reading so far (ref only; branch not yet started): with energy_weight 1000
 the warm-up forces run 20-40% above B's at equal energy (E dominates the
 loss); once PB is on, energy is 32-45% better than B at every epoch
-(7.23 vs 11.5-12.2 meV/atom by epoch 28) and the force gap closes from
-+7% (epoch 20) to +23% at epoch 28 (48.2 vs 39.3)... i.e. forces are worse
-than B by 15-23% in the PB phase at this weight; potential / fermi track
-B. The paired charging energy is not in these numbers -- evaluation at the
+(7.23 vs 11.5-12.2 meV/atom by epoch 28) while the forces stay worse than
+B's: +7% at epoch 20 (73.1 vs 68.0), +16% at 24 (53.1 vs 45.7), +23% at 28
+(48.2 vs 39.3) -- the gap widens as B's forces keep falling; potential /
+fermi track B. The paired charging energy is not in these numbers -- evaluation at the
 end.
 
 NEXT (largest first): the .item()/sync sites -- a call-site counter
