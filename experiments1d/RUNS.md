@@ -2700,6 +2700,50 @@ B's: +7% at epoch 20 (73.1 vs 68.0), +16% at 24 (53.1 vs 45.7), +23% at 28
 fermi track B. The paired charging energy is not in these numbers -- evaluation at the
 end.
 
+### w1000_branch, segment 1 (epochs 0-29)  (job 3438143, c301-002, 17:10 -> 18:46; code 98624ae) -- both arms at the same point
+
+Budget stop after epoch 29 (5684 s, last epoch 326 s), as for ref. Steps
+0.41-0.50 s (warm-up) / 1.42-1.49 s (PB), CUDA peak 23.96 GiB, n_outer
+7.7-7.9, cap 0 in the PB phase. Epochs 0-1 of the branch arm were far
+off (E 119 / 82.6 meV/atom, F 7768 / 874 meV/A, potential 28.3 / 11.2 eV
+against ref's 21.3 / 56.7, 853 / 769, 1.09 / 1.07) and the warm-up planar
+solve hit its cap on every step of epoch 2 (n_outer 13, at-cap 213/213);
+from epoch 2 on the arm is back in ref's range and the solver converges
+(n_outer 8, cap 0). Same seed, only the zero-init branch added: its output
+weight gets a gradient from step 1 (hidden activations x dL/dE) and the
+early trajectory diverges -- recorded as fact, not attributed further.
+
+E meV/atom / F meV/A / potential eV / fermi eV, validation:
+
+| epoch | w1000_ref | w1000_branch | fast-B (weight 1) |
+|---|---|---|---|
+| 0 | 21.32 / 853.0 / 1.086 / 1.050 | 119.42 / 7768.2 / 28.283 / 28.337 | 108.23 / 650.0 / 2.347 / 2.342 |
+| 1 | 56.71 / 768.5 / 1.075 / 1.065 | 82.61 / 873.8 / 11.218 / 10.142 | 86.03 / 566.1 / 6.065 / 5.857 |
+| 2 | 37.88 / 652.0 / 1.969 / 1.861 | 38.01 / 815.7 / 2.064 / 1.871 | 38.29 / 476.7 / 2.304 / 2.551 |
+| 5 | 26.93 / 184.4 / 1.639 / 1.639 | 24.21 / 163.7 / 1.805 / 1.800 | 31.77 / 152.9 / 1.613 / 1.626 |
+| 10 | 21.15 / 175.6 / 1.565 / 1.604 | 21.02 / 195.7 / 1.702 / 1.734 | 25.13 / 130.1 / 1.434 / 1.463 |
+| 15 | 18.80 / 190.5 / 1.492 / 1.529 | 19.91 / 181.6 / 1.492 / 1.522 | 20.52 / 148.9 / 1.401 / 1.441 |
+| 19 | 18.92 / 180.6 / 1.520 / 1.564 | 18.42 / 132.2 / 1.471 / 1.496 | 19.39 / 162.2 / 1.345 / 1.386 |
+| 20 | 11.13 / 73.1 / 0.287 / 0.298 | 11.61 / 86.9 / 0.326 / 0.337 | 16.27 / 68.0 / 0.290 / 0.314 |
+| 21 | 10.36 / 60.8 / 0.264 / 0.246 | 10.49 / 72.5 / 0.273 / 0.252 | 12.88 / 52.2 / 0.213 / 0.206 |
+| 22 | 9.76 / 56.6 / 0.207 / 0.203 | 9.24 / 66.7 / 0.231 / 0.195 | 12.31 / 47.3 / 0.181 / 0.161 |
+| 23 | 9.55 / 55.2 / 0.224 / 0.200 | 8.85 / 64.6 / 0.195 / 0.165 | 11.98 / 46.0 / 0.229 / 0.182 |
+| 24 | 8.60 / 53.1 / 0.205 / 0.182 | 8.66 / 62.2 / 0.189 / 0.169 | 12.15 / 45.7 / 0.236 / 0.191 |
+| 25 | 8.28 / 52.3 / 0.192 / 0.172 | 8.57 / 60.5 / 0.184 / 0.161 | 11.93 / 42.8 / 0.189 / 0.145 |
+| 26 | 7.85 / 50.4 / 0.178 / 0.158 | 7.64 / 57.7 / 0.168 / 0.140 | 11.75 / 41.7 / 0.147 / 0.120 |
+| 27 | 7.25 / 50.0 / 0.187 / 0.165 | 7.29 / 56.5 / 0.219 / 0.167 | 11.71 / 41.2 / 0.147 / 0.119 |
+| 28 | 7.23 / 48.2 / 0.164 / 0.151 | 7.35 / 55.2 / 0.191 / 0.156 | 11.77 / 40.5 / 0.150 / 0.118 |
+| 29 | 6.65 / 47.1 / 0.173 / 0.158 | 7.26 / 54.0 / 0.226 / 0.182 | 11.50 / 39.2 / 0.147 / 0.106 |
+
+At epoch 29: ref E 6.65 / F 47.1, branch E 7.26 / F 54.0, B 11.50 / 39.3.
+In the PB phase the two w1000 arms have the same energy within 0.1-0.7
+meV/atom (branch better at 22-24 and 26, ref better at 25 and 27-29) and
+the branch's forces are 12-20% worse than ref's at every PB epoch (54.0 vs
+47.1 at 29); both have better energy (-35..-45%) and worse forces (+20..+37%)
+than weight-1 B. The paired charging energy -- the quantity this arm was
+built for -- is not in these curves; evaluation on the per-epoch EMA
+checkpoints once the runs are done (and at 29 for a first look).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
