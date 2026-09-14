@@ -1942,16 +1942,25 @@ Decision rule agreed with the user: if segment 3's epochs are still far
 slower than the good-node reference (~8-9 min), stop the run and fix
 speed first.
 
-### solvent_center_mean_shift is now a constant, 0.5 A  (user decision 2026-09-13; code 5087a5d)
+### solvent_center_mean_shift is now a constant, 0.5 A  (user decision 2026-09-13; code 5087a5d) -- CORRECTED READING
 
 Never fitted, never supervised, not a parameter: run_train sets 0.5 in
-code. This removes the 5-12 min start-up fit (and the interim
---solvent_center_mean_shift_fixed argument of c5abba2). The value is used
-on every forward (comp_center_init, extensions.py 2151; solv_center, 2834),
-so it is a model convention that changes values slightly against the
-fitted 0.448714 -- and ab_head_nn_e1000 switches from 0.448714 (segments 1-2,
-epochs 40-46) to 0.5 from segment 3 (epoch 47) on. The +5 evaluation
-(epoch 44) is unaffected; the +10 / +20 evaluations carry the change.
+code; the 5-12 min start-up fit and the interim argument (c5abba2) are
+gone. WHERE IT IS USED, read from the code (extensions.py): the shift
+enters comp_center_init = z_e50 + shift (2148) and solv_center (2832).
+comp_center_init goes (a) into _pb1d_stage1 as planar_center, consumed
+only by _pb1d_planar_result -- the WARM-UP branch (1712) and the fallback
+taken when a PB solve is unhealthy (1841; "PB1D-FALLBACK" lines, none in
+any of these runs); (b) into the slab-correction features (2193), where
+on the PB path solvent_mu_override = the solved solvent dipole makes the
+centre argument unused; the gaussian-feature calls with the centre (2215,
+2228) are the non-PB branch. solv_center is overridden by the solved
+layer_mean on the pb1d path (2884/2889). The PB solve's own dipole
+reference center_z is the cell mid-height (pb1d_backend 485), not this
+value. So with healthy solves the constant affects the WARM-UP epochs
+only -- the user's reading; my two earlier statements that it changes
+full-PB values were wrong and are withdrawn. ab_head_nn_e1000's switch
+from 0.448714 to 0.5 at epoch 47 therefore changes nothing in its numbers.
 
 Also recorded: the density-loader change (a4f0bd2) was reverted (0a3c5f0)
 after a second measurement contradicted the first (13 s vs 0.7 s per cold
