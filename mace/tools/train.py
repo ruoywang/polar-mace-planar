@@ -717,7 +717,8 @@ def train_one_epoch(
                 if _n == _prof_skip:
                     _prof = torch.profiler.profile(
                         activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-                        record_shapes=False, profile_memory=False, with_stack=False)
+                        record_shapes=False, profile_memory=False,
+                        with_stack=bool(os.environ.get("MACE_PROFILE_STACK")))   # stacks: who issues the syncs / launches
                     _prof.__enter__()
                     logging.info(f"profiler: started after {_n} warm-up steps, {_prof_steps} steps to record")
                 elif _prof is not None and _n == _prof_skip + _prof_steps:
@@ -856,6 +857,33 @@ def _write_profile(prof, n_steps: int, rank: int) -> None:
     with open(os.path.join(out_dir, f"rank{rank}_summary.txt"), "w") as fh:
         fh.write(txt + "\n")
     print(txt, flush=True)
+    if os.environ.get("MACE_PROFILE_STACK"):
+        # WHO issues the host-device syncs and the kernel launches: key averages
+        # grouped by the Python stack (8 frames), for the sync ops and for the
+        # most frequently launched ops.
+        def _own(frame):
+            return "/mace/" in frame or "graph_longrange" in frame
+        def _stack(e):
+            st = [f for f in (e.stack or []) if "site-packages/torch" not in f]
+            own = [f for f in st if _own(f)]
+            return " <- ".join(x.split("/mace/")[-1] if "/mace/" in x else x.split("/")[-1] for x in (own or st)[:6])
+        kas = prof.key_averages(group_by_stack_n=8)
+        sync_names = ("aten::item", "aten::_local_scalar_dense", "aten::nonzero", "aten::masked_select", "aten::index", "aten::_to_copy", "aten::copy_")
+        out = [f"SYNC SITES BY STACK rank {rank} (per step over {n_steps} steps): op | count/step | self cpu ms/step | stack (mace frames)"]
+        rows = sorted([e for e in kas if e.key in sync_names], key=lambda e: -e.count)[:60]
+        for e in rows:
+            out.append(f"  {e.key:28s} {e.count / n_steps:8.1f} {e.self_cpu_time_total / 1e3 / n_steps:8.2f}  {_stack(e)[:230]}")
+        out.append("")
+        out.append(f"TOP LAUNCH SITES BY STACK rank {rank}: op | count/step | cpu total ms/step | device ms/step | stack")
+        skip = ("aten::item", "aten::_local_scalar_dense", "aten::empty", "aten::empty_strided", "aten::empty_like", "aten::resize_", "aten::as_strided", "aten::view", "aten::_unsafe_view", "aten::reshape", "aten::expand", "aten::t", "aten::transpose", "aten::permute", "aten::detach", "aten::alias", "aten::unsqueeze", "aten::squeeze", "aten::select", "aten::slice", "aten::to", "aten::contiguous", "aten::result_type", "aten::is_nonzero", "aten::lift_fresh", "aten::size", "aten::stride", "aten::numel")
+        rows = sorted([e for e in kas if e.key.startswith("aten::") and e.key not in skip and e.count >= 5 * n_steps], key=lambda e: -e.count)[:70]
+        for e in rows:
+            out.append(f"  {e.key:28s} {e.count / n_steps:8.1f} {e.cpu_time_total / 1e3 / n_steps:8.2f} {_dev(e) / 1e3 / n_steps:8.2f}  {_stack(e)[:210]}")
+        txt2 = "\n".join(out)
+        with open(os.path.join(out_dir, f"rank{rank}_stacks.txt"), "w") as fh:
+            fh.write(txt2 + "\n")
+        if rank == 0:
+            print(txt2, flush=True)
 
 
 def _proc_mem() -> str:
