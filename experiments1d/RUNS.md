@@ -1884,6 +1884,35 @@ watch; potential improves, fermi fluctuates. The branch's gradient is now
 reaches it. Whether the charging bias moves is the epoch-44 evaluation
 (3436274, queued behind the continuations 3436119 / 3436120).
 
+### ab_head_nn_e1000, segment 2 (epochs 44-46)  (job 3436473; a first continuation 3436119 failed at the optimizer load -- fixed in 363c34e)
+
+The first continuation attempt failed at optimizer.load_state_dict: the
+first segment had appended the branch's parameters as their own group
+"resume_new_params", while a continuation rebuilt the optimizer with those
+parameters spread over the builder's groups. Fix: continuation segments
+pass the same --resume_new_param_prefix; the loader removes the branch
+parameters from the builder's groups, appends the group first when the
+state already carries it, then loads everything (the branch's Adam moments
+and EMA shadows included: "moments restored (continuation); all present
+in the state"). Segment 2 resumed at epoch 44 with lowest_loss 1.00009497
+(= epoch 43), preload 66 s, again on node c301-003: step time 7.8 / 6.6 /
+5.4 s with stalls of 246 s (step 982) and 120 s (step 1468) -- all
+day-time stalls on this node, none in the night runs; the data phase
+(3D-density grid mmap + solvent3D points, 32-entry LRU) is the remaining
+per-step file access. Wall 5318 s for 3 epochs; state at 46 (next 47).
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV | branch |w| -> | mean |grad| |
+|---|---|---|---|---|---|---|---|
+| 44 | 0.985 | 8.27 | 39.59 | 0.142 | 0.108 | 19.85 | 6.15 |
+| 45 | 0.957 | 6.87 | 40.53 | 0.148 | 0.113 | 21.39 | 6.36 |
+| 46 | 0.949 | 6.59 | 39.88 | 0.135 | 0.121 | 22.80 | 6.31 |
+
+Energy RMSE keeps falling (11.27 -> 6.59 over 7 epochs) with the force
+RMSE flat at 40 (+13% over the start) and potential / fermi at the
+start's level; the branch's weights grow steadily (6.6 -> 22.8), its
+gradient stays at 6.2-6.6. The +5 structural evaluation (epoch 44, job
+3436652) runs next; segments 3 and 4 (3436653, 3436688) follow.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
