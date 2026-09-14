@@ -2198,6 +2198,76 @@ start-up, each rank copying a third; then every rank memmaps the RAM copy,
 so the sampled indices, values and RNG stream are unchanged). Test = the same
 timing job with the switch on, same node class, same tables. Then item 2.
 
+### fix 1 implemented, then CORRECTED after the user's code review  (fcb9369 -> e2ef133)
+
+Implementation: Density3DGridTargets.preload(sample_ids) reads the sampled
+planes rho[valid_iz] (177 of 500, contiguous 40..216, 19 MB per frame) of
+every train + valid frame once at start-up; sample_points reads the RAM
+copy with the same linear index -> same (plane, iy, ix) -> the same float32
+(sub[plane] == rho[valid_iz[plane]]); MACE_DENSITY3D_NO_PRELOAD=1 keeps the
+memmap path. Login-node check: 5 sids x 2 seeds, points / values / RNG state
+identical; the RAM path takes 1.9 ms per call.
+
+USER'S CORRECTION (2026-09-14 03:00): fcb9369 used
+np.ascontiguousarray(rho[start:stop]); for an already-contiguous memmap
+slice that returns a VIEW sharing the file mapping -- no copy, the pages are
+still faulted in per step, and the "14 GB" bookkeeping proved nothing.
+Reproduced on a small file: shares_memory True, owndata False, base memmap.
+e2ef133: np.array(..., dtype=float32, copy=True, order="C") plus a hard check
+(shares_memory False, owndata, C-contiguous, else RuntimeError); the preload
+line and the epoch accounting now print the process RSS and peak. Re-check:
+RSS +0.10 GiB for 5 copies (expected 0.093), owndata True, sampling
+identical. The first verification job (3437199, view version) was cancelled
+while queued; 3437217 runs the corrected code.
+
+Acceptance for fix 1 (user): identical sampling (epoch-40 validation line
+0.84561902), read_bytes per epoch, step mean / slow steps / epoch wall WITH
+the preload time counted, host RSS per rank (3 ranks x ~14 GB on top of the
+3 x 9 GB baseline cache -- if that is too much, share one read-only copy
+between the ranks). The 1.9 ms is the sampling call only, not a training
+speed.
+
+### timing caveat and the plan for items 2-6 (user, 2026-09-14)
+
+The phase labelled "fwd" in STEPTIMING is model.forward() WITH the force
+derivative F = -dE/dR inside it (compute_force=True -> autograd.grad in
+get_outputs), and solvated frames run stage 1 and stage 2 with grid terms
+that are partly recomputed under checkpointing; so "fwd minus the 130 ms PB
+solve" is NOT the network. The earlier sentence "the rest is MACE trunk,
+stage 1, stage-2 grid terms" is withdrawn as an attribution.
+
+Priorities set by the user: (1) density read -- done above, verify; (2) the
+three ranks waiting for each other (different data times, 207 vs 339 atoms,
+several separate count all_reduce calls in the loss: loss.py 61/2228/2346,
+solvent3d.py 481, plus DDP's gradient all_reduce with
+find_unused_parameters=True); (3) too many CPU-GPU syncs (.item()/.cpu()/
+float(tensor): 12 sites in pb1d_backend, 23 in loss, 16 in extensions; the
+per-step gradient tracking in the loop); (4) grid work done twice (density
+built for PB and rebuilt in stage 2; checkpoint recompute in backward);
+(5) two linear solves on one J_c in GRAD_PASSES=2 (factor once, solve twice
+if it matters); (6) out-of-epoch costs (start-up, validation, saves).
+Not to do: more DataLoader workers (the attach runs in the main process
+after the loader), switching off all recomputation (OOM on 40 GB recorded),
+switching off find_unused_parameters blindly, optimizer/lr/branch changes
+(6 ms), precision/grid/sample reductions (separate accuracy question).
+
+Diagnostic (19ca48d, exp_speed/job_profile.sh, run dir exp_speed/profile_e56):
+the real training entry, 3 ranks, the e1000 model WITH the branch and its
+loss settings, resumed from the epoch-56 segment state (same samples, global
+batch, RNG streams); 10 warm-up steps, then torch.profiler (CPU + CUDA) over
+20 steps per rank, then stop before validation. record_function markers:
+step/data_to_device, step/data_density3d_attach, step/data_solvent3d_attach,
+step/forward_energy_and_forces, model/force_derivative (inside
+compute_forces), pb1d/1_baseline..5_solve1d, pb1d/stage2_energy, step/loss,
+step/backward, step/grad_clip, step/optimizer, step/ema, epoch/grad_tracking,
+epoch/metrics_log. Summary per rank and per step: marker cpu/device totals;
+counts and times of collectives, host-device syncs (aten::item,
+_local_scalar_dense, cudaStreamSynchronize), DtoH copies, FFT ops, linalg
+solve/LU, checkpoint recompute; node facts (cpus, memory, OMP threads, CPU
+binding per rank, GPU clocks/power before and after). Job 3437244 queued.
+Only the top items get a fix; the final acceptance is one full epoch with
+the effective fixes and the profiler off.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
