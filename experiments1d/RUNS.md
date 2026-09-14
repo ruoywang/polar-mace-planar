@@ -2589,6 +2589,44 @@ trace now. cuequivariance is NOT installed in this environment (the log
 says so at every start): the e3nn tensor products run as many small fx-
 generated elementwise kernels.
 
+### kernel launches per step, by phase  (rank 0 trace of job 3437386, 4 full steps, pre-fix-2 code; audits/profile_e56_rank0_launches_by_phase.txt)
+
+35 658 kernel + memcpy launches per step (main thread 11 565, autograd
+thread 24 093) for 1328 ms of GPU kernel time in a 2060 ms step (profiler
+on): 37 us of GPU work per launch on average.
+
+| phase | launches/step | CPU span ms | GPU ms | us GPU per launch |
+|---|---|---|---|---|
+| forward, energy part (fwd minus force derivative) | 9 640 | 432 | 180 | 18.7 |
+|   of which pb1d 5_solve1d | 2 790 | 78 | 29 | 10.2 |
+|   of which pb1d 4_closure | 2 157 | 84 | 67 | 31.2 |
+|   of which pb1d 2_assembly | 18 | 3 | 6 | 336 |
+|   remainder (MACE trunk, stage 1/2, grid terms) | ~4 600 | ~267 | ~78 | ~17 |
+| model/force_derivative | 7 256 | 355 | 226 | 31.2 |
+| step/loss | 1 134 | 254 | 218 | 192 |
+| step/backward | 16 838 | 882 | 699 (438 NCCL) | 41.5 (15.5 without NCCL) |
+| step/optimizer | 246 | 13 | 1 | 5.4 |
+
+READING: the step is launch-bound, not compute-bound. The energy forward
+issues 9 640 launches for 180 ms of GPU work and takes 432 ms of CPU span;
+its non-PB remainder has 78 ms of kernels in a 267 ms span. The force
+derivative and the backward run 24 000 launches on the autograd thread.
+The PB 1-D solver alone issues about 5 000 launches per step on 500-point
+vectors (10 us of GPU work per launch in the Newton loop). Fix 2 removed
+host-device syncs, not launches, hence its small effect. The three levers
+that remain all change the kernels, not only the bookkeeping:
+(a) cuequivariance for the e3nn tensor products (not installed here; the
+    log says so every start) -- fused kernels, results equal to rounding,
+    NOT bit-identical;
+(b) CUDA graphs / torch.compile for the trunk -- same caveat;
+(c) the PB 1-D Newton loop under no_grad on 500-point vectors: fewer, larger
+    ops or a CPU solve for the converged phi with the two differentiable
+    corrections kept on the device -- value-identical in principle (same
+    arithmetic in a different place), to be checked like fix 2.
+Plus the cross-rank wait (280-440 ms per step), which shrinks with the
+step's CPU jitter. Which of these to do is the user's call; none is a
+bookkeeping change.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the

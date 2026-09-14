@@ -1,0 +1,14 @@
+steps 4; total kernel/memcpy launches per step 35658; GPU kernel time per step 1328 ms; step wall 2060 ms
+marker                             launches/step  span ms  GPU ms us GPU per launch
+step/forward_energy_and_forces             16896      787     406              24.0
+model/force_derivative                      7256      355     226              31.2
+pb1d/2_assembly                               18        3       6             336.1
+pb1d/4_closure                              2157       84      67              31.2
+pb1d/5_solve1d                              2790       78      29              10.2
+pb1d/stage2_energy                 (no events)
+step/loss                                   1134      254     218             192.2
+step/backward                              16838      882     699              41.5
+step/data_solvent3d_attach                     8        6       0               2.0
+step/optimizer                               246       13       1               5.4
+energy part (fwd minus force deriv)          9640      432     180
+launches per step by thread: {'main': 11565, 'other': 24093}
