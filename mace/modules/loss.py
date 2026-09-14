@@ -703,11 +703,12 @@ def _cells_from_batch(ref: Batch, num_graphs: int) -> torch.Tensor:
 
 
 def _gaussian_1d(z_grid: torch.Tensor, centers: torch.Tensor, sigma: float) -> torch.Tensor:
-    sigma_t = z_grid.new_tensor(float(max(sigma, 1.0e-12)))
+    # Python-float sigma (2026-09-14): new_tensor(sigma) was a synchronous
+    # host-to-device copy per call (13 per training step); dividing by a
+    # Python double gives the same IEEE result as dividing by a 0-dim tensor.
+    sig = float(max(sigma, 1.0e-12))
     dz = z_grid[:, None] - centers[None, :]
-    return torch.exp(-0.5 * torch.square(dz / sigma_t)) / (
-        math.sqrt(2.0 * math.pi) * sigma_t
-    )
+    return torch.exp(-0.5 * torch.square(dz / sig)) / (math.sqrt(2.0 * math.pi) * sig)
 
 
 def _gaussian_d1_1d(z_grid: torch.Tensor, centers: torch.Tensor, sigma: float) -> torch.Tensor:

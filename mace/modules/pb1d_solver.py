@@ -205,26 +205,37 @@ class Solver1D:
         phi = phi0
         resid, n_b, n_ion = self.residual(phi, phi_sol, s_ion, B, nb_off, q_sol)
         rms = self.resid_rms(resid)
+        # host reads (2026-09-14): ONE float per iteration (the convergence
+        # test) and one per line-search trial, instead of four; the same
+        # numbers decide the same branches. linalg.solve_ex without the
+        # per-call singularity check (that check is a host-device sync);
+        # the info flags are tested once after the loop.
+        rms_f = float(rms)
         n_outer = 0
-        self._last_rms = float(rms)
+        self._last_rms = rms_f
+        info_bad = None
         for outer in range(max_outer + 1):
-            if float(rms) < tol and outer >= 1:
+            if rms_f < tol and outer >= 1:
                 break
             n_outer = outer + 1
             dion = ion_density_derivative(phi, s_ion, self.params, self.volume)
             J = B + torch.diag(dion) - self.L0
-            dphi = torch.linalg.solve(J, -resid)
+            dphi, _info = torch.linalg.solve_ex(J, -resid, check_errors=False)
+            info_bad = (_info != 0) if info_bad is None else (info_bad | (_info != 0))
             alpha = 1.0
             for _ in range(7):
                 trial = phi + alpha * dphi
                 t_resid, t_nb, t_nion = self.residual(trial, phi_sol, s_ion, B, nb_off, q_sol)
                 t_rms = self.resid_rms(t_resid)
-                if float(t_rms) <= float(rms) or alpha <= 1.0 / 64.0:
-                    phi, resid, rms = trial, t_resid, t_rms
+                t_rms_f = float(t_rms)
+                if t_rms_f <= rms_f or alpha <= 1.0 / 64.0:
+                    phi, resid, rms, rms_f = trial, t_resid, t_rms, t_rms_f
                     n_b, n_ion = t_nb, t_nion
                     break
                 alpha *= 0.5
-            self._last_rms = float(rms)
+            self._last_rms = rms_f
+        if info_bad is not None and bool(info_bad.any()):
+            raise RuntimeError("pb1d newton: torch.linalg.solve reported a singular Jacobian (info != 0)")
         import os as _os
         if _os.environ.get("MACE_PB1D_SOLVE_DEBUG"):
             print(f"SOLVEDBG n_outer={n_outer}/{max_outer} rms={float(rms):.3e} "
@@ -301,7 +312,8 @@ class Solver1D:
             w_vec = mask * (C.transpose(0, 1) @ ((self.z - center_z) / nz))
             J_c = J + torch.outer(g1, w_vec)
 
-        dphi = torch.linalg.solve(J_c, -resid)
+        dphi, _info0 = torch.linalg.solve_ex(J_c, -resid, check_errors=False)   # info checked once below (no per-solve sync)
+        _infos = [_info0]
         phi = phi_star + dphi
         # grad_passes >= 2 (2026-09-13): further differentiable Newton
         # corrections on the LIVE phi with the same frozen J_c. One pass
@@ -322,7 +334,11 @@ class Solver1D:
             cvdip_k = cdipol_potential_1d(nz, self.lz, c_unit * torch.clamp(dip_k, -20.0, 20.0), indmin, dev)
             phi_sol = cvhar_z + cvdip_k
             resid_k, _, _ = self.residual(phi, phi_sol, s_ion, B, nb_off, q_sol)
-            phi = phi + torch.linalg.solve(J_c, -resid_k)
+            _dphi_k, _info_k = torch.linalg.solve_ex(J_c, -resid_k, check_errors=False)
+            _infos.append(_info_k)
+            phi = phi + _dphi_k
+        if bool(torch.stack(_infos).ne(0).any()):
+            raise RuntimeError("pb1d solve: torch.linalg.solve reported a singular coupled Jacobian (info != 0)")
         n_b = B @ phi + nb_off
         n_ion = ion_density_values(phi, s_ion, self.params, self.volume)
         with torch.no_grad():
@@ -368,6 +384,10 @@ class Solver1D:
             dip_z = val_ion_dipole_z + dsol_z - qsol_cache * center_z
             dip_in = torch.clamp(dip_z, -20.0, 20.0)
             res = dip_in - dip_tmp
+            # one batched host read per fixsol step for the scalar tests below
+            # (was up to five separate float() calls); same values
+            _abs_dres, _abs_res, _abs_dip_in = torch.stack(
+                [torch.abs(res - res_old), torch.abs(res), torch.abs(dip_in)]).tolist()
             # secant acceleration on the SCALAR fix point d = g(d) once two
             # (d, res) pairs exist: superlinear, ~8 total steps vs ~40 damped
             # (converged loop measured 216 ms — dominated by per-step syncs).
@@ -376,12 +396,12 @@ class Solver1D:
             # (exact numpy-parity path).
             use_secant = (
                 fixsol_converge and _step > 2
-                and float(torch.abs(res - res_old)) > 1.0e-14
+                and _abs_dres > 1.0e-14
             )
             if use_secant:
                 d_sec = dip_tmp - res * (dip_tmp - _d_prev) / (res - res_old)
                 # trust region: reject wild extrapolations
-                if float(torch.abs(d_sec - dip_tmp)) < 10.0 * float(torch.abs(res)) + 1.0:
+                if float(torch.abs(d_sec - dip_tmp)) < 10.0 * _abs_res + 1.0:
                     d_mix = d_sec
                 else:
                     use_secant = False
@@ -408,7 +428,7 @@ class Solver1D:
             if _step >= fixsol_steps:
                 if not fixsol_converge or _step >= fixsol_max_steps:
                     break
-                if float(torch.abs(res)) <= 1.0e-7 * max(1.0, float(torch.abs(dip_in))):
+                if _abs_res <= 1.0e-7 * max(1.0, _abs_dip_in):
                     break
         # A residual value alone cannot distinguish "converged on the
         # criterion" from "hit the iteration cap and reported the last

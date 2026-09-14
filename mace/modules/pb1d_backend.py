@@ -473,10 +473,8 @@ class PB1DBackend:
                 q_tot if q_tot is not None else torch.tensor(total_charge, dtype=dt, device=device),
             )
             delta_p = head.delta_p(coeff, w_s, u_s, length_z)
-            delta_stats = {
-                "c_absmax": float(coeff.detach().abs().max()),
-                "dp_rms": float(delta_p.detach().pow(2).mean().sqrt()),
-            }
+            _c_absmax_f, _dp_rms_f = torch.stack([coeff.detach().abs().max(), delta_p.detach().pow(2).mean().sqrt()]).tolist()
+            delta_stats = {"c_absmax": _c_absmax_f, "dp_rms": _dp_rms_f}
         else:
             delta_p = torch.zeros_like(prior_s)
         p_off = prior_s + delta_p
@@ -521,9 +519,11 @@ class PB1DBackend:
         # health gate reject EVERY neutral solvated frame -> silent
         # planar fallback throughout the s3d gate and 500-ep production)
         q_abs_t = torch.abs(rho_ion_z).sum() * dz * area
-        if float(torch.abs(q_ion_t)) > 1.0e-3:
+        # one host read for the two health tests (was two syncs); same values
+        _q_ion_abs_f, _q_abs_f = torch.stack([torch.abs(q_ion_t.detach()), q_abs_t.detach()]).tolist()
+        if _q_ion_abs_f > 1.0e-3:
             layer_mean_t = ion_dipole_t / q_ion_t
-        elif float(q_abs_t) > 1.0e-9:
+        elif _q_abs_f > 1.0e-9:
             layer_mean_t = (torch.abs(rho_ion_z) * z).sum() * dz * area / q_abs_t
         else:
             layer_mean_t = q_ion_t.detach() * 0.0 + 0.5 * length_z
@@ -558,12 +558,14 @@ class PB1DBackend:
                 "e_raw": float(e_bl_raw.detach()),
             }
 
+        # diagnostics: one batched host read instead of three float() calls
+        _q_ion_f, _lm_f, _mu_f = torch.stack([q_ion_t.detach(), layer_mean_t.detach(), mu_bound_t.detach()]).tolist()
         self.last_diagnostics = {
             "rms_last": float(out["rms_last"]),
             "n_outer": int(out["n_outer"]),
-            "q_ion": float(q_ion_t.detach()),
-            "layer_mean": float(layer_mean_t.detach()),
-            "mu_bound": float(mu_bound_t.detach()),
+            "q_ion": _q_ion_f,
+            "layer_mean": _lm_f,
+            "mu_bound": _mu_f,
             **delta_stats,
         }
         if self._timing_on:
@@ -853,9 +855,9 @@ class PB1DBackend:
             "rho_bound_z": rho_bound_z,
             "rho_layer_z": rho_ion_z + rho_bound_z,
             "height": length_z,
-            "q_ion": float(q_ion_t.detach()),
-            "layer_mean": float(layer_mean_t.detach()),
-            "mu_bound": float(mu_bound_t.detach()),
+            "q_ion": _q_ion_f,
+            "layer_mean": _lm_f,
+            "mu_bound": _mu_f,
             "q_ion_t": q_ion_t,
             "ion_dipole_t": ion_dipole_t,
             "layer_mean_t": layer_mean_t,

@@ -699,7 +699,7 @@ def train_one_epoch(
                 for _pref, _tr in _track.items():
                     _gs = [prm.grad for prm in _tr["params"] if prm.grad is not None]
                     if _gs:
-                        _tr["gsum"] += float(torch.sqrt(sum((g.double() ** 2).sum() for g in _gs))); _tr["gn"] += 1
+                        _tr["gsum"] = _tr["gsum"] + torch.sqrt(sum((g.double() ** 2).sum() for g in _gs)); _tr["gn"] += 1   # stays on the device; read once per epoch
             if rank == 0:
                 with torch.autograd.profiler.record_function("epoch/metrics_log"):
                     logger.log(opt_metrics)
@@ -731,7 +731,7 @@ def train_one_epoch(
                 _w0 = float(torch.sqrt(sum((w.double() ** 2).sum() for w in _tr["w0"])))
                 _w1 = float(torch.sqrt(sum((prm.detach().double() ** 2).sum() for prm in _tr["params"])))
                 _dw = float(torch.sqrt(sum(((prm.detach() - w).double() ** 2).sum() for prm, w in zip(_tr["params"], _tr["w0"]))))
-                _mg = _tr["gsum"] / max(1, _tr["gn"])
+                _mg = float(_tr["gsum"]) / max(1, _tr["gn"])
                 logging.info(f"epoch {epoch} param track {_pref}: |w| {_w0:.4e} -> {_w1:.4e}, |dw| {_dw:.4e}, mean |grad| {_mg:.4e} over {_tr['gn']} steps, {sum(prm.numel() for prm in _tr['params'])} params")
             _cap = int(getattr(_be, "max_outer", 0) or 0) if _be is not None else 0
             _pk = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else float("nan")

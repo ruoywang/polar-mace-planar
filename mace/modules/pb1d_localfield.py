@@ -23,23 +23,26 @@ import torch
 
 
 def _g_rot(u: torch.Tensor) -> torch.Tensor:
-    out = torch.ones_like(u)
+    # torch.where on a safe operand instead of boolean-mask gather/scatter
+    # (2026-09-14): the mask path issued nonzero + index + index_put per call
+    # -- each a host-device round trip -- about 120 times per training step
+    # inside the fixed-point loop, and again in the backward. Same
+    # per-element arithmetic on the same values -> identical results.
     small = u < 2.0e-4
-    us = u[~small]
-    out[~small] = 3.0 * (us - torch.tanh(us)) / (us * us * torch.tanh(us))
-    return out
+    us = torch.where(small, torch.ones_like(u), u)
+    val = 3.0 * (us - torch.tanh(us)) / (us * us * torch.tanh(us))
+    return torch.where(small, torch.ones_like(u), val)
 
 
 def _g_rot_prime(u: torch.Tensor) -> torch.Tensor:
     """d g / d u, analytic; series -2u/15 below the small-u switch."""
-    out = -2.0 * u / 15.0
+    series = -2.0 * u / 15.0
     small = u < 1.0e-2
-    us = u[~small]
+    us = torch.where(small, torch.ones_like(u), u)
     t = torch.tanh(us)
     tp = 1.0 - t * t
     num = 3.0 * ((1.0 - tp) * us * us * t - (us - t) * (2.0 * us * t + us * us * tp))
-    out[~small] = num / (us * us * t) ** 2
-    return out
+    return torch.where(small, series, num / (us * us * t) ** 2)
 
 
 class _LocalFieldFactorFn(torch.autograd.Function):
@@ -93,7 +96,7 @@ class _LocalFieldFactorFn(torch.autograd.Function):
                     prev_diff = diff
                 else:
                     f = new
-            f[zero] = hi
+            f = torch.where(zero, torch.full_like(f, hi), f)   # no masked write (nonzero + index_put)
         ctx.linear = False
         ctx.scalars = (alpha_pol, alpha0_rot, nu, beta, lo, hi)
         ctx.save_for_backward(e_mag, f)

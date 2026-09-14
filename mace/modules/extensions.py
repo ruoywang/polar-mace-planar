@@ -1667,18 +1667,23 @@ class PolarMACE(ScaleShiftMACE):
         # kept as a diagnostic and for the slab-energy wiring)
         s3d_mu_delta = positions.new_zeros(num_graphs)
 
+        # per-graph scalars read from the device ONCE (2026-09-14; was five
+        # to six .item() round trips per graph): same values, same branches
+        _H_l = torch.stack([_axis_box_length(cells[g], axis) for g in range(num_graphs)]).detach().tolist()
+        _slab_l = slab_mask.detach().view(-1).tolist()
+        _nat_l = torch.bincount(data["batch"], minlength=num_graphs).tolist()
+        _solv_l = solvated_rows.detach().view(-1).tolist() if solvated_rows is not None else None
+        _sid_l = sample_ids.detach().view(-1).tolist() if sample_ids is not None else None
+        _tq_l = total_charge_g.detach().view(-1).tolist()
         for g in range(num_graphs):
             cell_g = cells[g]
-            H_g = float(_axis_box_length(cell_g, axis).item())
+            H_g = float(_H_l[g])
             atom_mask = data["batch"] == g
-            if not bool(slab_mask[g].item()) or not bool(torch.any(atom_mask).item()):
+            if not bool(_slab_l[g]) or _nat_l[g] == 0:
                 continue
-            if solvated_rows is not None and float(solvated_rows.view(-1)[g].item()) < 0.5:
+            if _solv_l is not None and float(_solv_l[g]) < 0.5:
                 continue  # unsolvated frame: no solvent anywhere (all rows stay zero)
-            sid = (
-                int(sample_ids[g].detach().cpu().item())
-                if sample_ids is not None else None
-            )
+            sid = int(_sid_l[g]) if _sid_l is not None else None
             # fresh_stage1 (2026-08-12): no cross-epoch profile cache — stage 1
             # always does a fresh prior-only solve on the pre-recursion
             # density (the former first-encounter path becomes the only
@@ -1769,7 +1774,7 @@ class PolarMACE(ScaleShiftMACE):
                     positions=pos_g,
                     cell=cell_g,
                     z_valence=zval_g,
-                    total_charge=float(total_charge_g[g].item()),
+                    total_charge=float(_tq_l[g]),
                     sample_id=sid,
                     radial_coeffs=coeffs_g,
                     sigmas=self.atomic_density_sigmas,

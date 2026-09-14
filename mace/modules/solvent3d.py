@@ -44,9 +44,27 @@ def _get(ref, key: str):
 # backend under no_grad; everything here is supervision-side, detached)
 # ---------------------------------------------------------------------------
 
+_INTERP_CONST = {}
+
+
+def _interp_consts(shape, device, dtype):
+    """Grid-size and corner-offset tensors, built once per (shape, device, dtype):
+    torch.tensor(...) on the device is a synchronous host-to-device copy and
+    was issued nine times per call (27 syncs per training step)."""
+    key = (tuple(shape), str(device), dtype)
+    hit = _INTERP_CONST.get(key)
+    if hit is None:
+        n = torch.tensor(shape, device=device, dtype=dtype)
+        offs = {(dx, dy, dz): torch.tensor([dx, dy, dz], device=device)
+                for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)}
+        hit = (n, n.long(), offs)
+        _INTERP_CONST[key] = hit
+    return hit
+
+
 def _interp3_periodic(field: torch.Tensor, frac: torch.Tensor) -> torch.Tensor:
     """Trilinear periodic interpolation; field [nx,ny,nz], frac [P,3]."""
-    n = torch.tensor(field.shape, device=frac.device, dtype=frac.dtype)
+    n, n_long, offs = _interp_consts(field.shape, frac.device, frac.dtype)
     g = frac * n
     i0 = torch.floor(g).long()
     w = g - i0.to(frac.dtype)
@@ -54,7 +72,7 @@ def _interp3_periodic(field: torch.Tensor, frac: torch.Tensor) -> torch.Tensor:
     for dx in (0, 1):
         for dy in (0, 1):
             for dz in (0, 1):
-                idx = (i0 + torch.tensor([dx, dy, dz], device=i0.device)) % n.long()
+                idx = (i0 + offs[(dx, dy, dz)]) % n_long
                 ww = ((w[:, 0] if dx else 1 - w[:, 0])
                       * (w[:, 1] if dy else 1 - w[:, 1])
                       * (w[:, 2] if dz else 1 - w[:, 2]))
