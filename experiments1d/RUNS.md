@@ -2440,6 +2440,39 @@ extensions.py 1672-1679 (per-graph slab / solvated / sid / total_charge
 conversions); scatter.py:44 (6, int(index.max()) + 1 for the scatter
 size); train.py:702 (3, my gradient tracking).
 
+### op launch table, 5 steps with Python stacks  (job 3437386, c301-001; audits/profile_e56_rank0_launch_table.txt)
+
+The stack grouping attached no Python frames to the sync ops (item,
+_local_scalar_dense, nonzero, index all came back with an empty stack:
+they are issued from inside torch library code and, as the trace's thread
+ids show, partly from the autograd thread). Per-step op counts on rank 0
+(CPU total ms includes the wait inside the op):
+
+| op | launches/step | CPU total ms | GPU ms |
+|---|---|---|---|
+| aten::mul | 7837 | 122 | 209 |
+| aten::copy_ | 4544 | 204 | 59 |
+| aten::fill_ / zero_ / zeros / clone | 2761 / 2007 / 1463 / 1367 | 28 / 26 / 31 / 29 | 26 / 20 / 13 / 25 |
+| aten::add_ / add / sub / div | 2014 / 1746 / 1223 / 1859 | 20 / 26 / 16 / 29 | 56 / 29 / 25 / 40 |
+| aten::slice_backward / select_backward | 965 / 353 | 37 / 14 | 19 / 5 |
+| aten::nonzero | 529 | 363 | 51 |
+| aten::index | 484 | 251 | 47 |
+| aten::_index_put_impl_ / index_put_ / index_put | 539 / 441 / 76 | 161 / 111 / 22 | 66 / 44 / 1 |
+| aten::arange | 692 | 15 | 4 |
+| aten::bmm / mm / einsum | 430 / 581 / 104 | 11 / 15 / 11 | 224 / 18 / 59 |
+| aten::_fft_r2c / c2c / c2r | 151 / 97 / 69 | 11 / 5 / 7 | 14 / 14 / 11 |
+
+Reading: the boolean-mask indexing family (nonzero + index + index_put,
+about 1500 launches per step) costs about 890 ms of CPU-side time per step
+INCLUDING the host-device round trips that nonzero forces (it has to know
+how many elements matched before the next kernel can be sized) -- this is
+the single largest CPU-side item, larger than the Python-level float()
+calls (234 per step). slice_backward 965 and select_backward 353 per step
+say the forward slices tensors piecewise ~1300 times per step (Python
+loops over planes / graphs / components) and the backward pays a zeros +
+copy for each. The real compute is in bmm (224 ms GPU, 430 launches) and
+mul (209 ms, 7837 launches -- 27 microseconds each, launch-bound).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
