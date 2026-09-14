@@ -2627,6 +2627,20 @@ Plus the cross-rank wait (280-440 ms per step), which shrinks with the
 step's CPU jitter. Which of these to do is the user's call; none is a
 bookkeeping change.
 
+### sync count after fix 2  (job 3437395, c301-001, 5 steps)
+
+Python-level host-device syncs per step, ranks 0 / 1 / 2: 234 / 198 / 277
+-> 173 / 150 / 199 (-26%). pb1d_solver 109 -> 60 (what is left: one rms
+float per Newton iteration, one per line-search trial, one info test and
+one batched .tolist() per solve, the secant trust-region float), backend
+17.6 -> 8, localfield 24 (the every-8-iterations convergence test, kept),
+solvent_charge_layer 28 and loss 18.6 unchanged (not touched), extensions
+15.8 -> 16.6 (the same reads, now six .tolist() per step instead of
+per-graph .item()). The mask-indexing removal (nonzero + index + index_put,
+~1500 launches and ~500 syncs per step in the profiler's count) is not
+visible to this Python-level counter; its effect is inside the timing
+above.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
