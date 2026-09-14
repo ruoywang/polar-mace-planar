@@ -2268,6 +2268,67 @@ binding per rank, GPU clocks/power before and after). Job 3437244 queued.
 Only the top items get a fix; the final acceptance is one full epoch with
 the effective fixes and the profiler off.
 
+### fix 1 ACCEPTED: timing_B with the RAM copy  (job 3437217, c301-002 -- the same node as the baseline 3437065; code e2ef133 = memmap-copy preload, single thread; 06:11:46 -> 06:38:25, wall 1599 s)
+
+Same footing as the baseline: B epoch-39 state, epoch 40, 3 ranks, all
+timers on. Load at start 0.98 (baseline 0.71).
+
+1. SAMPLING IDENTICAL: epoch 40 validation loss 0.84561925 against the
+   baseline job's 0.84561902 and the fast-B run's 0.84561921 (3e-7
+   relative, the CUDA non-determinism floor); E 11.00, F 34.99, potential
+   0.1566, fermi 0.1066, density_3d 0.03106, solvent3d 0.001202/0.000101,
+   potential_1d 0.12597, rhob_1d 0.000200 -- every printed digit equal.
+2. DISK WAIT GONE: data_den3d 2391-3036 ms -> 1-2 ms per step on every rank.
+   rank-0 read_bytes per epoch 7.67 -> 3.24 GiB; the remainder is the
+   solvent3d attach (2 x 5.7 MB materialised per step, LRU 32 -> about
+   2.3 GiB per epoch) plus small reads.
+3. STEP TIME, steady state (20-step windows, steps 101-200, ms):
+
+| phase | baseline 3437065 (3 ranks) | fix 1 3437217 (3 ranks) |
+|---|---|---|
+| data_den3d | 2194-3036 | 1-2 |
+| data_solv3d | 49-145 | 33-97 |
+| fwd (energy + force derivative) | 1039-1918 | 461-747 |
+| loss_fn | 38-337 | 38-317 |
+| bwd | 690-794 | 691-794 |
+| opt | 5-7 | 5-6 |
+| step total | 5029-5866 | 1463-1715 |
+
+   Accounting: step mean 5.72 -> 2.10 s, max 75.5 -> 89.1 s (the first
+   step in both), n_outer 7.75 both, CUDA peak 23.92 GiB both. PB backend
+   forward 130 -> 124 ms/graph (same within its drift).
+   The forward also fell (1.0-1.9 -> 0.46-0.75 s) although nothing in it
+   changed; no attribution -- the profiler run separates energy, force
+   derivative, PB phases and stage 2.
+4. WALL CLOCK, split as the user asked:
+   - start-up to first step: baseline 2.0 min (job 02:16:08 -> training
+     02:17:38); fix 1 17.7 min (06:11:46 -> 06:29:26), of which the density
+     preload 932 s (720 grids, 15.05 GiB, slowest file 10.96 s, three ranks
+     reading at once = 16.5 MiB/s per rank) and the baseline preload 43 s.
+   - training epoch (213 steps): 1222 s -> 449 s (-773 s).
+   - validation (80 frames, density and solvent3d attach included):
+     118 s -> 27 s (-91 s).
+   - save: seconds in both.
+   - whole 1-epoch job: 2034 s -> 1599 s (-435 s), i.e. even a single
+     epoch already repays this slow preload; per further epoch the saving
+     is 864 s. A 6000 s dev segment held about 4 epochs before and holds
+     about 10 with this preload (rough division of the budget by the
+     measured per-epoch times; the next job measures the faster preload).
+5. HOST MEMORY: rank-0 RSS 35.54 GiB at the epoch end (peak 43.96), i.e.
+   15 GiB density planes + 9 GiB baseline cache + the rest; three ranks
+   about 107 GiB (peak about 132) on a 256 GiB node. Fits; sharing one
+   read-only copy between the ranks would return about 48 GiB if needed.
+
+The preload itself was then rewritten (b9c4552, threaded direct read(),
+element-wise check against the memmap for the first three files; 16 grids
+re-verified on the login node, 124 MiB/s there) -- its compute-node time is
+measured by the profiler job 3437244, which starts from that commit.
+
+REMAINING PER-STEP COST, this node, after fix 1: backward 0.69-0.79 s
+(45-50% of the step, unchanged by anything so far), forward 0.46-0.75 s,
+loss 0.04-0.32 s, solvent3d attach 0.03-0.10 s. What is inside the forward
+and the backward is the profiler's job.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
