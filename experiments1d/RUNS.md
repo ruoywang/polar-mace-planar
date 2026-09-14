@@ -2015,6 +2015,44 @@ Energy RMSE 6.4 -> 5.2-5.8 (start 11.27), force RMSE back to 37.5 (start
 Segment 4 (3436688, c301-001) started 23:36; +10 evaluation (epoch 49,
 3436911) and segment 5 (3436981) queued.
 
+### ab_head_nn_e1000, segment 4 (epochs 52-56) -- THE LAST SEGMENT  (job 3436688, c301-001, 23:36:01 -> 00:59:40, wall 4972 s; code d2af051 at start)
+
+User decision 2026-09-14 01:00 (while epoch 55 was running): "不需要跑完59了，
+跑完这个任务就简单分析结果并且开始解决速度问题" -- the run ends with this
+segment; segment 5 (3436981) cancelled while queued; the epoch-59 watcher
+stopped. The run therefore covers epochs 40-56 (17 of the planned 20).
+
+Start-up of this segment: job 23:36:01, first Python log line 23:37:24,
+model built 23:37:44, IN EFFECT 23:37:48, then the baseline preload (~1 min)
+-- about 3 min to the first step against the 9-15 min of segments 1-2 (the
+5-12 min density fit is gone, constant 0.5 in code).
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV | step s mean / max | branch |w| -> |
+|---|---|---|---|---|---|---|---|
+| 52 | 0.899 | 5.40 | 37.78 | 0.142 | 0.112 | 4.42 / 134.9 | 25.09 |
+| 53 | 0.891 | 4.92 | 37.65 | 0.127 | 0.103 | 3.38 / 7.1 | 25.57 |
+| 54 | 0.884 | 4.54 | 37.22 | 0.133 | 0.104 | 4.57 / 10.6 | 26.03 |
+| 55 | 0.864 | 4.07 | 36.62 | 0.132 | 0.096 | 4.63 / 11.2 | 26.25 |
+| 56 | 0.865 | 4.34 | 36.47 | 0.133 | 0.102 | 5.02 / 15.3 | 26.35 |
+
+Budget stop after 56 (4934 s elapsed, last epoch 1096 s); state at 56 (next
+57). One slow step (134.9 s) in epoch 52, none after; n_outer 7.72-7.79, cap
+0; baseline mmap reads 0. Step-time means 3.4-5.0 s on this node against
+2.06-2.37 s measured for the same fast-B configuration on a quiet node
+(ab_head_ref, epochs 41-44) -- the gap is what the timing job below is for.
+Branch |w| 24.5 -> 26.3 with |dw| shrinking 1.22 -> 0.33 per epoch while the
+mean gradient stays 6.0-6.1: the branch is still moving, more slowly.
+
+Validation over the whole run (start = B epoch 39: E 11.27 meV/atom, F 35.14
+meV/A): E 14.24 (40) -> 4.34 (56), F 43.5 (40) -> 36.47 (56, +3.8% against
+the start), potential 0.133 (start 0.142), fermi 0.102 (start ~0.107).
+Structural numbers (per-state energies, paired charging energy) come from
+the evaluations: epoch 49 (3436911, queued before this segment ended) and
+epoch 56 (3437064, submitted 01:01 with the standard footing: val complete,
+train every 6th frame). The train-stride-1 evaluation for the offline
+E + a*dN_e fit is dropped with the shortened plan; the fit uses the stride-6
+train frames (107) of the epoch-56 file.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
