@@ -2400,6 +2400,21 @@ READING (rank 0; the shares are what the user asked for, not causes):
    correction passes can save at most a fraction of the 28 ms LU part --
    small, as anticipated.
 
+Ranks 1 and 2 from their traces (same 20 steps): step wall 2021 / 2017 ms;
+GPU kernels 1351 / 1299 ms of which NCCL 395 / 282 -> compute kernels
+956 / 1017 ms (47% / 50%). Rank 0 has the least compute (853) and the most
+waiting (438): the collectives wait 280-440 ms per step on EVERY rank,
+more than the 160 ms spread of compute between ranks -- the rest of the
+waiting is the ranks arriving at each collective at different times
+(CPU-side jitter of a sync-heavy step), not compute imbalance alone.
+Per-rank force derivative 228 / 257 / 273 ms, loss 212 / 167 / 118 ms,
+backward compute (minus NCCL) 240 / 293 / 389 ms of kernels.
+
+Preload on c301-001 (sync-count job 3437375, a node that had not read the
+grids in this job chain since the e1000 segment 4): 720 grids, 15.05 GiB,
+16 s, 940 MiB/s with 8 threads, per file 0.08-1.05 s -- against 932 s for
+the single-thread memmap copy on c301-002.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
