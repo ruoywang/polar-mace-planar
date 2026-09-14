@@ -2053,6 +2053,84 @@ train every 6th frame). The train-stride-1 evaluation for the offline
 E + a*dN_e fit is dropped with the shortened plan; the fit uses the stride-6
 train frames (107) of the epoch-56 file.
 
+### ab_head_nn_e1000, FINAL: start / +5 / +10 / epoch 56  (evaluations 3436652, 3436911, 3437064; EMA weights; val complete = 80 frames / 20 pairs; LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12; full table with every pair in audits/ab_table_e1000_final.txt)
+
+| val | start B39 | +5 (44) | +10 (49) | 56 |
+|---|---|---|---|---|
+| paired dE residual rmse / bias / mean-removed (eV) | 5.324 / +5.264 / 0.794 | 3.317 / +3.262 / 0.601 | 2.452 / +2.408 / 0.466 | 2.037 / +1.995 / 0.408 |
+| charged NiN44 E rmse / bias (meV/atom) | 19.69 / +19.34 | 7.03 / +6.51 | 7.65 / +7.37 | 7.01 / +6.77 |
+| charged NiN88 E rmse / bias | 5.54 / -5.45 | 5.51 / -5.48 | 0.99 / -0.82 | 0.62 / +0.01 |
+| neutral NiN44 E rmse / bias | 6.37 / -6.31 | 9.86 / -9.81 | 4.86 / -4.78 | 3.52 / -3.40 |
+| all 80 frames E rmse / bias | 11.17 / +0.32 | 8.28 / -4.65 | 5.17 / -0.75 | 4.31 / -0.01 |
+| F rmse (meV/A) | 35.4 | 40.0 | 38.0 | 36.7 |
+| F rmse per state 44c / 88c / 44n | 35.5 / 33.3 / 36.3 | 41.0 / 36.6 / 41.0 | 38.0 / 35.7 / 39.0 | 36.8 / 34.6 / 37.7 |
+
+Pair by pair: all 20 residuals shrink monotonically 39 -> 44 -> 49 -> 56
+(largest change pair 28/628: +6.71 -> +2.70 eV; smallest 62/662: +3.66 ->
++1.17). Train (stride 6, 27 pairs) at 56: 2.104 / +2.076 / 0.344 -- the same
+as val, so nothing here is overfitting to the pairs.
+
+JUDGEMENT.
+- Charging bias: 5.26 -> 2.00 eV on val (-62%), still eV-scale, still 83% of
+  the residual is bias (mean-removed 0.41). NOT solved. The fall is slowing:
+  -2.00 eV over epochs 40-44, -0.85 over 45-49, -0.41 over 50-56.
+- Absolute energy: better, not worse -- val E rmse 11.17 -> 4.31 meV/atom,
+  NiN88 charged 5.54 -> 0.62, neutral NiN44 6.37 -> 3.52; charged NiN44
+  19.69 -> 7.01 but it keeps a +6.8 meV/atom offset, and neutral NiN44 keeps
+  -3.4. The pair residual is exactly these two offsets: (6.77 + 3.40) meV/atom
+  x 207 atoms = 2.10 eV.
+- Forces: 35.4 -> 36.7 meV/A (+3.7%) after the +13% excursion at +5; the
+  per-state maxima are unchanged in kind (NiN44 neutral 435 -> 791 max).
+- Usable accuracy: no. A 2 eV error on a 4.7-7.8 eV charging energy is not
+  usable for anything electrochemical; the absolute per-atom numbers are.
+- How much is the weight and how much the branch cannot be separated from
+  this run (no weight-1000 arm without the branch was run); the weight-1
+  branch run moved nothing, so at least the weight was necessary.
+
+OFFLINE E + a*dN_e DIAGNOSTIC (audits/charging_offset_diagnostic.py on the
+epoch-56 file; a fitted on the 107 stride-6 TRAIN energies only, per-atom
+normalised, unit weights; val untouched; full output in
+audits/charging_offset_diagnostic_e56.txt). dN_e = -total_charge per frame
+(continuous, -0.79..-1.38 e in the data) or the per-system mean over charged
+train frames (1.073 e NiN44, 1.112 e NiN88), 0 for neutrals:
+
+| a (eV/e) | val paired dE before -> after | charged NiN44 bias | charged NiN88 bias | neutral |
+|---|---|---|---|---|
+| per-frame -0.967 | 2.037/+1.995/0.408 -> 1.024/+0.982/0.289 | +6.77 -> +1.87 | +0.01 -> -3.13 | unchanged |
+| per-system -0.972 | -> 1.036/+0.952/0.408 | +6.77 -> +1.73 | +0.01 -> -3.18 | unchanged |
+
+Reading: a single per-electron constant now removes only HALF of the pair
+bias, and it buys the NiN44 improvement by pushing NiN88 from 0.0 to -3.1
+meV/atom. The residual is no longer one constant per electron across systems
+(as it was for the original head: a = -5.27 eV/e fitted on pairs removed
+98% of the bias, RUNS 2026-09-10): NiN44 charged frames would need about
+-1.31 eV/e (6.77 meV/atom x 207 / 1.073 e) while NiN88 charged frames need
+0. The same fit on the START file (B39, 214 train frames) gives a = -2.33
+eV/e and 5.32 -> 2.86 eV -- so the weight-1000 training has already absorbed
+the system-independent part; what is left is system-dependent (cell size,
+electron count per atom). The per-frame and per-system conventions differ
+by 0.005 eV/e -- the continuous charge carries no extra information here.
+Consistency: the fit changes the model's dE/dN_e by a, i.e. the implied
+electron chemical potential, by -0.97 eV; the Fermi-level supervision
+(RMSE 0.10 eV) constrains a different quantity (the level's position
+against the reference), so a shift of that size would be visible as a
+systematic Fermi error if the model's energy were exactly the integral of
+its Fermi level -- it is not made to be, so this diagnostic cannot decide
+the consistency question; it is reported, not applied. Nothing goes into
+the model.
+
+NEXT PROPOSAL (not started; user: no training until the speed problem is
+understood). If the branch line is continued: the remaining defect is a
+per-system offset of the charged NiN44 frames (+1.40 eV per frame) against
+neutral NiN44 (-0.70 eV) with NiN88 correct, i.e. the head distinguishes the
+charge state but not the cell -- the natural test is whether the branch's
+structure inputs (64 node scalars) carry the cell size at all (NiN44 vs
+NiN88 have different Ni coverage per area); a per-atom energy that is
+constant across the slab cannot encode "electrons per cell". Before any
+retraining: (1) the speed measurement below; (2) a weight-1000 arm WITHOUT
+the branch for 5 epochs from the same state, so weight and branch are
+separated -- the one control this run lacks.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config

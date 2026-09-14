@@ -1,0 +1,28 @@
+frames: train 107, val 80;  per-system dN_e (mean over charged train frames): {'NiN44': 1.0734333333333215, 'NiN88': 1.1116666666666661}
+
+=== per-frame dN_e = -total_charge: a = -0.9668 eV per electron (fitted on train energies only) ===
+  train: per-state E error (meV/atom) rmse / bias, before -> after
+     charged NiN44 ( 27):   7.26 /  +7.08  ->    2.52 /  +2.06
+     charged NiN88 ( 27):   0.77 /  -0.03  ->    3.35 /  -3.20
+     neutral NiN44 ( 53):   3.39 /  -3.29  ->    3.39 /  -3.29
+  train: paired dE (27 pairs) rmse / bias / mean-removed: 2.1044 / +2.0762 / 0.3436  ->  1.0727 / +1.0384 / 0.2689
+  val: per-state E error (meV/atom) rmse / bias, before -> after
+     charged NiN44 ( 20):   7.01 /  +6.77  ->    2.37 /  +1.87
+     charged NiN88 ( 20):   0.62 /  +0.01  ->    3.26 /  -3.13
+     neutral NiN44 ( 40):   3.52 /  -3.40  ->    3.52 /  -3.40
+  val: paired dE (20 pairs) rmse / bias / mean-removed: 2.0365 / +1.9952 / 0.4082  ->  1.0238 / +0.9821 / 0.2891
+
+=== per-system fixed dN_e: a = -0.9722 eV per electron (fitted on train energies only) ===
+  train: per-state E error (meV/atom) rmse / bias, before -> after
+     charged NiN44 ( 27):   7.26 /  +7.08  ->    2.60 /  +2.03
+     charged NiN88 ( 27):   0.77 /  -0.03  ->    3.31 /  -3.22
+     neutral NiN44 ( 53):   3.39 /  -3.29  ->    3.39 /  -3.29
+  train: paired dE (27 pairs) rmse / bias / mean-removed: 2.1044 / +2.0762 / 0.3436  ->  1.0883 / +1.0326 / 0.3436
+  val: per-state E error (meV/atom) rmse / bias, before -> after
+     charged NiN44 ( 20):   7.01 /  +6.77  ->    2.52 /  +1.73
+     charged NiN88 ( 20):   0.62 /  +0.01  ->    3.24 /  -3.18
+     neutral NiN44 ( 40):   3.52 /  -3.40  ->    3.52 /  -3.40
+  val: paired dE (20 pairs) rmse / bias / mean-removed: 2.0365 / +1.9952 / 0.4082  ->  1.0355 / +0.9517 / 0.4082
+
+NOTE: the correction does not touch forces; it changes dE/dN_e by a (the implied chemical potential),
+so its consistency with the Fermi-level supervision and the energy reference has to be argued separately.
