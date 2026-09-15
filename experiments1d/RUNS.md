@@ -2800,6 +2800,41 @@ meV/atom, neutral bias -0.9, forces +14%. Whatever the branch adds, it has
 not helped so far; the improvement over B is the weight. Both arms still
 have a +3 eV bias to lose and 30 epochs to run; the verdict is at 59.
 
+### w1000_branch, segment 2 (epochs 30-46)  (job 3439240, c301-002, 20:33 -> 22:12) -- both arms at 46
+
+Budget stop after 46 (5843 s). Steps 1.42-1.54 s (first step 106.6 s
+cold, one 10.8 s step in epoch 41), CUDA peak 23.95 GiB, n_outer 7.7-7.9,
+cap 0. Both arms now have the state at 46 (next 47); 13 epochs remain
+each -- one more segment per arm.
+
+E meV/atom / F meV/A / potential eV / fermi eV:
+
+| epoch | w1000_ref | w1000_branch |
+|---|---|---|
+| 30 | 6.58 / 46.0 / 0.148 / 0.137 | 8.17 / 54.4 / 0.192 / 0.163 |
+| 31 | 5.93 / 44.6 / 0.155 / 0.133 | 6.59 / 52.0 / 0.169 / 0.141 |
+| 32 | 5.93 / 44.5 / 0.179 / 0.149 | 5.76 / 49.9 / 0.143 / 0.129 |
+| 33 | 5.74 / 43.3 / 0.154 / 0.130 | 5.40 / 48.4 / 0.143 / 0.123 |
+| 34 | 5.01 / 42.7 / 0.150 / 0.119 | 5.58 / 47.2 / 0.150 / 0.116 |
+| 35 | 5.23 / 42.4 / 0.167 / 0.124 | 5.60 / 47.4 / 0.212 / 0.157 |
+| 36 | 4.95 / 41.8 / 0.155 / 0.127 | 5.46 / 46.1 / 0.165 / 0.131 |
+| 37 | 5.69 / 41.9 / 0.173 / 0.136 | 5.58 / 45.4 / 0.142 / 0.111 |
+| 38 | 4.45 / 40.8 / 0.162 / 0.125 | 5.12 / 44.3 / 0.144 / 0.119 |
+| 39 | 5.56 / 41.6 / 0.153 / 0.115 | 6.25 / 45.9 / 0.211 / 0.176 |
+| 40 | 5.15 / 40.3 / 0.143 / 0.115 | 5.16 / 43.6 / 0.151 / 0.125 |
+| 41 | 4.88 / 39.7 / 0.144 / 0.108 | 5.40 / 43.8 / 0.138 / 0.115 |
+| 42 | 4.95 / 39.2 / 0.134 / 0.108 | 5.10 / 43.4 / 0.155 / 0.127 |
+| 43 | 4.66 / 38.7 / 0.138 / 0.105 | 4.81 / 41.9 / 0.149 / 0.115 |
+| 44 | 4.18 / 38.1 / 0.157 / 0.115 | 4.64 / 41.2 / 0.141 / 0.116 |
+| 45 | 3.73 / 37.5 / 0.137 / 0.104 | 4.81 / 41.4 / 0.163 / 0.126 |
+| 46 | 4.39 / 37.4 / 0.139 / 0.100 | 4.00 / 41.5 / 0.151 / 0.118 |
+
+At 46: ref E 4.39 / F 37.4 / 0.139 / 0.100; branch E 4.00 / F 41.5 /
+0.151 / 0.118. Over 30-46 the branch's energy is within +-0.7 meV/atom of
+ref's (better at 32-33, 40, 46; worse at 31, 34-39, 41-45) and its forces
+are 8-17% worse at every epoch (41.5 vs 37.4 at 46). Paired charging
+energy: evaluation at 59.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
