@@ -2865,6 +2865,22 @@ fermi equal. Against the e1000 fine-tune's endpoint (56: 4.34 / 36.5 /
 0.133 / 0.102): better on all four. The paired charging energy: evaluation
 3440284 (epochs 49 and 59) queued; 39 and 46 for both arms in 3439943.
 
+## PRODUCTION prod500_w1000_ref: 500 epochs, no branch, energy_weight 1000  (user 2026-09-15 "提交一个a100的500epoch的任务先排着队吧，用没有分支的设置"; job 3440435, gpu-a100, 48 h)
+
+Run dir 3-residual_3D/prod500_w1000_ref: the w1000_ref config with
+max_num_epochs 500 (everything else identical: original local-electron
+head, energy_weight 1000 / forces 100, warm-up 20 encounters, seed 123,
+EMA 0.99, lr 0.01, batch 1, save_all_checkpoints True -> 500 x 64 MB of
+EMA checkpoints); job_prod.sh: 3 ranks, LIVE_POS=1 GRAD_PASSES=2
+AREA_EPS=1e-12, density-grid RAM preload, code at 8be6743+ (98624ae code
+tree), segment_time_budget 169200 s (47 h) so the run stops at an epoch
+boundary before the 48 h wall and writes the segment state; a
+continuation (RESUME=...) needs a new production submission. Budget
+arithmetic from the dev runs (20 warm-up epochs at ~90 s, PB epochs at
+~325 s incl. validation): 500 epochs ~ 44 h of training if the node runs
+like c301-001/002 -- inside 47 h with little margin; a slower node means a
+continuation. Submitted 01:57 (queued, Resources).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
