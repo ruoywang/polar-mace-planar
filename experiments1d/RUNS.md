@@ -2744,6 +2744,37 @@ than weight-1 B. The paired charging energy -- the quantity this arm was
 built for -- is not in these curves; evaluation on the per-epoch EMA
 checkpoints once the runs are done (and at 29 for a first look).
 
+### w1000_ref, segment 2 (epochs 30-46)  (job 3439084, c301-002, 18:47 -> 20:26; resumed from the epoch-29 state)
+
+Budget stop after 46 (5792 s; state at 46, next 47; continuation 3439590
+queued). Resume seamless (29: 6.65 / 47.1 -> 30: 6.58 / 46.0); steps
+1.42-1.50 s, first step 80.5 s (cold), no other slow steps; CUDA peak
+23.95 GiB; n_outer 7.7-7.9, cap 0.
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV |
+|---|---|---|---|---|---|
+| 30 | 1.024 | 6.58 | 46.0 | 0.148 | 0.137 |
+| 31 | 1.001 | 5.93 | 44.6 | 0.155 | 0.133 |
+| 32 | 1.009 | 5.93 | 44.5 | 0.179 | 0.149 |
+| 33 | 0.979 | 5.74 | 43.3 | 0.154 | 0.130 |
+| 34 | 0.958 | 5.01 | 42.7 | 0.150 | 0.119 |
+| 35 | 0.965 | 5.23 | 42.4 | 0.167 | 0.124 |
+| 36 | 0.949 | 4.95 | 41.8 | 0.155 | 0.127 |
+| 37 | 0.958 | 5.69 | 41.9 | 0.173 | 0.136 |
+| 38 | 0.927 | 4.45 | 40.8 | 0.162 | 0.125 |
+| 39 | 0.940 | 5.56 | 41.6 | 0.153 | 0.115 |
+| 40 | 0.912 | 5.15 | 40.3 | 0.143 | 0.115 |
+| 41 | 0.904 | 4.88 | 39.7 | 0.144 | 0.108 |
+| 42 | 0.904 | 4.95 | 39.2 | 0.134 | 0.108 |
+| 43 | 0.890 | 4.66 | 38.7 | 0.138 | 0.105 |
+| 44 | 0.879 | 4.18 | 38.1 | 0.157 | 0.115 |
+| 45 | 0.866 | 3.73 | 37.5 | 0.137 | 0.104 |
+| 46 | 0.867 | 4.39 | 37.4 | 0.139 | 0.100 |
+
+At 46: E 4.39, F 37.4, potential 0.139, fermi 0.100 -- energy 2.6x better
+than weight-1 B at its endpoint (11.27 at 39), forces 7% worse than B's
+35.1, potential / fermi equal to B's (0.142 / 0.104).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
