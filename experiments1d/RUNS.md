@@ -2881,6 +2881,34 @@ arithmetic from the dev runs (20 warm-up epochs at ~90 s, PB epochs at
 like c301-001/002 -- inside 47 h with little margin; a slower node means a
 continuation. Submitted 01:57 (queued, Resources).
 
+### w1000_branch COMPLETE: segment 3 (epochs 47-59)  (job 3439917, c301-003, 01:00 -> 02:18) -- both arms finished
+
+E meV/atom / F meV/A / potential eV / fermi eV, validation:
+
+| epoch | w1000_ref | w1000_branch |
+|---|---|---|
+| 47 | 3.92 / 37.5 / 0.150 / 0.106 | 4.19 / 40.5 / 0.146 / 0.113 |
+| 48 | 3.32 / 37.0 / 0.132 / 0.096 | 4.43 / 39.7 / 0.143 / 0.109 |
+| 49 | 3.25 / 36.5 / 0.130 / 0.090 | 3.69 / 39.2 / 0.135 / 0.101 |
+| 50 | 3.59 / 36.1 / 0.127 / 0.088 | 4.39 / 39.9 / 0.138 / 0.105 |
+| 51 | 3.32 / 35.9 / 0.134 / 0.088 | 3.83 / 38.7 / 0.133 / 0.101 |
+| 52 | 3.24 / 35.7 / 0.137 / 0.095 | 3.36 / 37.8 / 0.138 / 0.102 |
+| 53 | 3.18 / 35.4 / 0.130 / 0.088 | 3.34 / 37.7 / 0.149 / 0.105 |
+| 54 | 4.09 / 36.3 / 0.145 / 0.112 | 3.26 / 37.4 / 0.133 / 0.099 |
+| 55 | 3.98 / 36.0 / 0.136 / 0.097 | 2.96 / 36.8 / 0.131 / 0.097 |
+| 56 | 3.39 / 35.3 / 0.132 / 0.097 | 2.86 / 36.4 / 0.132 / 0.096 |
+| 57 | 3.64 / 35.1 / 0.118 / 0.090 | 3.48 / 37.3 / 0.119 / 0.145 |
+| 58 | 3.66 / 34.7 / 0.130 / 0.094 | 4.34 / 36.7 / 0.121 / 0.100 |
+| 59 | 3.02 / 34.7 / 0.139 / 0.093 | 4.06 / 36.5 / 0.142 / 0.102 |
+
+Endpoints (59): ref E 3.02 / F 34.7 / 0.139 / 0.093; branch E 4.06 / F 36.6
+/ 0.142 / 0.102. Over 47-59 the branch's energy is within +-1 meV/atom of
+ref's (better at 54-56, worse elsewhere), its forces 1-8% worse at every
+epoch. Both arms: 3 dev segments each, PB epochs ~325 s incl. validation,
+no fallback, cap never hit. Structural evaluations: 3439943 (both arms at
+39 and 46), 3440284 (ref at 49 and 59), branch at 49 and 59 submitted once
+the dev-queue submit limit (which counts the queued production job) frees.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
