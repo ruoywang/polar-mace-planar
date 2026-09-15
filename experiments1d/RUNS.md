@@ -2991,6 +2991,18 @@ VERDICT.
    500 epochs, no branch) was submitted before the branch's 59 came in;
    the verdict confirms the choice.
 
+### offline E + a*dN_e on the ref-59 file  (audits/charging_offset_diagnostic.py; a fitted on the 107 stride-6 train energies; val untouched)
+
+a = -0.705 eV/e (per-frame dN_e) / -0.716 (per-system fixed). Val paired
+residual 1.357 / +1.320 / 0.312 -> 0.627 / +0.582 / 0.234 (per-frame) or
+0.634 / +0.552 / 0.312 (per-system): one constant fitted on total energies
+now removes 56% of the pair bias (it removed 50% on the e1000-56 file with
+a = -0.97, and on B39 a = -2.33 removed 46%). The fitted per-electron
+constant has fallen 2.33 -> 0.97 -> 0.71 eV/e as the training absorbs the
+system-independent part; what one constant cannot remove is the
+system-dependent remainder (charged NiN44 vs NiN88 need different a).
+Reported, not applied.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
