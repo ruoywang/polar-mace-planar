@@ -2835,6 +2835,36 @@ ref's (better at 32-33, 40, 46; worse at 31, 34-39, 41-45) and its forces
 are 8-17% worse at every epoch (41.5 vs 37.4 at 46). Paired charging
 energy: evaluation at 59.
 
+### w1000_ref COMPLETE: segment 3 (epochs 47-59)  (job 3439590, c301-001, 23:38 -> 00:56, wall 4645 s; models/w1000_ref.model written, error tables skipped)
+
+| epoch | loss | E meV/atom | F meV/A | potential eV | fermi eV |
+|---|---|---|---|---|---|
+| 47 | 0.863 | 3.92 | 37.5 | 0.150 | 0.106 |
+| 48 | 0.850 | 3.32 | 37.0 | 0.132 | 0.096 |
+| 49 | 0.838 | 3.25 | 36.5 | 0.130 | 0.090 |
+| 50 | 0.841 | 3.59 | 36.1 | 0.127 | 0.088 |
+| 51 | 0.832 | 3.32 | 35.9 | 0.134 | 0.088 |
+| 52 | 0.832 | 3.24 | 35.7 | 0.137 | 0.095 |
+| 53 | 0.829 | 3.18 | 35.4 | 0.130 | 0.088 |
+| 54 | 0.855 | 4.09 | 36.3 | 0.145 | 0.112 |
+| 55 | 0.837 | 3.98 | 36.0 | 0.136 | 0.097 |
+| 56 | 0.822 | 3.39 | 35.3 | 0.132 | 0.097 |
+| 57 | 0.826 | 3.64 | 35.1 | 0.118 | 0.090 |
+| 58 | 0.813 | 3.66 | 34.7 | 0.130 | 0.094 |
+| 59 | 0.806 | 3.02 | 34.7 | 0.139 | 0.093 |
+
+Steps 1.42-1.49 s (first step 101 s cold; one 11.1 s step in epoch 58);
+CUDA peak 23.95 GiB; n_outer 7.8-7.9, cap 0. The whole 60-epoch run took
+three dev segments: 5760 + 5792 + 4645 s of job wall = 4.5 h of node time
+(20 warm-up epochs at ~90 s, 40 PB epochs at ~325 s including validation).
+
+Endpoint (59): E 3.02 meV/atom, F 34.7 meV/A, potential 0.139 eV, fermi
+0.093 eV. Against weight-1 fast-B at its endpoint (39: 11.27 / 35.14 /
+0.142 / 0.104): energy 3.7x better, forces equal (-1%), potential and
+fermi equal. Against the e1000 fine-tune's endpoint (56: 4.34 / 36.5 /
+0.133 / 0.102): better on all four. The paired charging energy: evaluation
+3440284 (epochs 49 and 59) queued; 39 and 46 for both arms in 3439943.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
