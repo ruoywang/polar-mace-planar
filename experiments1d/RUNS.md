@@ -2942,6 +2942,55 @@ and every per-state energy better. The branch arm trailed ref until 39
 49 / 59 numbers decide whether the branch adds anything at the end. The
 residual is still 96% bias (1.32 of 1.36) and still eV-scale.
 
+### w1000 A/B VERDICT  (branch 49 / 59 from job 3440532; full table with every pair in audits/ab_table_w1000_final.txt)
+
+Paired dE residual rmse / bias / mean-removed (eV), val, 20 pairs:
+
+| epoch | w1000_ref | w1000_branch |
+|---|---|---|
+| 29 | 3.225 / +3.175 / 0.570 | 3.729 / +3.685 / 0.577 |
+| 39 | 2.646 / +2.596 / 0.513 | 3.155 / +3.109 / 0.535 |
+| 46 | 2.006 / +1.959 / 0.429 | 1.973 / +1.931 / 0.404 |
+| 49 | 1.448 / +1.408 / 0.341 | 1.717 / +1.674 / 0.381 |
+| 59 | 1.357 / +1.320 / 0.312 | 1.901 / +1.860 / 0.394 |
+
+Endpoints (59), val:
+
+| | B39 (w=1) | e1000 fine-tune 56 | branch 59 | ref 59 |
+|---|---|---|---|---|
+| paired dE rmse / bias / mean-removed | 5.324 / +5.264 / 0.794 | 2.037 / +1.995 / 0.408 | 1.901 / +1.860 / 0.394 | 1.357 / +1.320 / 0.312 |
+| charged NiN44 E rmse / bias (meV/atom) | 19.69 / +19.34 | 7.01 / +6.77 | 6.88 / +6.63 | 5.14 / +4.89 |
+| charged NiN88 | 5.54 / -5.45 | 0.62 / +0.01 | 0.70 / +0.51 | 0.74 / +0.16 |
+| neutral NiN44 | 6.37 / -6.31 | 3.52 / -3.40 | 2.91 / -2.81 | 2.12 / -1.99 |
+| all 80 frames E | 11.17 / +0.32 | 4.31 / -0.01 | 4.02 / +0.38 | 3.00 / +0.27 |
+| F rmse all / 44c / 88c / 44n (meV/A) | 35.4 / 35.5 / 33.3 / 36.3 | 36.7 / 36.8 / 34.6 / 37.7 | 36.9 / 36.2 / 34.3 / 38.4 | 35.0 / 35.5 / 31.8 / 36.3 |
+| validation E / F / potential / fermi | 11.27 / 35.1 / 0.142 / 0.104 | 4.34 / 36.5 / 0.133 / 0.102 | 4.06 / 36.6 / 0.142 / 0.102 | 3.02 / 34.7 / 0.139 / 0.093 |
+
+Pair by pair at 59: ref's residual is smaller than branch's on 20 of 20
+pairs (and smaller than B39's on 20/20; the per-pair fall B39 -> ref59 is
+-2.98 to -4.93 eV). The branch arm regressed between 49 and 59 (1.72 ->
+1.90) while ref kept falling (1.45 -> 1.36).
+
+VERDICT.
+1. The lever is the energy weight, not the branch. The original
+   local-electron head at energy_weight 1000, trained from scratch for
+   20 + 40 epochs, cuts the paired charging residual 5.32 -> 1.36 eV (3.9x)
+   with forces equal to weight-1 B (35.0 vs 35.4 meV/A), potential and
+   fermi equal, and every per-state energy better (charged NiN44 bias
+   +19.3 -> +4.9, neutral -6.3 -> -2.0, NiN88 -5.5 -> +0.2 meV/atom).
+2. The charge branch adds nothing under the same weight and budget: worse
+   paired residual at 29, 39, 49 and 59 (better only at 46, by 0.03 eV),
+   worse forces at every epoch (1-17%), worse charged-NiN44 bias at 59
+   (+6.63 vs +4.89). Not adopted.
+3. Not solved: 1.36 eV on charging energies of 4.7-7.8 eV is still not a
+   usable accuracy for electrochemistry, and 97% of it is bias (1.32 of
+   1.36) -- the same per-electron-constant shape as before, now 3.9x
+   smaller. The offline a*dN_e diagnostic on the ref-59 file is the next
+   cheap question (does one constant still remove most of it?).
+4. Production follows this verdict: prod500_w1000_ref (3440435, gpu-a100,
+   500 epochs, no branch) was submitted before the branch's 59 came in;
+   the verdict confirms the choice.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
