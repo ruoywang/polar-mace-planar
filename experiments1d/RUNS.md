@@ -2909,6 +2909,39 @@ no fallback, cap never hit. Structural evaluations: 3439943 (both arms at
 39 and 46), 3440284 (ref at 49 and 59), branch at 49 and 59 submitted once
 the dev-queue submit limit (which counts the queued production job) frees.
 
+### w1000 A/B: paired charging energy along the run  (evaluations 3439239 / 3439943 / 3440284; branch 49/59 = 3440532 pending; val complete, 20 pairs, EMA checkpoints)
+
+Paired dE residual rmse / bias / mean-removed (eV):
+
+| epoch | w1000_ref | w1000_branch |
+|---|---|---|
+| 29 | 3.225 / +3.175 / 0.570 | 3.729 / +3.685 / 0.577 |
+| 39 | 2.646 / +2.596 / 0.513 | 3.155 / +3.109 / 0.535 |
+| 46 | 2.006 / +1.959 / 0.429 | 1.973 / +1.931 / 0.404 |
+| 49 | 1.448 / +1.408 / 0.341 | (pending) |
+| 59 | 1.357 / +1.320 / 0.312 | (pending) |
+
+Reference points: B39 (weight 1) 5.324 / +5.264 / 0.794; e1000 fine-tune
+of the branch at its endpoint (56) 2.037 / +1.995 / 0.408.
+
+Per-state val energies (rmse / bias, meV/atom) and forces (rmse, meV/A):
+
+| | B39 | e1000 56 | ref 46 | branch 46 | ref 59 |
+|---|---|---|---|---|---|
+| charged NiN44 | 19.69 / +19.34 | 7.01 / +6.77 | 6.98 / +6.71 | 6.06 / +5.75 | 5.14 / +4.89 |
+| charged NiN88 | 5.54 / -5.45 | 0.62 / +0.01 | 1.37 / +1.22 | 0.59 / +0.02 | 0.74 / +0.16 |
+| neutral NiN44 | 6.37 / -6.31 | 3.52 / -3.40 | 3.57 / -3.43 | 3.61 / -3.54 | 2.12 / -1.99 |
+| all 80 E | 11.17 / +0.32 | 4.31 / -0.01 | 4.36 / +0.27 | 3.97 / -0.33 | 3.00 / +0.27 |
+| F 44c / 88c / 44n | 35.5 / 33.3 / 36.3 | 36.8 / 34.6 / 37.7 | 37.7 / 34.4 / 39.6 | 40.7 / 38.9 / 43.8 | 35.5 / 31.8 / 36.3 |
+
+READING so far: the original head at weight 1000, from scratch, brings the
+paired residual from 5.32 (B) to 1.36 eV at 59 -- 4x, and 1.5x better than
+the fine-tuned branch's 2.04 -- with forces equal to B's (35.0 vs 35.4)
+and every per-state energy better. The branch arm trailed ref until 39
+(+0.5 eV) and matched it at 46 (1.97 vs 2.01) with 11% worse forces; its
+49 / 59 numbers decide whether the branch adds anything at the end. The
+residual is still 96% bias (1.32 of 1.36) and still eV-scale.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
