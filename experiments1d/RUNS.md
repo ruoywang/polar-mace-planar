@@ -2775,6 +2775,31 @@ At 46: E 4.39, F 37.4, potential 0.139, fermi 0.100 -- energy 2.6x better
 than weight-1 B at its endpoint (11.27 at 39), forces 7% worse than B's
 35.1, potential / fermi equal to B's (0.142 / 0.104).
 
+### w1000 A/B at epoch 29 (10 full-PB epochs): structural evaluation  (job 3439239; EMA checkpoints; val complete 80 frames / 20 pairs, train stride 6; audits/ab_table_w1000_e29.txt)
+
+| val | B39 (weight 1, start of the old runs) | w1000_ref 29 | w1000_branch 29 | e1000 +5 (branch fine-tuned from B39, epoch 44) |
+|---|---|---|---|---|
+| paired dE residual rmse / bias / mean-removed (eV) | 5.324 / +5.264 / 0.794 | 3.225 / +3.175 / 0.570 | 3.729 / +3.685 / 0.577 | 3.317 / +3.262 / 0.601 |
+| charged NiN44 E rmse / bias (meV/atom) | 19.69 / +19.34 | 11.16 / +10.87 | 11.79 / +11.48 | 7.03 / +6.51 |
+| charged NiN88 | 5.54 / -5.45 | 0.89 / -0.79 | 1.10 / -0.91 | 5.51 / -5.48 |
+| neutral NiN44 | 6.37 / -6.31 | 4.91 / -4.83 | 5.77 / -5.69 | 9.86 / -9.81 |
+| all 80 frames E | 11.17 / +0.32 | 6.59 / +0.10 | 7.19 / -0.21 | 8.28 / -4.65 |
+| F rmse (meV/A) | 35.4 | 47.7 | 54.6 | 40.0 |
+| F rmse 44c / 88c / 44n | 35.5 / 33.3 / 36.3 | 48.4 / 42.5 / 49.8 | 54.3 / 50.4 / 56.7 | 41.0 / 36.6 / 41.0 |
+
+Pair by pair: the branch arm's residual is larger than ref's on 20 of 20
+pairs. Train (27 pairs): ref 3.301 / +3.267 / 0.479, branch 3.784 / +3.749
+/ 0.515 -- same picture, no split-specific effect.
+
+READING at this point (30 epochs of 60): the control answers the question
+the e1000 run could not: at energy_weight 1000 the ORIGINAL head reaches a
+3.2 eV paired residual after 10 PB epochs from scratch -- the same level
+the fine-tuned branch reached at its +5 -- and the branch arm is BEHIND
+it on every quantity: paired residual +0.50 eV, charged NiN44 bias +0.6
+meV/atom, neutral bias -0.9, forces +14%. Whatever the branch adds, it has
+not helped so far; the improvement over B is the weight. Both arms still
+have a +3 eV bias to lose and 30 epochs to run; the verdict is at 59.
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
