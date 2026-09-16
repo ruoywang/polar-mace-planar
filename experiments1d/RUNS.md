@@ -3023,6 +3023,25 @@ independent copies of the same setting from epoch 60 on (the production
 job starts from scratch and will differ by CUDA non-determinism only until
 its own chaos sets in).
 
+### w1000_ref_500 progress, segments 1-3 (epochs 60-107)
+
+| segment | job | node | epochs | end reason | E / F / pot / fermi at the last epoch |
+|---|---|---|---|---|---|
+| 1 | 3445493 | c301-002 | 60-74 | budget 5745 s | 74: 2.15 / 31.9 / 0.131 / - |
+| 2 | 3445897 | c301-004 | 75-91 | budget 5921 s | 91: 1.73 / 30.4 / 0.130 / - |
+| 3 | 3446570 | - | 92-107 | budget 5767 s (wall 5872 s) | 107: 2.24 / 28.95 / 0.134 / - |
+
+Selected validation lines: 65: 2.59 / 33.4; 70: 2.63 / 32.6; 80: 2.18 /
+31.2 / 0.139 / 0.084; 90: 1.48 / 30.3 / 0.132 / 0.083; 100: 1.95 / 29.3 /
+0.120 / 0.071; 105: 1.49 / 29.0 / 0.130 / 0.066 (E meV/atom, F meV/A,
+potential eV, fermi eV). Forces keep falling (34.7 at 59 -> 29.0 at 105),
+energy 1.4-2.2, fermi down to 0.066. One 101 s step in epoch 72, one 99 s
+first step per segment (cold start); no fallback, cap never hit.
+Segment 4 = 3447232 (next epoch 108), submitted 08:01 -- 1.4 h after
+segment 3 ended (06:36): the chain watcher had died with a session restart
+and was re-armed only at 08:00. Production 3440435 still queued (priority
+1719 at 08:00).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
