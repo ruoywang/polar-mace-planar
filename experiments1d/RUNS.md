@@ -3003,6 +3003,26 @@ system-independent part; what one constant cannot remove is the
 system-dependent remainder (charged NiN44 vs NiN88 need different a).
 Reported, not applied.
 
+## w1000_ref_500: the no-branch run continued on the dev queue toward 500 epochs  (user 2026-09-15 "在等a100的时候，之前那个没有分支的，也可以在dev上反复提交逐渐跑500epoch")
+
+Run dir 3-residual_3D/w1000_ref_500: the w1000_ref config with
+max_num_epochs 500 (name w1000_ref_500), job_seg.sh with STOP default 499
+and the 6000 s budget. The first segment (3445493) resumes from
+w1000_ref's FINAL segment state -- the run writes one at completion too:
+checkpoints/segments/w1000_ref_run-123_segment_state_epoch59.pt, next_epoch
+60, lowest_loss 0.80613569 -- so this is the same 60-epoch run continued
+(raw weights, Adam, scheduler, EMA, all ranks' RNG streams), not a splice
+from the EMA checkpoint. (A first submission from the epoch-46 state,
+3445491, was cancelled while queued once the epoch-59 state was found.)
+Later segments resume from the new run's own state; chain.sh submits them
+(arm ref_500, job name w1kr5; it never starts this arm from scratch). At
+~17 PB epochs per 6000 s segment, 440 epochs are about 26 dev segments
+plus queue waits -- a hedge that runs in parallel with the gpu-a100 job
+3440435 (still queued, priority 1459 at 19:25); the two runs are
+independent copies of the same setting from epoch 60 on (the production
+job starts from scratch and will differ by CUDA non-determinism only until
+its own chaos sets in).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
