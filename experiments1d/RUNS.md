@@ -3042,6 +3042,17 @@ segment 3 ended (06:36): the chain watcher had died with a session restart
 and was re-armed only at 08:00. Production 3440435 still queued (priority
 1719 at 08:00).
 
+### w1000_ref_500 segment 4 (epochs 108-124)  (job 3447232, c301-003, 08:04 -> 09:48; budget stop 5883 s; state next 125; continuation 3447512 queued)
+
+Validation at 110 / 115 / 120 / 124 in the run log (E meV/atom, F meV/A):
+forces 28.9 -> 27.9, energy 1.3-1.6 with excursions to 2.2. Report page
+(artifact Mm7WWEn11tbyuukq7TJKEq) published and revised 14 times on
+2026-09-16: ten one-figure slides in English; slide 1 is the model
+pipeline with the three problem sites; slide 4 now also shows the DFT
+charging energy against the extra electron count for all 200 pairs
+(r = -0.97, 0.18 eV scatter about a line of -5.98 eV per electron,
+intercept 0.03 eV).
+
 NEXT (largest first): the .item()/sync sites -- a call-site counter
 (MACE_COUNT_SYNC_STEPS, commit after b9c4552) reports which file:line
 issues the 690 syncs per step; then remove the ones that are not the
