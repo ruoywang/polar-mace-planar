@@ -3202,6 +3202,37 @@ pairs' own 0.18 eV. Per-state val (E rmse / bias meV/atom, F rmse meV/A):
 Charged NiN44 bias +0.62 -> +0.41 meV/atom, neutral NiN44 -0.55 -> -0.59,
 NiN88 +0.02 -> +0.10; forces 23.7 / 21.8 / 25.2 (val). Next: 400, 499.
 
+
+### production checkpoint evaluation, epoch 400  (job 3454176, 2026-09-18, same call)
+
+Paired charging energy (eV; rmse / bias / mean-removed): val 0.2127 / 0.0855 / 0.1947,
+train 0.2217 / 0.1221 / 0.1850. Full series so far (val):
+
+    epoch   rmse     bias     mean-removed
+    59      1.3299   1.2970   0.2940
+    100     0.6214   0.5885   0.1995
+    150     0.6057   0.5765   0.1855
+    200     0.4139   0.3703   0.1848
+    235     0.2586   0.1916   0.1737
+    300     0.2231   0.1372   0.1759
+    400     0.2127   0.0855   0.1947
+
+The bias keeps falling (0.137 -> 0.0855); the mean-removed scatter moved up
+from 0.176 to 0.1947 eV, its first rise in the series, so at epoch 400 the
+rmse is scatter-dominated for the first time (bias is 40% of the rmse).
+One evaluation is not a trend; epoch 499 will tell. Per-state val
+(E rmse / bias meV/atom, F rmse meV/A):
+
+    train  charged NiN44   27            1.28      0.53    19.13    191.7
+    train  charged NiN88   27            0.85      0.07    18.68    181.8
+    train  neutral NiN44   53            0.69     -0.32    38.36   1465.7
+    val  charged NiN44   20            1.16      0.36    22.61    416.8
+    val  charged NiN88   20            0.73      0.16    20.96    193.1
+    val  neutral NiN44   40            0.74     -0.43    24.19    854.7
+
+Charged NiN44 bias +0.41 -> +0.36 meV/atom, neutral NiN44 -0.59 -> -0.43,
+NiN88 +0.10 -> +0.16; forces 22.6 / 21.0 / 24.2 (val). Next: 499.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
