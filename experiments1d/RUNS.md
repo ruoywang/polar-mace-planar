@@ -3177,6 +3177,31 @@ Remaining production epochs 236-499 run under the same budget; the same
 evaluation at 300 / 400 / 499 will tell whether the bias keeps falling or
 plateaus.
 
+
+### production checkpoint evaluation, epoch 300  (job 3453392, 2026-09-18, same call as 3452940)
+
+Paired charging energy (eV; rmse / bias / mean-removed): val 0.2231 / 0.1372 / 0.1759,
+train 0.2411 / 0.1673 / 0.1736. Extending the table above:
+
+    epoch   val rmse   val bias   val mean-removed   train rmse   train bias   train mean-removed
+    235       0.2586     0.1916             0.1737       0.2803       0.2174               0.1769
+    300       0.2231     0.1372             0.1759       0.2411       0.1673               0.1736
+
+The bias keeps falling (0.192 -> 0.137, and 1.297 at epoch 59); the scatter
+is flat at 0.17-0.18 eV for the fourth evaluation in a row (100: 0.200,
+150: 0.186, 200: 0.185, 235: 0.174, 300: 0.176), i.e. it sits at the DFT
+pairs' own 0.18 eV. Per-state val (E rmse / bias meV/atom, F rmse meV/A):
+
+    train  charged NiN44   27            1.31      0.55    20.08    178.2
+    train  charged NiN88   27            0.93     -0.00    19.72    194.6
+    train  neutral NiN44   53            0.79     -0.49    40.20   1519.1
+    val  charged NiN44   20            1.15      0.41    23.67    430.5
+    val  charged NiN88   20            0.79      0.10    21.76    173.1
+    val  neutral NiN44   40            0.83     -0.59    25.23    925.0
+
+Charged NiN44 bias +0.62 -> +0.41 meV/atom, neutral NiN44 -0.55 -> -0.59,
+NiN88 +0.02 -> +0.10; forces 23.7 / 21.8 / 25.2 (val). Next: 400, 499.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
