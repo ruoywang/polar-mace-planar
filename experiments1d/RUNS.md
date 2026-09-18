@@ -3060,6 +3060,67 @@ solver's convergence test (keep values on the GPU, batch the diagnostics).
 Second: the cross-rank wait, once the forward is shorter (a size-paired
 sampler would change the data order -- not without the user).
 
+### w1000_ref_500 segments 5-6 (epochs 125-158), then PAUSED  (2026-09-17 21:05)
+
+Segment 5: job 3447512, c301-001, submitted 09-16 09:49, ran 14:28 -> 16:06
+(1 h 38 min), epochs 125-141, state next 142 (lowest_loss 0.69148273).
+Segment 6: job 3449220, c301-002, submitted 16:07 (the 7 h between the two
+segments was queue wait, not a watcher gap), ran 23:09 -> 00:47, epochs
+142-158, budget stop at 5793 s (last epoch 329 s), state next 159.
+Validation (E meV/atom, F meV/A, potential eV, fermi eV):
+
+    epoch   loss        E      F      potential  fermi
+    141     0.6915     1.49   27.3    0.130      0.069
+    150     0.6908     1.53   26.95   0.1224     0.0644
+    158     0.6827     1.22   26.59   0.1238     0.0637
+
+No PB1D-FALLBACK line in epochs 60-158. Not resubmitted after 00:47: the
+session restart killed the chain watcher; found at 21:00 (20.2 h idle).
+
+PAUSED (my decision, for the user to confirm or reverse): production
+3440435 started at 00:27 and stands at epoch 235 at 21:00, 77 epochs ahead
+of this run on the same setting and the same trajectory (production epoch
+160: E 1.13 / F 26.25; this run epoch 158: E 1.22 / F 26.59). The user's
+purpose was "while waiting for the a100"; the single gpu-a100-dev slot
+(MaxJobsPU 1) now goes to production checkpoint evaluations. The segment
+state (next epoch 159) is intact; resume with
+`cd 3-residual_3D/w1000_ref_500 && sbatch --export=ALL,RESUME=checkpoints/segments/w1000_ref_500_run-123_segment_state.pt job_seg.sh`
+or the chain watcher without CHAIN_ARMS (chain.sh now takes
+CHAIN_ARMS="ref branch" to leave this arm alone).
+
+### PRODUCTION prod500_w1000_ref, first 20.5 h  (job 3440435, c303-001, start 2026-09-17 00:27:23)
+
+Epoch 0 at 00:33 (6 min start-up incl. preload). Epoch wall from the log
+timestamps: warm-up epochs 111-117 s, PB epochs 328-339 s (last ten:
+332 339 332 330 330 330 330 328 332 328). Validation:
+
+    epoch   loss        E      F       potential  fermi    density_3d
+    0       86.25     35.84   853.6    2.395      2.544    0.0978
+    20      1.700     11.53   74.80    0.333      0.333    0.0339
+    50      0.8345     3.46   36.90    0.1379     0.1045   0.0314
+    60      0.8076     3.36   34.75    0.1528     0.1014   0.0313
+    100     0.7211     1.60   29.41    0.1167     0.0738   0.0307
+    150     0.6821     1.50   26.50    0.1160     0.0700   0.0304
+    200     0.6632     1.17   24.92    0.1132     0.0625   0.0301
+    235     0.6618     0.90   24.37    0.1157     0.0595   0.0300
+
+Same-epoch check against w1000_ref (epoch 59: E 3.02 / F 34.7 / potential
+0.139 / fermi 0.093): forces agree, E and potential are within their
+epoch-to-epoch swing. 15 PB1D-FALLBACK lines, all inside epoch 1, the same
+sid set as w1000_ref and w1000_branch (deterministic warm-up event), none
+since. save_all_checkpoints: 236 files x 64 MB = 14 GB so far (30 GB at
+500). Budget 169200 s ends 2026-09-18 23:27:23 at the latest; at 21:00 the
+run has 264 epochs left, which at 330 s each is 24.2 h against 26.4 h of
+remaining budget -- a single submission, if the epoch wall holds.
+
+Evaluation of the production checkpoints (paired charging energy on the 20
+val pairs, per-state E/F, train stride 6): job 3452940 (gpu-a100-dev,
+queued 21:05), epochs 59 / 100 / 150 / 200 / 235. job_eval.sh generalised:
+ARMS may name a run dir (prod500_w1000_ref); MODEL_OBJ supplies the model
+object of an identical-architecture run (w1000_ref: config differs only in
+name and max_num_epochs) because the production run has written no model
+object yet -- the epoch checkpoint's state dict is loaded strict=True on it.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
