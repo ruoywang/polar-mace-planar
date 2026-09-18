@@ -3121,6 +3121,62 @@ object of an identical-architecture run (w1000_ref: config differs only in
 name and max_num_epochs) because the production run has written no model
 object yet -- the epoch checkpoint's state dict is loaded strict=True on it.
 
+
+### production checkpoint evaluation, epochs 59-235  (job 3452940, c301-003, 2026-09-18 00:39 -> 00:53, code 989338b)
+
+exp_ab_w1000/job_eval.sh, ARMS=prod500_w1000_ref, MODEL_OBJ = w1000_ref's model
+object, the epoch checkpoint's EMA state dict loaded strict=True (all five
+rc=0; 14 min for five checkpoints). Same evaluation as the A/B arms: val
+complete (20 pairs, 80 frames), train every 6th frame (27 pairs).
+
+Paired charging energy dE = E(k) - E(k+600), model vs DFT (eV; rmse / bias /
+mean-removed = scatter about the bias):
+
+    epoch   val rmse   val bias   val mean-removed   train rmse   train bias   train mean-removed
+    59        1.3299     1.2970             0.2940       1.3749       1.3522               0.2489
+    100       0.6214     0.5885             0.1995       0.6468       0.6156               0.1987
+    150       0.6057     0.5765             0.1855       0.6316       0.6030               0.1879
+    200       0.4139     0.3703             0.1848       0.4362       0.3953               0.1844
+    235       0.2586     0.1916             0.1737       0.2803       0.2174               0.1769
+
+Epoch 59 here (1.330) reproduces w1000_ref's own epoch 59 (1.357): same
+setting, same trajectory. From 59 to 235 the bias falls 1.297 -> 0.192 eV
+(6.8x) and the scatter 0.294 -> 0.174 eV (1.7x); the rmse 1.33 -> 0.26 eV
+is 20x below B's 5.32 eV (the pre-weight-change model). Train and val agree
+at every epoch (235: 0.280 / 0.217 / 0.177 vs 0.259 / 0.192 / 0.174), so
+this is not a val-set accident. The DFT pairs themselves scatter 0.18 eV
+about their -5.98 eV/e line (RUNS "DFT charging energy vs extra electrons"),
+so the remaining mean-removed 0.17 eV is at the level of the pair-to-pair
+variation in the reference, while the bias 0.19 eV is still one-signed
+(charged NiN44 +0.62 meV/atom vs neutral -0.55).
+
+Per-state absolute energies and forces, val:
+
+    epoch   state            n   E rmse   E bias   F rmse   F max   (val; meV/atom, meV/atom, meV/A, meV/A)
+    59      charged NiN44    20     4.79     4.54    34.81   726.2
+    59      charged NiN88    20     0.83     0.04    32.30   345.9
+    59      neutral NiN44    40     2.40    -2.26    36.13  1378.3
+    100     charged NiN44    20     2.27     1.93    29.66   697.9
+    100     charged NiN88    20     1.10     0.57    27.36   217.9
+    100     neutral NiN44    40     1.39    -1.25    30.80  1235.7
+    150     charged NiN44    20     2.45     2.16    26.59   549.5
+    150     charged NiN88    20     0.77    -0.01    24.97   174.7
+    150     neutral NiN44    40     1.09    -0.93    27.59   996.3
+    200     charged NiN44    20     1.65     1.22    25.01   462.8
+    200     charged NiN88    20     0.70     0.07    23.28   180.5
+    200     neutral NiN44    40     1.06    -0.88    26.06   901.0
+    235     charged NiN44    20     1.21     0.62    24.50   476.5
+    235     charged NiN88    20     0.78     0.02    22.59   173.7
+    235     neutral NiN44    40     0.76    -0.55    25.57   940.2
+
+Charged NiN44 is where the charging bias lives at every epoch (E bias +4.54
+-> +0.62 meV/atom); NiN88 is unbiased throughout (+0.04 -> +0.02); neutral
+NiN44 mirrors it with the opposite sign (-2.26 -> -0.55). Forces at 235:
+24.5 / 22.6 / 25.6 meV/A (val), against 35.0 / 32.3 / 36.1 at epoch 59.
+Remaining production epochs 236-499 run under the same budget; the same
+evaluation at 300 / 400 / 499 will tell whether the bias keeps falling or
+plateaus.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
