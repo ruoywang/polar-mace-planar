@@ -3282,6 +3282,43 @@ compiled .model was not written):
 Per-epoch checkpoints: 500 x 64 MB = 30 GB in checkpoints/. Structural evaluation
 of epoch 499 (paired charging energy): job 3455058, queued 21:59.
 
+
+### production checkpoint evaluation, epoch 499 (FINAL)  (job 3455058, 2026-09-18, same call)
+
+Paired charging energy (eV; rmse / bias / mean-removed): val 0.2500 / 0.1499 / 0.2001,
+train 0.2670 / 0.1931 / 0.1844. Complete series (val, 20 pairs):
+
+    epoch   rmse     bias     mean-removed
+    59      1.3299   1.2970   0.2940
+    100     0.6214   0.5885   0.1995
+    150     0.6057   0.5765   0.1855
+    200     0.4139   0.3703   0.1848
+    235     0.2586   0.1916   0.1737
+    300     0.2231   0.1372   0.1759
+    400     0.2127   0.0855   0.1947
+    499     0.2500   0.1499   0.2001
+
+Reading: the paired residual fell 1.33 -> 0.26 eV between epochs 59 and 235 and has
+sat at 0.21-0.26 eV since (235 / 300 / 400 / 499 = 0.259 / 0.223 / 0.213 / 0.250);
+the final checkpoint is not the best one on this metric (400 is, by 0.04 eV). Within
+the plateau the bias moves between 0.09 and 0.19 eV from checkpoint to checkpoint
+while the mean-removed scatter stays at 0.17-0.20 eV, i.e. at the DFT pairs' own
+0.18 eV scatter about their -5.98 eV/e line. Train agrees with val at every epoch
+(499: 0.2670 / 0.1931 / 0.1844). What the weight-1000 run did not remove is a
+charged-NiN44 energy bias that flips sign against neutral NiN44 (val, meV/atom):
+
+    train  charged NiN44   27            1.35      0.67    18.33    159.3
+    train  charged NiN88   27            0.78      0.05    17.90    156.1
+    train  neutral NiN44   53            0.75     -0.47    36.64   1365.7
+    val  charged NiN44   20            1.22      0.46    22.16    408.1
+    val  charged NiN88   20            0.66      0.12    20.32    188.3
+    val  neutral NiN44   40            0.79     -0.56    25.10    858.3
+
+Per-state biases at 59 -> 499: charged NiN44 +4.54 -> +0.46, NiN88 +0.04 -> +0.12,
+neutral NiN44 -2.26 -> -0.56. Forces val 22.2 / 20.3 / 25.1 meV/A (59: 34.8 / 32.3 / 36.1).
+Series of the production run closed; the report page (fig 6 / 8 / 10) still shows
+the epoch-59 state and is not updated without the user's word.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
