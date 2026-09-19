@@ -3233,6 +3233,55 @@ One evaluation is not a trend; epoch 499 will tell. Per-state val
 Charged NiN44 bias +0.41 -> +0.36 meV/atom, neutral NiN44 -0.59 -> -0.43,
 NiN88 +0.10 -> +0.16; forces 22.6 / 21.0 / 24.2 (val). Next: 499.
 
+
+### PRODUCTION prod500_w1000_ref COMPLETE  (job 3440435, c303-001, 2026-09-17 00:27:23 -> 2026-09-18 22:19:26, 45 h 52 min, rc=0)
+
+All 500 epochs in the single submission: "Training complete" at 21:57:52, 1 h 30 min
+before the 169200 s budget would have stopped it; no continuation needed (the
+prepared job_seg.sh for a dev-queue continuation was not used). PB-phase epoch wall
+(epochs 21-499, from the log timestamps): median 331 s, 10-90% 327-346 s, max 594 s,
+8 epochs above 400 s (clustered at 380-382, 404-409, 416, 450, 467-468).
+Final validation lines (loss, E meV/atom, F meV/A, potential eV, fermi eV):
+
+    epoch        loss       E        F  potential    fermi
+    400    0.63982753    0.86    22.80    0.1059   0.0564
+    450    0.63729097    0.83    22.81    0.1002   0.0487
+    480    0.63560215    0.84    22.66    0.1153   0.0590
+    490    0.63824541    0.86    22.37    0.1073   0.0546
+    495    0.64024535    0.83    22.90    0.1078   0.0513
+    496    0.64505480    0.81    22.53    0.1052   0.0493
+    497    0.64021437    0.83    22.24    0.1076   0.0497
+    498    0.64187219    0.89    22.48    0.1103   0.0588
+    499    0.63705846    0.89    22.94    0.1057   0.0579
+
+Start of the run for comparison: w1000_ref epoch 59 = E 3.02 / F 34.7 / potential 0.139 /
+fermi 0.093. Lowest single-epoch values seen: E 0.78 (494), F 22.24 (497), potential
+0.1002 (450), fermi 0.0487 (450). Final built-in evaluation (epoch-499 checkpoint,
+python .model saved as models/prod500_w1000_ref.model, 50.8 MB; the TorchScript export
+failed on a dict expansion in extensions.py:3088 -- "python .model unaffected", the
+compiled .model was not written):
+
+    Error-table on TRAIN and VALID:
+    +---------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    |  config_type  | RMSE E / meV / atom | RMSE F / meV / A | relative F RMSE % | RMSE Q / e | RMSE Atomic Mu / eA | RMSE Potential / eV | RMSE Fermi / eV | RMSE Density3D / e/A^3 | RMSE OccAug | RMSE Phi1D / eV | RMSE Rho1D / e/A^3 | RMSE Solv Center / A |
+    +---------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    | train_Default |            0.9      |         22.1     |          2.60     |            |                     |         0.0859      |       0.0355    |         0.02963        |    0.00390  |      0.06817    |       0.00145      |                      |
+    | valid_Default |            0.9      |         22.9     |          2.71     |            |                     |         0.1057      |       0.0579    |         0.02969        |    0.00399  |      0.07118    |       0.00141      |                      |
+    +---------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    Error-table on TEST:
+    +---------------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    |     config_type     | RMSE E / meV / atom | RMSE F / meV / A | relative F RMSE % | RMSE Q / e | RMSE Atomic Mu / eA | RMSE Potential / eV | RMSE Fermi / eV | RMSE Density3D / e/A^3 | RMSE OccAug | RMSE Phi1D / eV | RMSE Rho1D / e/A^3 | RMSE Solv Center / A |
+    +---------------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    |    NiN44_Default    |            1.5      |         20.7     |          2.36     |            |                     |         0.0902      |       0.0469    |         0.03012        |    0.00401  |      0.05522    |       0.00149      |                      |
+    | NiN44neusol_Default |            0.7      |         25.6     |          2.88     |            |                     |         0.0840      |       0.0424    |         0.03019        |    0.00407  |      0.09233    |       0.00148      |                      |
+    |   NiN44vac_Default  |            0.9      |         20.7     |          2.30     |            |                     |         0.0588      |       0.0324    |         0.03028        |    0.00409  |      0.06249    |       0.00160      |                      |
+    |    NiN88_Default    |            0.5      |         20.5     |          2.66     |            |                     |         0.1035      |       0.0628    |         0.02647        |    0.00370  |      0.07390    |       0.00120      |                      |
+    +---------------------+---------------------+------------------+-------------------+------------+---------------------+---------------------+-----------------+------------------------+-------------+-----------------+--------------------+----------------------+
+    Done
+
+Per-epoch checkpoints: 500 x 64 MB = 30 GB in checkpoints/. Structural evaluation
+of epoch 499 (paired charging energy): job 3455058, queued 21:59.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
