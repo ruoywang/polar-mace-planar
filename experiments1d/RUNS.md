@@ -3319,6 +3319,110 @@ neutral NiN44 -2.26 -> -0.56. Forces val 22.2 / 20.3 / 25.1 meV/A (59: 34.8 / 32
 Series of the production run closed; the report page (fig 6 / 8 / 10) still shows
 the epoch-59 state and is not updated without the user's word.
 
+
+## 2026-09-21 cavity-derivative question -> three non-training checks  (jobs 3459226 / 3459230 / 3459232, code 45049cc, audits/pair_terms_prod.py)
+
+Context: the user asked whether the model should carry VASPsol++'s cavity-derivative
+potential v_solv = d(A_cav + A_diel + A_ion)/dn_e. My first answer said the tau*A cavity
+energy was OFF in production -- WRONG (I read a code comment "default off" as the run
+setting). Production config_pb1d.yaml and the LOADED model object both say:
+solvent_cavity_energy True, solvent3d_energy True, solvent_baseline_coupling True,
+fresh_stage1 True, warmup 20, num_recursion_steps 1. The user asked for three checks
+without training; done on the epoch-499 production checkpoint (w1000_ref model object,
+strict state-dict load), 20 val pairs + 27 stride-6 train pairs, eleven additive terms
+closure-checked against the model total (worst 3.4e-12 eV).
+
+Job history: 3459226 landed on c301-002 -> "CUDA unknown error", no device, exit at
+init (2 min); 3459230 -> FileNotFoundError ./cal1_train.json (the model object resolves
+its PB-backend paths relative to cwd; fixed by chdir to the run dir as ab_eval.py does);
+3459232 on c301-003: 94 forwards in 88 s, RSS 2.2 GB.
+
+1. Switches and actual values (sid 28 charged / sid 628 neutral, eV):
+       tau*A cavity        +3.915 / +3.949   (d -0.034)
+       3D solvent          -0.300 / -0.308   (d +0.008)
+       baseline coupling   -0.440 / -0.573   (d +0.132)
+       1D compensation     -2.403 / +0.084   (d -2.487)
+       slab dipole corr.   -4.434 / -0.014   (d -4.420)
+       solute electrostat. -9.394 / -8.699   (d -0.695)
+       inter_e (head)      identical to 1e-6 -> d = 0 (descriptor charge-blind, as at B)
+       local electron      d -0.001
+   Per-frame tau*A against the DFT's printed A_cav over all 94 frames: model 3.860 vs
+   DFT 3.817 mean (val), model - DFT +0.042 +/- 0.049 eV, corr 0.96.
+
+2. Charged-minus-neutral differences vs the paired residual (val 20 pairs; train 27 in
+   parentheses). Residual = dE_model - dE_dft: rmse 0.250 (0.267), bias +0.150 (+0.193),
+   std 0.200 (0.184), 16/20 (22/27) positive.
+
+       term                     mean d      rms d    corr(d, resid)
+       solute electrostatic     -1.452      1.481    +0.43  (+0.12)
+       1D solvent compensation  -1.662      1.708    -0.53  (-0.25)
+       slab dipole correction   -2.938      3.022    -0.56  (-0.18)
+       cavity tau*A             -0.030      0.033    +0.35  (-0.40)
+       3D solvent energy        -0.006      0.019    +0.36  (-0.07)
+       baseline coupling E_bl   -0.020      0.169    +0.974 (+0.945)
+       inter_e / e0 / branch     0          0        --
+       local electron energy    +0.001      0.002    -0.15  (+0.05)
+
+   CAVITY: model d(tau*A) -0.030 +/- 0.033 vs DFT dA_cav -0.006 +/- 0.006; same sign on
+   20/20 and 27/27 pairs, corr 0.41 (0.43); the model's cavity term moves 5x more across
+   charging than the DFT's, but the gap is 0.024 eV against a 0.25 eV residual, and
+   replacing the model's difference by the DFT's makes the residual WORSE (val rmse
+   0.250 -> 0.262, bias +0.150 -> +0.174). The cavity term is not where the residual is.
+
+   E_bl: the residual tracks the E_bl pair difference on both splits:
+       val    resid = 1.16 * dE_bl + 0.173,  r = 0.974,  std after fit 0.045 eV
+       train  resid = 0.76 * dE_bl + 0.181,  r = 0.945,  std after fit 0.061 eV
+       both   resid = 0.87 * dE_bl + 0.174,  r = 0.938,  std after fit 0.067 eV
+   Removing the E_bl pair difference outright (resid - dE_bl): val rmse 0.250 -> 0.178,
+   bias +0.150 -> +0.170, std 0.200 -> 0.053; train 0.267 -> 0.195, +0.193 -> +0.177,
+   0.184 -> 0.083. (dE_model - dE_bl) against dE_dft: corr 0.9986 (val). The DFT charging
+   energy itself does NOT co-vary with dE_bl (corr -0.52 val, -0.10 train, sign not even
+   stable), so E_bl's pair-to-pair variation (-0.35 .. +0.22 eV) is not matched by any
+   DFT quantity and no network term can compensate it (the head's contribution cancels
+   exactly in every pair). No other single term explains the scatter (after-fit std
+   0.166-0.19 for 1Dcomp / slab / solES / cav / 3D).
+   Mechanics: the two frames of a pair use the SAME baseline row (index sid k and k+600
+   -> same row; fields identical to the bit on 3 checked pairs), so
+   dE_bl = int [rho_solv^charged - rho_solv^neutral](z) * (-<phi_base>(z), zero-mean) A dz:
+   the added ionic layer (and changed bound charge) against the neutral baseline's
+   potential shape, G0 piece excluded by the 09-08 convention.
+   WHAT IS LEFT after E_bl's pair difference: a per-electron constant, +0.170 (val) /
+   +0.177 (train) eV, with 0.05-0.08 eV scatter -- the "one constant" again, now 0.17 eV
+   instead of the 5.27 eV of the weight-1 era.
+
+   DFT dA_corr vs model d(slab dipole correction) (09-10 candidate, one pair 1%): over 47
+   pairs corr 0.99 but mean gap +0.09 (val) / +0.14 (train), rms diff 0.21 eV; the gap
+   correlates -0.9 with d(1D comp) and +0.9 with d(solute ES), i.e. with how the model
+   splits its own electrostatics, not with the residual (0.52 / 0.24). Still a candidate.
+
+3. Inventory, VASPsol++ A_solv (paper eq. 90) against the model's explicit terms:
+       q_sol <phi_solv>  (G0 interaction)        -> slab dipole correction (G0 of the total
+                                                    dipole); E_bl's G0 piece deliberately
+                                                    excluded (09-08) -- owner still open
+       (eps0/8pi) int phi_solv lap phi_solv       -> 1D compensation (cross + self of the
+       (electrostatic self-energy of rho_solv)      net model charge with rho_solv), E_bl
+                                                    (rho_solv x baseline solute potential),
+                                                    3D residual coupling; note the model
+                                                    writes the INTERACTION form, VASPsol++
+                                                    the stationary form -- equal only
+                                                    together with the lambda terms below
+       A_cav = tau int |grad S_cav|               -> tau*A[s_cav3] explicit, ON, 1% per frame
+       n_mol int S_diel lambda_diel               -> NO explicit term (rotational entropy /
+       (dielectric internal free energy)            polarization work of the medium)
+       n_max int S_ion lambda_ion                 -> NO explicit term (ion mixing entropy
+       (ionic internal free energy)                 with steric saturation)
+       v_solv in the KS potential                 -> no counterpart (no variational density);
+                                                    training gradients through the live
+                                                    cavity are the nearest analogue
+   The two lambda terms and any error of the explicit terms are left to the learned
+   energy head -- which cannot act on paired differences at all (charge-blind features).
+
+VERDICT on the question asked: adding v_solv is not indicated by these measurements --
+the cavity term is on, accurate per frame, and its charging difference is 0.03 eV. The
+paired residual is (a) E_bl's pair-to-pair variation, 0.20 eV std, and (b) a per-electron
+constant +0.17 eV. Next (user's call): audit E_bl's definition and G0 owner; a
+no-training test already exists in these numbers (dE_bl = 0 -> 0.178 / +0.170 / 0.053).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
