@@ -188,7 +188,15 @@ def _vsolv_core(n_e: torch.Tensor, phi_z_solver: torch.Tensor, pos_frac: torch.T
     # (create_graph) only when the caller itself records gradients
     outer_grad = torch.is_grad_enabled()
     with torch.enable_grad():
-        n_in = n_e if (outer_grad and n_e.requires_grad) else n_e.detach().requires_grad_(True)
+        # THE PARTIAL NEEDS ITS OWN NODE. In the model, phi* was solved from the same density
+        # tensor, so phi's autograd history passes through n_e itself; autograd.grad(A, n_e)
+        # would then follow A -> lambda(phi*) -> phi* -> n_e as well and return the TOTAL
+        # derivative dA/dn = dA/dn|_phi + dA/dphi dphi*/dn (found 2026-09-21: feature derivative
+        # +0.099 vs FD -0.088 on a neutral frame). Differentiating w.r.t. a fresh node n_in =
+        # n_e.clone() counts only the paths through the cavity functions (the partial at fixed
+        # phi), while the clone's own history keeps the outer dependence on n_e for forces and
+        # training gradients, and phi_in keeps its own.
+        n_in = n_e.clone() if (outer_grad and n_e.requires_grad) else n_e.detach().requires_grad_(True)
         phi_in = phi_z_solver if outer_grad else phi_z_solver.detach()
         phi_z = fourier_resample_1d(phi_in, nz)
         a_cav, a_diel, a_ion = free_energies(n_in, phi_z, grid, params, tp, sigma_b, eps_area)
