@@ -3935,6 +3935,62 @@ EPOCH-30 STRUCTURAL COMPARISON (same protocol as epoch 25):
    0.81-1.04 band on validation and the charging bias (+3.2 vs +3.5 eV) is the training stage.
 
 
+## 2026-09-21 gate_vsolv, epoch-33 (final) structural comparison  (evaluations 3460338 gate / 3460368 prod, code b396deb) -- VERDICT
+
+                                            prod e33    gate e33   gate/prod-1
+   charged NiN44 (47 frames)
+     E err/atom rmse (meV/atom)              10.822      11.361      +5.0%   (bias +10.58 / +11.13)
+     F rmse (meV/A)                           43.93       45.55      +3.7%
+     solvent profile L1 vs DFT (e)           0.6677      0.6733      +0.8%
+     solvent dipole |m-d| (e A)              0.2088      0.1800     -13.8%
+     |E_bl model - DFT field| (eV)           0.2502      0.2602      +4.0%
+     3-D density rmse (e/A^3)                0.03315     0.03354     +1.2%
+     window L1 (e)                            3.0771      2.9669     -3.6%
+     tail bottom L1 / dN (e)             0.4763/+0.0713  0.4319/+0.0789   -9.3%
+     tail top    L1 / dN (e)             0.0766/+0.0729  0.0753/+0.0686   -1.7%
+   neutral NiN44 (47 frames)
+     E err/atom rmse (meV/atom)               3.842       4.010      +4.4%   (bias -3.73 / -3.93)
+     F rmse (meV/A)                           62.11       63.15      +1.7%
+     solvent profile L1 vs DFT (e)           0.5257      0.5410      +2.9%
+     solvent dipole |m-d| (e A)              0.3455      0.3426      -0.8%
+     |E_bl model - DFT field| (eV)           0.3540      0.2949     -16.7%
+     3-D density rmse (e/A^3)                0.03324     0.03363     +1.2%
+     window L1 (e)                            3.0877      2.9523     -4.4%
+     tail bottom L1 / dN (e)             0.4720/+0.0701  0.4277/+0.0497   -9.4%
+     tail top    L1 / dN (e)             0.0988/+0.0956  0.1113/+0.1084  +12.7%
+   charge response dn(z), 47 pairs
+     L1(model-DFT) (e)                        1.4841      1.5185      +2.3%   (DFT scale 1.509)
+     |zc model - zc dft| (A)                  0.237       0.220       -7.4%
+     |metal share model - dft|                0.2016      0.2158      +7.0%   (DFT share 0.331)
+   paired charging (47 pairs) rmse / bias / std (eV)
+                                       3.006/+2.964/0.501  3.152/+3.116/0.473   (recorded)
+
+Across the three matched epochs (25 / 30 / 33) every structural quantity moves the same way,
+so the pattern is the input's, not one epoch's noise:
+   forces               +6.7/+6.2  ->  +3.0/+1.3  ->  +3.7/+1.7 %   (charged/neutral)   WORSE
+   3-D density rmse     +1.8       ->  +0.9       ->  +1.2 %                           WORSE
+   solvent-side tail L1 +2.0/+5.3  ->  +5.1/+11.0 ->  -1.7/+12.7 %                     WORSE (neutral)
+   vacuum-side tail L1  -6.4/-6.3  ->  -7.4/-7.6  ->  -9.3/-9.4 %                      better
+   window L1            -1.5/-2.4  ->  -1.4/-2.8  ->  -3.6/-4.4 %                      better
+   charge response L1   -1.1       ->  +0.9       ->  +2.3 %                           unchanged
+   metal-share error    +12.3      ->  +9.4       ->  +7.0 %                           WORSE
+   solvent profile L1   -1.2/+5.4  ->  +0.7/+4.5  ->  +0.8/+2.9 %                      within +-5%
+   E rmse               +2.0/-7.7  ->  -4.2/-17.9 ->  +5.0/+4.4 %                      noise (repl. band 0.81-1.04)
+   charging residual    -1.1       ->  -8.8       ->  +4.9 %                           noise, training stage
+VERDICT: the first-stage effective-potential input (v_new = d(A_cav+A_diel+A_ion)/dn_e at the
+stage-1 field, projected on the receiver widths) does not improve what it was meant to improve.
+The electron density tail on the SOLVENT side, the charge response and the solvent profile are
+unchanged or worse; the only gains are the vacuum-side tail (-6 to -9%) and the plane-averaged
+window L1 (-1.5 to -4.4%), while the 3-D rmse -- the trained quantity -- is 1-2% worse in every
+epoch and every state, the force error is 2-7% worse at every epoch (validation F outside the
+same-config replicate's range in 14/14 epochs), and occ_aug is 7-16% worse. Cost +12% step
+time, +2.45 GiB. Both arms share the same structural defect the comparison exposes: the model's
+charge response dn(z) differs from DFT's by more than the response itself (L1 1.48-1.62 vs 1.51
+e) and puts 0.13-0.16 of the extra charge in the metal region against DFT's 0.33 -- that defect
+is independent of the input and is the lead to follow. Decision on the flag (drop, or a variant)
+is the user's; the code stays optional-off (solvent_pb1d_vsolv_input default False).
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
