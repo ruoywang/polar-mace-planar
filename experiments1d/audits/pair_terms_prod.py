@@ -52,6 +52,10 @@ DFT = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single")
 OUT = os.environ.get("KIT_OUT", os.path.join(RUN, "logs"))
 STRIDE = int(os.environ.get("KIT_STRIDE", "6"))
 os.environ.setdefault("MACE_PB1D_NO_PRELOAD", "1")   # per-frame eviction below
+# the model object unpickles its PB backend with paths relative to the run dir
+# (./cal1_train.json, cache/); resolve them the way ab_eval.py does
+OUT = os.path.abspath(OUT)
+os.chdir(RUN)
 
 PAIRS_VAL = [28, 30, 43, 60, 61, 62, 69, 79, 83, 94,
              128, 134, 148, 153, 159, 177, 180, 185, 186, 189]
