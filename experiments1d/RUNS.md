@@ -3874,6 +3874,67 @@ verified against the offline-corrected epoch-499 values to 1e-4):
    (+6-7% structural, +2.6 to +16.9% validation) and worse density_3d / occ_aug.
 
 
+## 2026-09-21 gate_vsolv COMPLETE (epochs 0-33) + epoch-30 structural comparison  (segment 2 = 3459907 c301-001 14:22 -> 15:12, epochs 29-33 in 3011 s; evaluations 3460001 prod e30 / 3460175 gate e30; code b396deb; pushed 59815d1 -> 815dd6d)
+
+Segment 2 resumed from the epoch-28 state (RNG streams restored), epochs 29-33: step mean
+1.64-1.66 s (epoch 29 2.19 s because of one 90 s step right after the resume), CUDA peak
+26.35-26.36 GiB, n_outer 7.7-7.9 / 10, no fallbacks; models/gate_vsolv.model written, EXIT 0.
+
+VALIDATION, all PB epochs 20-33, ratio gate/prod with the same-config replicate w1000_ref/prod
+as the noise floor (14 epochs each):
+                  loss     E      F      pot    fermi  dens3d  Phi1D  rho_b   occ
+   gate/prod mean 1.048  0.958  1.056  1.037  0.996  1.014   1.026  1.029  1.111
+   gate range     0.98-  0.82-  1.007- 0.90-  0.83-  1.006-  0.98-  1.00-  1.066-
+                  1.11   1.05   1.169  1.22   1.19   1.019   1.05   1.05   1.163
+   repl/prod mean 1.003  0.964  0.971  1.011  0.965  0.998   0.993  1.041  1.042
+   repl range     0.96-  0.81-  0.944- 0.86-  0.76-  0.991-  0.95-  1.02-  1.02-
+                  1.05   1.04   1.003  1.18   1.05   1.007   1.05   1.08   1.07
+   gate epochs outside the replicate range
+                  7/14   1/14   14/14  1/14   6/14   13/14   2/14   4/14   13/14
+   Epoch 33: loss 1.019 vs 0.991, E 6.49 vs 6.23 meV, F 46.60 vs 45.08 meV/A, pot 0.1533 vs
+   0.1546, fermi 0.1255 vs 0.1405, dens3d 0.03259 vs 0.03218, Phi1D 0.1358 vs 0.1303, rho_b
+   0.001226 vs 0.001207, occ 0.00924 vs 0.00858.
+   The F excess narrows with training (1.06-1.17 at epochs 20-25, 1.03-1.04 at 31-33) but stays
+   above the replicate's whole range in all 14 epochs; density_3d (+0.6 to +1.9%) and occ_aug
+   (+6.6 to +16%) likewise. Nothing is better outside the noise at any epoch.
+
+EPOCH-30 STRUCTURAL COMPARISON (same protocol as epoch 25):
+                                            prod e30    gate e30   gate/prod-1
+   charged NiN44 (47 frames)
+     E err/atom rmse (meV/atom)              11.698      11.210      -4.2%   (bias +11.41 / +10.96)
+     F rmse (meV/A)                           46.71       48.09      +3.0%
+     solvent profile L1 vs DFT (e)           0.6705      0.6754      +0.7%
+     solvent dipole |m-d| (e A)              0.1937      0.1978      +2.1%
+     |E_bl model - DFT field| (eV)           0.2577      0.2464      -4.4%
+     3-D density rmse (e/A^3)                0.03347     0.03377     +0.9%
+     window L1 (e)                            3.0234      2.9798     -1.4%
+     tail bottom L1 / dN (e)             0.4429/+0.0534  0.4101/+0.0897   -7.4%
+     tail top    L1 / dN (e)             0.0737/+0.0706  0.0774/+0.0717   +5.1%
+   neutral NiN44 (47 frames)
+     E err/atom rmse (meV/atom)               5.621       4.614     -17.9%   (bias -5.56 / -4.53)
+     F rmse (meV/A)                           64.13       64.96      +1.3%
+     solvent profile L1 vs DFT (e)           0.5275      0.5514      +4.5%
+     solvent dipole |m-d| (e A)              0.3219      0.2852     -11.4%
+     |E_bl model - DFT field| (eV)           0.2906      0.1979     -31.9%
+     3-D density rmse (e/A^3)                0.03359     0.03387     +0.8%
+     window L1 (e)                            3.0830      2.9955     -2.8%
+     tail bottom L1 / dN (e)             0.4383/+0.0534  0.4050/+0.0602   -7.6%
+     tail top    L1 / dN (e)             0.1044/+0.1024  0.1159/+0.1137  +11.0%
+   charge response dn(z), 47 pairs
+     L1(model-DFT) (e)                        1.5479      1.5614      +0.9%   (DFT scale 1.509)
+     |zc model - zc dft| (A)                  0.239       0.201      -16.0%
+     |metal share model - dft|                0.1914      0.2095      +9.4%   (DFT share 0.331)
+   paired charging (47 pairs) rmse / bias / std (eV)
+                                       3.556/+3.514/0.550  3.244/+3.206/0.492   (recorded)
+     dE_bl pair mean / std (eV)         +0.075 / 0.227     +0.223 / 0.224
+   Same pattern as epoch 25 in every structural quantity: the vacuum-side (bottom) tail is 7%
+   better, the solvent-side (top) tail 5-11% worse, the 3-D rmse ~1% worse, the window L1 1-3%
+   better, the charge response unchanged (+0.9%) with a slightly worse metal share, the solvent
+   profile within +-5%. The force error excess is down to +3.0 / +1.3% at this epoch (validation
+   +3.2%). The E rmse is lower with the input (-4 / -18%) but E sits inside the replicate's
+   0.81-1.04 band on validation and the charging bias (+3.2 vs +3.5 eV) is the training stage.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
