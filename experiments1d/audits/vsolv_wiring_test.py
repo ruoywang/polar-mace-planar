@@ -452,6 +452,31 @@ def sec_Z(a):
         fd_t = (s_term(nP) - s_term(nM)) / (2 * h)
         print(f"      term {name:4s}: offline JVP {jvp_t:+.6f}  vs FD {fd_t:+.6f}  (diff {jvp_t-fd_t:+.6f})")
         del n_leaf2; torch.cuda.empty_cache()
+    # Z3: the cavity term's Hessian path against the AREA_EPS regulariser (sqrt(|grad S|^2 + eps)):
+    # JVP and FD of the cav feature functional for several eps, plus the A_cav value.
+    print("   Z3 cav term vs AREA_EPS (JVP = offline double backward along dn/dR; FD h 0.01 and 0.02; A_cav value):")
+    nz = int(grid.shape[2]); phi_z = VS.fourier_resample_1d(phi0, nz)
+    pp2 = a.get_positions().copy(); pp2[i, c] += 0.02; nP2, *_ = capture(pp2)
+    pm2 = a.get_positions().copy(); pm2[i, c] -= 0.02; nM2, *_ = capture(pm2)
+    for eps_t in (1e-30, 1e-12, 1e-8, 1e-6, 1e-4):
+        def s_cav(n, create=False):
+            with torch.enable_grad():
+                nl = n if (create and n.requires_grad) else n.detach().requires_grad_(True)
+                A = VS.free_energies(nl, phi_z, grid, params, tp, sigma_b, eps_t)
+                (gr,) = torch.autograd.grad(A[0], nl, create_graph=create)
+                v_t = VS.VSOLV_SIGN * gr / (grid.volume / float(grid.ngrid))
+                val, grad = VS.smoothed_value_and_gradient(v_t, grid, fr0, float(sig[0]))
+                s_t = (torch.cat([val[i:i+1], grad[i]]) * w).sum()
+            return (s_t, nl, float(A[0])) if create else (float(s_t), None, float(A[0]))
+        nl3 = n0.clone().requires_grad_(True)
+        s_t, _, a_val = s_cav(nl3, create=True)
+        with torch.enable_grad():
+            (g3,) = torch.autograd.grad(s_t, nl3)
+        jvp3 = float((g3 * dn_dir).sum())
+        fd1 = (s_cav(nP)[0] - s_cav(nM)[0]) / (2 * 0.01)
+        fd2 = (s_cav(nP2)[0] - s_cav(nM2)[0]) / (2 * 0.02)
+        print(f"      eps {eps_t:.0e}: A_cav {a_val:+.6f} eV | JVP {jvp3:+.6f} | FD h0.01 {fd1:+.6f} h0.02 {fd2:+.6f} | JVP-FD {jvp3-fd1:+.6f}")
+        del nl3, s_t, g3; torch.cuda.empty_cache()
     evict()
 
 
