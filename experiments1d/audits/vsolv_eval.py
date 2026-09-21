@@ -100,7 +100,7 @@ for sid in SIDS:
     lz = cap["height"]
     phi_z = VS.fourier_resample_1d(cap["phi_z"], nz)
     sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
-    eps_area = float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30"))
+    eps_area = float(os.environ.get("MACE_PB1D_VSOLV_AREA_EPS", "1e-8"))   # the feature's own floor (see pb1d_vsolv)
     print(f"\n===================== sid {sid} ({'charged' if abs(float(a.info.get('total_charge',0)))>1e-6 else 'neutral'}, {len(a)} atoms) grid {shape} =====================")
 
     if sid == SIDS[0]:

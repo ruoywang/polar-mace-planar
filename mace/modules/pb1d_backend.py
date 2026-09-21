@@ -859,9 +859,14 @@ class PB1DBackend:
             from .pb1d_vsolv import vsolv_node_fields
             with self._Phase(self, "7_vsolv", device):
                 _sig_b = float(self.params["R_B"]) if float(self.params["R_B"]) > 0.0 else float(self.params["A_K"])
+                # the feature's cavity term uses ITS OWN floor in sqrt(|grad S_cav|^2 + eps):
+                # the energy's 1e-12 floor has curvature 1/sqrt(eps) = 1e6 on the plateaus, and
+                # the second derivative that the feature's outer dependence needs was dominated
+                # by it (AD-FD of the cavity path 33% at 1e-12, wrong sign at 1e-30; 2.4% at 1e-8
+                # with A_cav moved by 0.15%, measured 2026-09-21). The energy term keeps 1e-12.
                 vsolv_nf = vsolv_node_fields(
                     n_e_density, out["phi"], pf_in, grid, self.params, self._tp, _sig_b,
-                    float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30")),
+                    float(os.environ.get("MACE_PB1D_VSOLV_AREA_EPS", "1e-8")),
                     list(vsolv_sigmas) if vsolv_sigmas is not None else [1.0],
                     checkpoint=not bool(os.environ.get("MACE_PB1D_VSOLV_NOCKPT")),
                 )

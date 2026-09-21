@@ -390,7 +390,7 @@ def sec_Z(a):
 
     n0, phi0, fr0, grid, params, tp = capture()
     sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
-    eps_area = float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30"))
+    eps_area = float(os.environ.get("MACE_PB1D_VSOLV_AREA_EPS", "1e-8"))   # the feature's own floor (see pb1d_vsolv)
     sig = list(model.field_feature_widths)
 
     def s_of(n, phi, frac):

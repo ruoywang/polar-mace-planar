@@ -3,7 +3,12 @@ input (user design 2026-09-21; audits/vsolv_eval.py is the standalone check of t
 
     v_new(r) = d(A_cav + A_diel + A_ion)/dn_e(r) |_{phi = phi_stage1}
 
-  A_cav  = TAU * int |grad S_cav[n_e]| dV          (pb1d_backend's regularised expression, doubled Stern mask)
+  A_cav  = TAU * int |grad S_cav[n_e]| dV          (pb1d_backend's expression: doubled Stern mask, sqrt(|grad S|^2 + eps);
+                                                    the FEATURE uses its own floor eps = MACE_PB1D_VSOLV_AREA_EPS = 1e-8,
+                                                    not the energy's 1e-12 -- the second derivative that the outer
+                                                    dependence needs is dominated by the floor's curvature 1/sqrt(eps):
+                                                    AD-FD of the cavity path 33% at 1e-12, sign wrong at 1e-30, 2.4% at
+                                                    1e-8, A_cav moved by 0.15%; 2026-09-21, vsolv_wiring_test section Z3)
   A_diel = N_MOL * int S_diel[n_e] lambda_diel(E_loc) dV,  lambda_diel = lambda_rot + lambda_pol + lambda_sic
   A_ion  = n_max * int S_ion[n_e] lambda_ion(phi) dV,      lambda_ion = -(1/beta) ln(1 - theta + theta cosh(z beta phi))
 
