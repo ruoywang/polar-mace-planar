@@ -3575,6 +3575,42 @@ one-feedback (stage-1, lagged) approximation as the reaction potential.
        (LIVE_POS path), step time and memory measured;
    (d) then the 34-epoch 3-GPU gate and the A/B against production.
 
+
+### 2026-09-21 v_new evaluated standalone at the stage-1 field  (jobs 3459277 / 3459279, code 9754b90, audits/vsolv_eval.py; user's tightened route)
+
+Definition implemented: v_new(r) = d(A_cav + A_diel + A_ion)/dn_e(r) at phi = phi*(z) of the
+stage-1 1-D solve (broadcast over the plane), the three terms in the parent's own form
+(A_cav = TAU int|grad S_cav| with the backend's regularisation and doubled Stern mask; A_diel =
+N_MOL int S_diel lambda_diel(E_loc), lambda_diel = lambda_rot + lambda_pol + lambda_sic, E_loc
+= f_loc E; A_ion = n_max int S_ion lambda_ion(phi), lattice gas theta_b = 0.436). The partial is
+g(n, phi) with phi an independent input; the model will evaluate g(n, phi*(n)).
+  C0  -d lambda_diel/dE = p(E) (parent polarisation incl. local-field factor): rel 7e-7 .. 5e-11
+      over E = 1e-4 .. 1 eV/A. PASS -- the free-energy expression is the parent's.
+  C1  FD of the partial at fixed phi, per term, sid 28: shell blob rel 4e-6 (cav) / 5e-7 (diel) /
+      3e-6 (ion); random smooth direction 3e-5 / 1e-7 / 2e-5. PASS. (sid 628's shell-blob
+      direction landed where all terms are zero -- a dead test direction, not a failure.)
+  C2  g(n, live phi) equals the fixed-phi value bitwise and carries d/dphi* (|.|max 4e3): the
+      structure that keeps the outer stage-1 dependence works.
+  C3  magnitudes (eV per electron), sid 28 / 628: v_diel grid rms 0.24 / 0.28, max 7.5 / 8.9,
+      plane-mean |v| peak 0.73 / 0.87 at z = 16.35 A; v_cav peak 0.077 / 0.078 at 16.65 A; v_ion
+      peak 2.7e-3 (charged) / 3e-8 (neutral) at 17.55 A. Dielectric transition S(1-S) peak at
+      17.40 A. AT THE NUCLEI all three are numerically zero (H 4e-15, O 1e-29): the potential
+      lives in the cavity shell 1-2 A outside the outermost atoms, so the projection must be the
+      receiver-Gaussian-smoothed value and gradient at the atom (field_feature_widths = 1.0 A),
+      exactly the electrostatic channel's projection of a potential -- not the nuclear value,
+      not a Poisson solve. Reaction potential for scale: rms 2.5-3.3 eV, at atoms 3.0-3.9 eV.
+  C4  cost per frame: g (grad only) 0.13-0.41 s, peak 2.4-4.7 GiB; g with create_graph (live
+      phi) 0.16-0.17 s but peak 21-22 GiB -> in training the double-backward graph must be
+      checkpointed (recompute in backward), not stored.
+  Values: A_cav 3.627 (stage-1 density) vs the backend's 3.915 (stage-2 density, matches DFT
+  3.868 to 1.2%): the pre-recursion density's cavity is 6-8% smaller in area; A_diel -1.29
+  (charged) / -1.60 (neutral); A_ion -0.019 / 0.000. v_new at stage 1 is consistently built
+  from the stage-1 density (the density that stage 1 solves with).
+Next: wire as an optional input (flag, default off): backend computes v_new + receiver-smoothed
+value/gradient at atoms (checkpointed), extensions adds the rows through the external-field
+block; sign/normalisation fixed by pushing the reaction potential through the same sampler;
+then force FD, loss-gradient check, step time / memory; then the gate.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
