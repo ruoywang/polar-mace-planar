@@ -156,11 +156,18 @@ def _vsolv_core(n_e: torch.Tensor, phi_z_solver: torch.Tensor, pos_frac: torch.T
                 tp, sigma_b: float, eps_area: float, sigmas: List[float]) -> torch.Tensor:
     """node fields [n_atoms, n_sigma, 4] = [V, dV/dx, dV/dy, dV/dz] with V = VSOLV_SIGN * smoothed v_new."""
     nz = int(grid.shape[2])
-    phi_z = fourier_resample_1d(phi_z_solver, nz)
-    if not n_e.requires_grad:
-        n_e = n_e.detach().requires_grad_(True)
-    a_cav, a_diel, a_ion = free_energies(n_e, phi_z, grid, params, tp, sigma_b, eps_area)
-    (gr,) = torch.autograd.grad(a_cav + a_diel + a_ion, n_e, create_graph=True)
+    # the inner partial needs a graph even when the caller runs under no_grad (inference,
+    # finite-difference probes): build it under enable_grad; keep the outer dependence
+    # (create_graph) only when the caller itself records gradients
+    outer_grad = torch.is_grad_enabled()
+    with torch.enable_grad():
+        n_in = n_e if (outer_grad and n_e.requires_grad) else n_e.detach().requires_grad_(True)
+        phi_in = phi_z_solver if outer_grad else phi_z_solver.detach()
+        phi_z = fourier_resample_1d(phi_in, nz)
+        a_cav, a_diel, a_ion = free_energies(n_in, phi_z, grid, params, tp, sigma_b, eps_area)
+        (gr,) = torch.autograd.grad(a_cav + a_diel + a_ion, n_in, create_graph=outer_grad)
+    if not outer_grad:
+        gr = gr.detach()
     v_phys = VSOLV_SIGN * gr / (grid.volume / float(grid.ngrid))
     rows = []
     for s in sigmas:

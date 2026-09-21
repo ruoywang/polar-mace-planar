@@ -3611,6 +3611,52 @@ value/gradient at atoms (checkpointed), extensions adds the rows through the ext
 block; sign/normalisation fixed by pushing the reaction potential through the same sampler;
 then force FD, loss-gradient check, step time / memory; then the gate.
 
+
+### 2026-09-21 v_new wired as an optional stage-1 input; first acceptance round  (code ad61501 -> d1cdf57; jobs 3459285 / 3459286 / 3459287)
+
+Wiring (solvent_pb1d_vsolv_input, default off): pb1d_backend.solve_graph computes the node
+fields (mace/modules/pb1d_vsolv.py) from THIS solve's live density and phi, positions live
+(pf_in); _pb1d_run_graphs collects them for the stage-1 pass only; _solvent_compensation_block
+adds their projection (_vsolv_projection_features, same rows as the reaction potential) to the
+compensation features. Sign: VSOLV_SIGN = -1 (energy per electron -> physics-sign potential).
+
+Round 1 (3459285, 3-D field path): S PASS -- the new 3-D sampler reproduces the electrostatic
+channel's projection of the reaction potential at the 207 atoms: value rel diff 7.5e-5
+(corr 1.000000), z-gradient rel 2.6e-4, lateral components 2e-17 -> the channel IS the
+physics-sign potential k rho/G^2 with receiver-Gaussian smoothing, normalisation confirmed.
+Then OOM in the force backward with the input ON: the checkpoint recompute of the inner
+double-backward graph (~21 GiB) ran while the outer backward held 37.7 GiB. Cause found in
+the standalone numbers: the 80-sweep 3-D local-field fixed point unrolled under create_graph.
+Fix d1cdf57: the stage-1 potential is plane-uniform, so E = -d/dz (w_b * phi), the local-field
+factor (pb1d_localfield, analytic implicit backward), lambda_diel and lambda_ion are 1-D
+functions of z, evaluated on the z axis and broadcast; only the cavity functions stay 3-D.
+
+Round 2, evaluator (3459286): C0 PASS (7e-7); C1 1-D vs 3-D torch_pb path: A_diel differs
+3.3e-5 eV (rel 2.6e-5), A_ion identical, |E_loc(z)| max diff 3e-3 eV/A (rel ~1e-4; Nyquist/kernel
+details) -- agreement at the 1e-5 level; C2 FD of the partial PASS on both frames and both
+directions (cav 2e-6..3e-5, diel 3e-7..7e-8, ion 1e-6..8e-6); C3 live-phi PASS; C4 unchanged
+magnitudes (v_diel peak 0.73/0.87 eV in the shell); receiver-smoothed (sigma 1.0) physics-sign
+value at atoms: O 0.037/0.045, H 0.039/0.047 eV rms, max 0.20-0.25 eV, Ni ~1e-7. C5 memory:
+grad+create_graph 3.0-3.2 GiB (was 21-22), per term 2.2-2.6 GiB, node fields + backward to
+(n_e, phi, positions) 2.9-3.1 GiB, 0.03-0.19 s.
+
+Round 2, wiring test (3459287, sid 28 / 628):
+  S PASS again (628: value rel 7.6e-4, gradient rel 1.9e-3 on a 16x smaller potential).
+  M new rows rms 0.119 / 0.135 vs channel rows 3.77 / 0.236 (3% charged, 57% neutral);
+    energy with the untrained head moves -0.020 / +0.015 eV, forces 2.3 / 3.1 meV/A.
+  T per frame: E+F  OFF 0.64 s / 6.0 GiB -> ON 0.86 s / 11.4 GiB (checkpointed) or 0.77 s /
+    15.8 GiB (stored); force-loss double backward OFF 1.0 s / 16.9 GiB -> ON 1.3 s / 28.7 GiB
+    (checkpointed) / 30.8 GiB (stored). The input adds ~5.4 GiB (E+F) and ~12 GiB (force-loss)
+    per frame: the training gate must measure the batch.
+  G force-loss parameter gradient (charge-head weight, AD vs FD): OFF rel 1.1e-2 / 3.8e-5, ON
+    8.6e-3 / 1.5e-5 -- the new path's gradient is as consistent as the existing one.
+  F forces: OFF worst 0.21 meV/A (known). ON: z components off by 336-489 meV/A and five
+    "PB1D-FALLBACK rms=nan" lines -- NOT an AD error: the finite-difference forwards run under
+    no_grad, where _vsolv_core's inner autograd.grad raised (no graph), the RuntimeError was
+    swallowed by the fallback guard, and the displaced energies came from the PLANAR fallback.
+    Fixed (this commit): the inner partial is built under enable_grad regardless of the caller,
+    create_graph only when the caller records gradients. F to be re-run.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
