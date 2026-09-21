@@ -3774,6 +3774,83 @@ validation metrics (E, F, potential, fermi, density_3d, Phi1D, rho_b, occ_aug), 
 tail against DFT, the 1-D solvent profile against dft_solvent1d_ref (ebl_audit-style L1), and the
 paired charging energy recorded (job_eval.sh with KIT_VSOLV=1 for the gate checkpoints).
 
+## 2026-09-21 gate_vsolv, first segment (epochs 0-28) + epoch-25 structural comparison  (segment 3459760 c301-004 12:03 -> 13:43, continuation 3459907; evaluations 3459890 gate / 3459891 prod; code b396deb)
+
+Segment 1: epochs 0-28 in 5791 s (budget stop after epoch 28, state written, continuation
+submitted by the chain). PB epochs: 213 steps, step mean 1.59-1.62 s, CUDA peak 26.34-26.36 GiB,
+n_outer mean 7.7-7.9 / max 10, no Newton-cap hits, no fallbacks (production epochs 20-22:
+1.43-1.44 s, 23.9 GiB). The +0.16-0.18 s / +2.45 GiB of the input in real training, as probed.
+
+CONSISTENCY CHECK before using production as the control (user's request). Config diff gate vs
+prod: name, max_num_epochs (34 vs 500), the flag -- nothing else; same seed 123, warm-up 20,
+losses, 1 x 3 ranks. But the trajectories are NOT identical even in the warm-up, where the flag
+is inactive (epoch 0: loss 86.81 vs 86.25, E 18.15 vs 35.84 meV; epoch 19: loss +2.7%, F +2.6%).
+This is the known run-to-run non-determinism of the 3-rank GPU training (first seen 09-13 with
+two same-config arms), not a configuration difference. Its size is measured with the same-config
+replicate 3-residual_3D/w1000_ref (config = production except name / 60 epochs, seed 123):
+epoch 19 loss +10.3%, F +11.7% vs production; PB epochs 20-33, replicate/prod ratios:
+
+                  loss     E      F      pot   fermi  dens3d  Phi1D  rho_b   occ
+   mean           1.003  0.964  0.971  1.011  0.965  0.998   0.993  1.041  1.042
+   range (20-33)  0.98-  0.93-  0.947- 0.86-  0.76-  0.991-  0.95-  1.03-  1.02-
+                  1.05   1.04   1.003  1.18   1.05   1.007   1.03   1.08   1.07
+This is the noise floor a gate/prod ratio has to clear (one replicate: a range, not a
+significance). gate_vs_prod_table.py now prints this third column and the count of gate epochs
+outside the replicate's range.
+
+GATE vs PRODUCTION, validation, epochs 20-28 (ratio gate/prod; replicate range in brackets):
+                  loss     E      F      pot    fermi  dens3d  Phi1D  rho_b   occ
+   mean           1.065  0.973  1.074  1.047  1.021  1.016   1.027  1.036  1.130
+   range          1.02-  0.82-  1.026- 0.94-  0.83-  1.012-  1.00-  1.01-  1.081-
+                  1.11   1.05   1.169  1.15   1.19   1.019   1.05   1.05   1.163
+   epochs outside
+   replicate range 7/9    3/9    9/9    0/9    4/9    9/9     3/9    3/9    9/9
+   Epoch 28 values: loss 1.101 vs 1.078, E 6.36 vs 7.77 meV, F 50.66 vs 49.37 meV/A, pot 0.1822 vs
+   0.1739, fermi 0.1636 vs 0.1632, dens3d 0.03313 vs 0.03275, Phi1D 0.1504 vs 0.1440, rho_b
+   0.001260 vs 0.001214, occ 0.00973 vs 0.00900.
+   Reading: three metrics sit outside the replicate's range in every one of the 9 epochs and all
+   three are WORSE with the input -- F (+2.6 to +16.9%), density_3d (+1.2 to +1.9%) and occ_aug
+   (+8 to +16%); loss follows F. E, potential, fermi, Phi1D, rho_b are inside the noise. No
+   validation metric is better outside the noise.
+
+EPOCH-25 STRUCTURAL COMPARISON (audits/ebl_audit.py + struct_compare.py, 47 pairs = 20 val +
+27 stride-6 train, 94 frames, forces on; the gate evaluated with KIT_VSOLV=1 on the same model
+object; DFT 1-D reference now read with the fixed convention, e/A^3 electron-positive -> flipped,
+verified against the offline-corrected epoch-499 values to 1e-4):
+                                       prod e25    gate e25    gate/prod-1
+   charged NiN44 (47)
+     E err/atom rmse (meV/atom)          13.328      13.599      +2.0%   (bias +13.06 / +13.34)
+     F rmse (meV/A)                       53.32       56.88      +6.7%
+     solvent profile L1 vs DFT (e)       0.6825      0.6744      -1.2%
+     solvent dipole |m-d| (e A)          0.2660      0.2877      +8.1%
+     E_bl model / DFT field (eV)      -0.266/-0.318  -0.190/-0.318
+   neutral NiN44 (47)
+     E err/atom rmse (meV/atom)           6.303       5.820      -7.7%   (bias -6.25 / -5.75)
+     F rmse (meV/A)                       68.55       72.79      +6.2%
+     solvent profile L1 vs DFT (e)       0.5559      0.5858      +5.4%
+     solvent dipole |m-d| (e A)          0.1806      0.1904      +5.4%
+     E_bl model / DFT field (eV)      -0.838/-0.786  -0.833/-0.786
+   paired charging (47 pairs), rmse / bias / std (eV)
+                                   4.041/+3.996/0.603  3.998/+3.951/0.615   (recorded, epoch 25)
+     dE_bl pair mean / std (eV)      +0.572 / 0.257     +0.643 / 0.280
+   At epoch 25 the gate's force error is 6-7% worse in both states (same direction and size as
+   the validation F), the solvent profile is unchanged within +-5% (charged slightly better,
+   neutral slightly worse), the E_bl pair variation is slightly LARGER with the input. The
+   charging bias of ~+4 eV at epoch 25 is the training stage (production 59 -> 1.33, 235 -> 0.26),
+   identical in both arms.
+   Density-grid comparison (audits/density_profile_eval.py): gate numbers below; production's in
+   the next entry when 3459891 finishes.
+   gate e25: 3-D rmse 0.03457 (charged) / 0.03468 (neutral) e/A^3 over all 178 planes x 168^2
+   points of the DFT window (z 3.7-19.6 A); window L1 2.99 / 3.03 e; electron tails (22 planes =
+   2 A beyond the outermost atom + 1 A): bottom model-DFT +0.093 / +0.066 e (L1 0.370 / 0.364),
+   top +0.076 / +0.111 e (L1 0.081 / 0.113) -- positive = fewer electrons than DFT in the tail.
+   Charge response dn(z) = n(charged) - n(neutral) (pure electron density, identical geometry):
+   L1(model-DFT) 1.615 e against L1(DFT dn) 1.509 e, i.e. the response profile is wrong at the
+   level of the response itself; integral -1.062 vs -1.062 e (exact), centroid 12.57 vs 12.55 A,
+   share of the extra charge in the metal region (z <= top solute atom + 1 A) 0.141 vs DFT 0.331
+   -- the model puts less than half of DFT's share on the metal and the rest into the water.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
