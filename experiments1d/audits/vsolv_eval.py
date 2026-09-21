@@ -125,6 +125,12 @@ def free_energies(n_e, phi3, grid, params, tp, w_b, eps_area):
     """A_cav, A_diel, A_ion at fixed phi3; n_e is the differentiated input."""
     s_ion, s_diel, s_cav = tp.create_cavity_torch(n_e, grid, params)
     dV = grid.volume / float(np.prod(n_e.shape))
+    # pb1d_backend's exact expression: the Stern box mask is applied a second time to s_cav
+    # ("Stern mask doubled") before the spectral gradient and the AREA_EPS floor
+    if bool(params["LVAC"]) and float(params["SOL_Z1"]) > float(params["SOL_Z0"]):
+        m_ion3 = tp._smooth_box(grid, float(params["SOL_Z0"]) + float(params["D_STERN"]),
+                                float(params["SOL_Z1"]) - float(params["D_STERN"]), float(params["SOL_SIGMA"]))
+        s_cav = s_cav * m_ion3
     gx, gy, gz, _ = grid.grad_from_recip(grid.fft(s_cav))
     a_cav = float(params["TAU"]) * torch.sqrt(gx * gx + gy * gy + gz * gz + eps_area).sum() * dV
     fq = tp._field_quantities(phi3, s_ion, s_diel, grid, params, w_b)   # emag includes f_loc
