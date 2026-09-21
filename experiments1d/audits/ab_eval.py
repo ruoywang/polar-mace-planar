@@ -65,6 +65,12 @@ else:
     model = torch.load(f=mp, map_location=device).to(device)
     model.load_state_dict(torch.load(cp, map_location=device)["model"], strict=False)
 model.eval(); model._pb1d_epoch = EPOCH
+# KIT_VSOLV=1: evaluate a checkpoint TRAINED WITH the stage-1 effective-potential input
+# (solvent_pb1d_vsolv_input) when the model object was saved without the flag (same parameter
+# set; the input only adds rows to existing features). Off by default.
+if os.environ.get("KIT_VSOLV", "") not in ("", "0"):
+    model.solvent_pb1d_vsolv_input = True
+print(f"[{TAG}] solvent_pb1d_vsolv_input = {getattr(model, 'solvent_pb1d_vsolv_input', False)}")
 for p in model.parameters(): p.requires_grad_(False)
 z_table = tools.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 _bd = {}; _bk = PB.PB1DBackend.solve_graph
