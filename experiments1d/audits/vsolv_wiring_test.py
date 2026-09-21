@@ -61,6 +61,12 @@ def _bk_wrap(self, *a, **k):
         cap.update(r=r, backend=self)
     return r
 PB.PB1DBackend.solve_graph = _bk_wrap
+_clo = PB.closure_from_fields
+def _clo_wrap(n_e_density, cvhar3, grid, params, tp):
+    if "n_e" not in cap:   # first closure call of a forward = stage 1
+        cap.update(n_e=n_e_density.detach().clone(), grid=grid, params=params, tp=tp)
+    return _clo(n_e_density, cvhar3, grid, params, tp)
+PB.closure_from_fields = _clo_wrap
 
 z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 kspec = KeySpecification(info_keys={"energy": "energy", "total_charge": "total_charge", "total_spin": "total_spin",
@@ -363,11 +369,59 @@ def sec_Y(a):
     evict()
 
 
+@section("Z")
+def sec_Z(a):
+    """Which Jacobian of the node fields disagrees with FD? Capture n_e (stage-1 density) and phi*
+    from displaced forwards, then evaluate the node-field functional OFFLINE with each input frozen
+    or varied (values only), and compare each FD with the matching detached-AD value."""
+    from mace.modules import pb1d_vsolv as VS
+    i, c = 181, 2
+    w = torch.tensor([1.0, 0.3, -0.7, 0.5], dtype=torch.float64, device=device)
+    cell_t = torch.tensor(np.array(a.get_cell()), device=device, dtype=torch.float64)
+
+    def capture(positions=None):
+        model.solvent_pb1d_vsolv_input = True; cap.clear()
+        b = batch_of(a, positions)
+        with torch.no_grad():
+            model(b.to_dict(), compute_force=False, training=False)
+        pos = torch.tensor(a.get_positions() if positions is None else positions, device=device, dtype=torch.float64)
+        frac = torch.remainder(pos @ torch.linalg.inv(cell_t), 1.0)
+        return cap["n_e"], cap["r"]["phi_z"].detach().clone(), frac, cap["grid"], cap["params"], cap["tp"]
+
+    n0, phi0, fr0, grid, params, tp = capture()
+    sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
+    eps_area = float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30"))
+    sig = list(model.field_feature_widths)
+
+    def s_of(n, phi, frac):
+        with torch.no_grad():
+            nf = VS.vsolv_node_fields(n, phi, frac, grid, params, tp, sigma_b, eps_area, sig, checkpoint=False)
+        return float((nf[i, 0, :] * w).sum())
+
+    s0 = s_of(n0, phi0, fr0)
+    print(f"--- Z: node-field functional of atom {i} from captured stage-1 quantities, s0 {s0:+.6e} ---")
+    print(f"   {'h':>6} | {'FD all vary':>12} {'FD phi frozen':>13} {'FD n,phi frozen':>15} {'FD n only':>10} {'FD phi only':>11}")
+    for h in (0.005, 0.01, 0.02):
+        pp = a.get_positions().copy(); pp[i, c] += h; nP, phP, frP, *_ = capture(pp)
+        pm = a.get_positions().copy(); pm[i, c] -= h; nM, phM, frM, *_ = capture(pm)
+        fd_all = (s_of(nP, phP, frP) - s_of(nM, phM, frM)) / (2 * h)
+        fd_phifrozen = (s_of(nP, phi0, frP) - s_of(nM, phi0, frM)) / (2 * h)
+        fd_posonly = (s_of(n0, phi0, frP) - s_of(n0, phi0, frM)) / (2 * h)
+        fd_nonly = (s_of(nP, phi0, fr0) - s_of(nM, phi0, fr0)) / (2 * h)
+        fd_phionly = (s_of(n0, phP, fr0) - s_of(n0, phM, fr0)) / (2 * h)
+        print(f"   {h:6.3f} | {fd_all:+12.6f} {fd_phifrozen:+13.6f} {fd_posonly:+15.6f} {fd_nonly:+10.6f} {fd_phionly:+11.6f}")
+        dn = float((nP - nM).abs().max()); dphi = float((phP - phM).abs().max())
+        print(f"          max|n+ - n-| {dn:.3e} e/A^3, max|phi+ - phi-| {dphi:.3e} eV")
+    print("   compare with AD: all live / phi detached / phi,n detached / phi,pos detached / n,pos detached from section Y")
+    evict()
+
+
 for sid in SIDS:
     a = atoms_by_sid[sid]
     print(f"\n===================== sid {sid} ({'charged' if abs(float(a.info.get('total_charge',0)))>1e-6 else 'neutral'}, {len(a)} atoms) =====================")
     head = model.field_dependent_charges_maps[0]
     theta = next(p for p in head.parameters())
+    sec_Z(a)
     sec_Y(a)
     sec_X(a)
     res_S = sec_S(a)
