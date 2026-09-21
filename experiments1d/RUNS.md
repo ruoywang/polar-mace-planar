@@ -3698,6 +3698,48 @@ Gate prepared, NOT submitted: 3-residual_3D/gate_vsolv (production config + solv
 True, 34 epochs, seed 123, job_seg.sh on gpu-a100-dev with 3 ranks / 6000 s segments). The
 control is production's own epochs 0-33 (same seed; the code differs only inside the flag).
 
+
+### 2026-09-21 v_new acceptance, rounds 6-7: the remaining 5% traced to the area regulariser; final acceptance  (ca3be2d -> 48051b5; jobs 3459332/3 (Y2), 3459368 (Z), 3459372 (Z2), 3459378 (Z3), 3459381/2 (final))
+
+Y2 line scan of the feature functional s(z) over +/- 0.01 A: quadratic-fit residual rms 3e-6
+(relative 3e-5) -- a noise floor that makes small-step FD scatter by a few percent; the
+fit slope (noise-robust) agreed with AD to 0.2% on the neutral frame but not on the charged
+one (fit -0.0858 vs AD -0.0905, 5%).
+Z (charged frame, FD from captured stage-1 densities and phi* with each input frozen or varied,
+against the matching detached-AD values): positions path FD -0.07571 vs AD -0.07571; phi path
+-0.00076 vs -0.00077; DENSITY path FD -0.0096 vs AD -0.0140 -- the whole gap.
+Z2: the offline double backward along the ACTUAL density change reproduces the model's
+value (-0.01405), so the model's dn/dR graph is fine and the inner Hessian path is at fault;
+per term: diel JVP +0.00335 vs FD +0.00341, ion +0.00029 vs +0.00030, CAV -0.01769 vs -0.01327.
+Z3, the cavity term against the area floor sqrt(|grad S|^2 + eps):
+      eps      A_cav      JVP (AD)    FD h0.01    JVP-FD
+      1e-30    3.62671    +0.01246    -0.01319    sign wrong
+      1e-12    3.62672    -0.01769    -0.01327    -0.0044 (33%)     <- the energy term's floor
+      1e-8     3.63200    -0.01836    -0.01793    -0.0004 (2.4%)    A_cav +5.3 meV (0.15%)
+      1e-6     3.69287    -0.02271    -0.02216    -0.0005          A_cav +66 meV (1.8%)
+   The first derivative (v_cav itself) is exact at any floor (C2 passed at 1e-12); the SECOND
+   derivative, which the feature's outer dependence needs, is dominated by the floor's curvature
+   1/sqrt(eps) on the plateaus (1e6 at 1e-12), and the plateau jitter through g/sqrt(g^2+eps) is
+   the 3e-6 noise floor. Note the FD itself moves with eps (-0.0133 -> -0.0179 -> -0.0222): the
+   curvature term div(grad S/|grad S|) of the parent's lambda_cav is not converged in the
+   regulariser -- an approximation of the FEATURE's cavity part, declared here.
+FIX 48051b5: the feature's cavity term uses its own floor MACE_PB1D_VSOLV_AREA_EPS = 1e-8; the
+energy term keeps MACE_PB1D_AREA_EPS = 1e-12 (its first derivative is what matters there).
+FINAL acceptance (3459381 sid 28 / 3459382 sid 628, code 48051b5):
+  Y  feature derivative AD -0.09148 / -0.09128 vs FD(h 0.002) -0.09145 / -0.09126, line-scan fit
+     slope -0.09117 / -0.09102 (0.3%); fit residual rms 7e-7 (was 3e-6).
+  F  forces ON worst 0.210 / 0.211 meV/A over six components (OFF 0.209 / 0.211).
+  G  force-loss parameter gradient ON rel 9.3e-3 / 7.6e-6 (OFF 6.3e-3 / 1.2e-7; the 28 weight's
+     FD step is the limit on both).
+  S  PASS (unchanged). M new rows 3% (charged) / 61% (neutral) of the channel rows.
+  T  per frame: E+F OFF 0.62 s / 6.0 GiB -> ON 0.71 s / 10.3 GiB (ckpt) or 0.67 s / 12.0 GiB;
+     force-loss double backward OFF 1.03 s / 16.9 GiB -> ON 1.16 s / 23.4 GiB (ckpt) or 3.5 s /
+     24.2 GiB. Net +4.2 GiB and +6.5 GiB per frame, +0.1 s.
+The user's pre-training list (potential partial, forces after wiring, loss gradients, cost) is
+complete. Next step, NOT taken without the user: the gate 3-residual_3D/gate_vsolv (34 epochs,
+production config + solvent_pb1d_vsolv_input, dev-queue 3-rank segments; control = production
+epochs 0-33).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
