@@ -3423,6 +3423,74 @@ paired residual is (a) E_bl's pair-to-pair variation, 0.20 eV std, and (b) a per
 constant +0.17 eV. Next (user's call): audit E_bl's definition and G0 owner; a
 no-training test already exists in these numbers (dE_bl = 0 -> 0.178 / +0.170 / 0.053).
 
+
+### 2026-09-21 E_bl physics audit  (job 3459240, code 096c14a, audits/ebl_audit.py; corrected tables via logs/ebl_audit_prod500_e499_fixed.npz)
+
+Two corrections to the entry above, from the user's review: (1) the +0.17 eV left after
+removing the E_bl pair difference is a PER-PAIR bias; calling it "per electron" needs
+dN_e != 1 pairs, which this set does not have (every pair is +1 electron). (2) "no network
+term can compensate" was too strong: inter_e is charge-blind (d = 0 on every pair) but
+local_electron_energy reads charges and fields (its pair contribution is 0.001 eV on THIS
+checkpoint), and the density / solvent heads move the explicit terms indirectly.
+
+Script errors caught after the run (both fixed offline, numbers below are the corrected
+ones): the DFT 1-D reference arrays rb_z_vasp / ion_z_vasp are e/A^3 with the electron-
+positive sign (the ionic profile integrates to -q_ion(model)); the log's first Q2 block
+read the neutral frames with a wrong unit scale and all frames with the wrong sign.
+
+Q1 -- one set of definitions on the solver grid (n = 600, dz = 0.075 A):
+  * E_bl(exported) = int rho_solv (-phi_base') A dz, recomputed to 7e-16; reciprocity
+    E_bl = int rho_base' phi_solv holds to 3e-14 (same periodic G!=0 operator, K = 180.95
+    eV A). E_bl IS the baseline-solute x solvent cross term.
+  * 1-D compensation = cross_net + self = int rho_net phi_solv + 1/2 int rho_solv phi_solv
+    (charged: -3.390 + 1.784; neutral: +0.080 + 0.013 eV). Disjoint from E_bl by
+    construction -> no double counting between the two.
+  * G0: both the VASP potential and the baseline cache are cell-average-zero, so the
+    q_solv <phi_base> piece is dropped consistently on both sides. The slab dipole
+    correction carries the G0 (dipole) part for explicit + solvent dipoles; the baseline
+    dipole x solvent dipole G0 piece is in neither term (flagged, not quantified).
+  * Solver phi_z is in the electron-PE convention (94/94 frames).
+  * What a stationary free energy has and the interaction form lacks: the medium's
+    internal free energy. Linear response: F_solv = 1/2 int rho_sol phi_solv =
+    1/2 (cross_net + E_bl), model explicit = cross_net + E_bl + self; difference
+    U_int = -1/2 int rho_solv phi_tot. Two routes agree: from the solver's total
+    potential +0.258 (charged) / +0.241 (neutral) eV per frame; from the reconstruction
+    +0.20 / +0.23. Nearly state-independent: pair difference mean +0.025 (val) / +0.011
+    (train), rms 0.095 / 0.093, but corr(resid, dU_int) = -0.95 / -0.96.
+    Adding U_int(recon) to dE: val 0.250/+0.150/0.200 -> 0.163/+0.125/0.104;
+    train 0.267/+0.193/0.184 -> 0.183/+0.148/0.108. Adding U_int(solver phi):
+    0.210/+0.175/0.116 and 0.227/+0.204/0.099. Half the scatter variance, not all: the
+    residual regresses on dU_int with slope -2.07 (val) / -1.93 (train), i.e. it behaves as
+    if the WHOLE E_bl pair variation should be absent, not half of it.
+
+Q2 -- the same integral with the DFT 1-D solvent charge (data/dft_solvent1d_ref.npz):
+                          model field      DFT field
+    E_bl charged (mean)     -0.609           -0.350      (train -0.546 / -0.294)
+    E_bl neutral (mean)     -0.589           -0.794      (train -0.563 / -0.780)
+    dE_bl pair, mean/rms    -0.020 / 0.169   +0.444 / 0.456   (train +0.016/0.231, +0.487/0.512)
+  corr(dE_bl model, dE_bl DFT) 0.25 (val) / 0.59 (train); corr(resid, dE_bl DFT) 0.24 / 0.54.
+  Solvent profile error (plane-averaged, L1 over the cell): charged 0.446 e vs |rho_dft|
+  1.056 (42%); neutral 0.435 e vs 0.490 (88%). z-dipole: charged 17.44 vs 17.53 e A
+  (ion layer), neutral 0.19 vs 0.43. Total ionic charge identical (+1.048). So the model's
+  E_bl is nearly state-independent where the DFT-field one changes by +0.44 eV across
+  charging: for this term the INPUT FIELD (the 1-D solvent charge, worst on neutral frames)
+  is a first-order error. Swapping the model's E_bl for the DFT-field one inside the
+  trained model gives rmse 0.626 / bias +0.614 / std 0.121 (train 0.679/+0.663/0.144):
+  the rest of the model co-adapted to the model-field term, so the swap is not a test of
+  the total -- it shows the DFT-field pair difference is a near-constant +0.45 +/- 0.10.
+
+Q3 -- deletion stakes without retraining: E_bl = -0.573 (charged) / -0.574 (neutral) eV
+  = -2.77 meV/atom on both states (absolute-energy shift of deletion, vs the model's 0.9
+  meV/atom error); force contribution -dE_bl/dR rms 203 (charged) / 224 (neutral) meV/A,
+  water atoms 189 / 216, max ~1 eV/A -- against the model's force error 20 / 28 meV/A.
+  Deleting the term is a retrain decision; the trunk currently carries a ~0.2 eV/A-rms
+  force field that cancels it.
+
+Status: E_bl is not double-counted against the 1-D compensation; its pair variation is
+driven by the model's solvent-profile error (Q2) and the interaction form omits the medium
+internal free energy (~+0.25 eV/frame, half the scatter variance when added back). Both
+are formula/field questions to settle before any retrain; the user decides the route.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
