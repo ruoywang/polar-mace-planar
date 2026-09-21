@@ -44,4 +44,4 @@ for e in epochs:
 print(f"{'ratio':>5} " + " ".join(f"{(sum(v)/len(v) if v else float('nan')):>18.3f}" for k, _ in KEYS for v in [ratios[k]]))
 last = epochs[-1] if epochs else None
 if last is not None:
-    print(f"last common epoch {last}: " + ", ".join(f"{k} {gate[last][k]:.4g} vs {prod[last][k]:.4g} ({gate[last][k]/prod[last][k]:+.1%})" if prod[last][k] else "" for k, _ in KEYS))
+    print(f"last common epoch {last}: " + ", ".join(f"{k} {gate[last][k]:.4g} vs {prod[last][k]:.4g} ({gate[last][k]/prod[last][k]-1:+.1%})" if prod[last][k] else "" for k, _ in KEYS))
