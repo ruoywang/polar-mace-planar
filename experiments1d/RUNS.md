@@ -3740,6 +3740,40 @@ complete. Next step, NOT taken without the user: the gate 3-residual_3D/gate_vso
 production config + solvent_pb1d_vsolv_input, dev-queue 3-rank segments; control = production
 epochs 0-33).
 
+
+## 2026-09-21 v_new: real-training cost probes, then the gate  (probes 3459536 ON / 3459537 OFF; gate_vsolv first segment submitted)
+
+User (2026-09-21, after the acceptance): the derivative checks support training but the single-frame
+cost probe (all parameters frozen but one tensor, no DDP) is not a training cost; measure real
+training steps first (actual batch, all parameters, full loss, 3-rank DDP), then run the planned
+comparison; evaluate density tails, charge response and solvent profiles as well as E and F, with
+the charging energy recorded but not the sole criterion. Reference consistency confirmed: the
+scheduler (ExponentialLR / ReduceLROnPlateau) does not depend on max_num_epochs, swa off, batch
+1 x 3 ranks, seed 123, warm-up 20, same losses; the code differs only inside the flag, so the
+production run's epochs 0-33 are the control.
+
+Probes: 3-residual_3D/gate_vsolv_probe_{on,off} = production config with the flag on / off,
+warm-up 0 (PB phase from epoch 0, cost only), 2 epochs, seed 123, 3 ranks, MACE_STEP_TIMING=1,
+both on c301-003:
+                              step mean      CUDA peak (rank 0)   n_outer mean/max  at-cap   fallbacks
+      OFF epoch 0 / 1         1.51 / 1.46 s  23.83 / 23.95 GiB     9.9 / 17-18       65-70    15
+      ON  epoch 0 / 1         1.62 / 1.65 s  26.24 / 26.36 GiB    10.9-11.1 / 18     78-83    16
+      production PB (20-22)   1.43-1.44 s    23.89-23.90 GiB       7.7 / 10          0        0 (after warm-up)
+   Step split (per-step ms, 400-step windows): OFF data 30-34 / fwd 541-548 / loss 167-179 /
+   bwd 727; ON data 39-48 / fwd 593-612 / loss 183-208 / bwd 782. Increments of the input in the
+   real training path: +0.11-0.19 s per step (+7-13%), +2.4 GiB CUDA peak (+10%), well inside the
+   40 GB card. The Newton-cap hits and the 15-16 fallbacks appear in BOTH probes (warm-up 0 =
+   untrained density solving PB from step 0), so they are the probe condition, not the input.
+   Validation values at epochs 0-1 are pre-warm-up noise and not compared.
+
+GATE gate_vsolv (production config + solvent_pb1d_vsolv_input: True, 34 epochs, seed 123, dev
+queue 3 ranks, 6000 s segments chained through the segment state; watcher
+claude/2-1D_PB/exp_vsolv/gate_chain.sh): first segment submitted 2026-09-21 12:05. Control =
+prod500_w1000_ref epochs 0-33. Evaluation plan at matched epochs (25 / 30 / 33): per-epoch
+validation metrics (E, F, potential, fermi, density_3d, Phi1D, rho_b, occ_aug), z_e50 / density
+tail against DFT, the 1-D solvent profile against dft_solvent1d_ref (ebl_audit-style L1), and the
+paired charging energy recorded (job_eval.sh with KIT_VSOLV=1 for the gate checkpoints).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
