@@ -140,15 +140,32 @@ def periodic_trilinear(field: torch.Tensor, frac: torch.Tensor) -> torch.Tensor:
     return out
 
 
-def smoothed_value_and_gradient(v: torch.Tensor, grid, frac: torch.Tensor, sigma: float
-                                ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Receiver-Gaussian-smoothed potential and its gradient at the atoms (spectral smoothing and
-    derivative, periodic trilinear sampling)."""
-    v_g = grid.fft(v) * torch.exp(-0.5 * (2.0 * math.pi) ** 2 * grid.gsq * float(sigma) ** 2)
-    v_s = grid.ifft_real(v_g)
-    gx, gy, gz, _ = grid.grad_from_recip(v_g)
-    val = periodic_trilinear(v_s, frac)
-    grad = torch.stack([periodic_trilinear(gx, frac), periodic_trilinear(gy, frac), periodic_trilinear(gz, frac)], dim=1)
+def smoothed_value_and_gradient(v: torch.Tensor, grid, frac: torch.Tensor, sigma: float,
+                                g_cut_over_sigma: float = 5.0) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Receiver-Gaussian-smoothed potential and its gradient at the atoms, by the truncated
+    spectral sum  V_sigma(R) = sum_{|G| < Gcut} v(G) exp(-sigma^2 G^2 / 2) exp(i G.R)  (the same
+    exact-in-position evaluation the 1-D electrostatic channel uses). Smooth in R, so autograd
+    forces match finite differences; a trilinear sampler had kinks at grid planes (2026-09-21,
+    22 meV/A on one component). Truncation at Gcut = 5/sigma keeps exp(-12.5) ~ 4e-6 of the
+    Gaussian weight."""
+    nx, ny, nz = v.shape
+    n = nx * ny * nz
+    V = torch.fft.fftn(v) / n                                       # v(r) = sum_G V_G exp(i G.r)
+    dev, dt = v.device, v.dtype
+    h = torch.fft.fftfreq(nx, device=dev, dtype=dt) * nx
+    k = torch.fft.fftfreq(ny, device=dev, dtype=dt) * ny
+    l = torch.fft.fftfreq(nz, device=dev, dtype=dt) * nz
+    H, K, L = torch.meshgrid(h, k, l, indexing="ij")
+    b = grid.recip_no_2pi.to(dt)                                    # rows b_i, a_i . b_j = delta_ij
+    Gc = 2.0 * math.pi * (H[..., None] * b[0] + K[..., None] * b[1] + L[..., None] * b[2])  # Cartesian G [nx,ny,nz,3]
+    G2 = (Gc ** 2).sum(-1)
+    mask = G2 <= (float(g_cut_over_sigma) / float(sigma)) ** 2
+    c = V[mask] * torch.exp(-0.5 * float(sigma) ** 2 * G2[mask])   # [M] complex
+    Gm = Gc[mask]                                                   # [M, 3]
+    hkl = torch.stack([H[mask], K[mask], L[mask]], dim=1)           # [M, 3]
+    phase = torch.exp(2.0j * math.pi * (frac.to(dt) @ hkl.T))       # [N, M]: exp(i G.R) via fractional coordinates
+    val = torch.real(phase @ c)
+    grad = torch.real(phase @ (1.0j * Gm * c[:, None]))             # [N, 3]
     return val, grad
 
 
