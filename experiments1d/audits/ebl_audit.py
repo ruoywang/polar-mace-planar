@@ -220,17 +220,19 @@ def run(sid, want_forces):
         rb, ion = ref_rb[i], ref_ion[i]
         dz_r = ref_lz / rb.shape[0]
         pbz_r = resample(pbz, rb.shape[0])
-        # unit convention of the reference: pick the reading that integrates to the ionic charge
-        Q_dens = float(ion.sum() * dz_r * area)            # if e/A^3
-        Q_vals = float(ion.sum() / ion.shape[0])            # if VASP "values" (sum/N = charge)
-        rec["dft_Qion_as_density"], rec["dft_Qion_as_values"] = Q_dens, Q_vals
-        conv = "density" if abs(abs(Q_dens) - abs(rec["q_ion"])) <= abs(abs(Q_vals) - abs(rec["q_ion"])) else "values"
-        scale = 1.0 if conv == "density" else 1.0 / (dz_r * area)
-        rho_s_dft = (rb + ion) * scale
-        rec["dft_conv"] = conv
+        # Reference convention (established 2026-09-21 on the epoch-499 audit, RUNS.md "E_bl
+        # physics audit"): rb_z_vasp / ion_z_vasp are e/A^3 with the electron-POSITIVE sign (the
+        # ionic profile integrates to -q_ion(model)), charged and neutral frames alike; the
+        # physics-sign solvent charge is -(rb + ion). The earlier per-frame convention guess read
+        # the neutral frames with a wrong unit scale and every frame with the wrong sign.
+        Q_dens = float(ion.sum() * dz_r * area)            # as e/A^3, electron-positive: expect -q_ion(model)
+        rec["dft_Qion_as_density"] = Q_dens
+        rec["dft_Qion_sign_ok"] = bool(abs(Q_dens + rec["q_ion"]) < 1e-3 * max(1.0, abs(rec["q_ion"])))
+        rho_s_dft = -(rb + ion)
+        rec["dft_conv"] = "density, electron-positive -> flipped"
         rec["Ebl_dft_field"] = float((rho_s_dft * (-pbz_r)).sum() * dz_r * area)
         rec["q_solv_dft"] = float(rho_s_dft.sum() * dz_r * area)
-        rec["q_ion_dft"] = float(ion.sum() * scale * dz_r * area)
+        rec["q_ion_dft"] = float(-ion.sum() * dz_r * area)
         rho_s_m_r = resample(rho_s, rb.shape[0])
         rec["rho_solv_L1_model_vs_dft"] = float(np.abs(rho_s_m_r - rho_s_dft).sum() * dz_r * area)
         rec["rho_solv_L1_dft"] = float(np.abs(rho_s_dft).sum() * dz_r * area)
@@ -258,8 +260,8 @@ for i, k in enumerate(pairs):
             print(f"           solver phi_z convention: rms(phi_z - [physics -pbz+phi_solv]) {r['phi_conv_A_rms']:.3f}, "
                   f"rms(phi_z - [electron-PE]) {r['phi_conv_B_rms']:.3f}, phi_z rms {r['phi_z_rms']:.3f} eV")
             if "dft_conv" in r:
-                print(f"           DFT ref ion charge: as e/A^3 {r['dft_Qion_as_density']:+.4f}, as VASP values {r['dft_Qion_as_values']:+.4f} "
-                      f"-> read as {r['dft_conv']}; q_ion_dft {r['q_ion_dft']:+.4f}, q_solv_dft {r['q_solv_dft']:+.4f}")
+                print(f"           DFT ref ion charge as e/A^3 electron-positive {r['dft_Qion_as_density']:+.4f} (expect -q_ion model; ok={r['dft_Qion_sign_ok']}) "
+                      f"-> {r['dft_conv']}; q_ion_dft {r['q_ion_dft']:+.4f}, q_solv_dft {r['q_solv_dft']:+.4f}")
     if (i + 1) % 10 == 0:
         print(f"   {i+1}/{len(pairs)} pairs, {time.time()-t0:.0f} s", flush=True)
 print(f"   all {len(pairs)} pairs ({2*len(pairs)} frames) in {time.time()-t0:.0f} s")
