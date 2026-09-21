@@ -413,6 +413,45 @@ def sec_Z(a):
         dn = float((nP - nM).abs().max()); dphi = float((phP - phM).abs().max())
         print(f"          max|n+ - n-| {dn:.3e} e/A^3, max|phi+ - phi-| {dphi:.3e} eV")
     print("   compare with AD: all live / phi detached / phi,n detached / phi,pos detached / n,pos detached from section Y")
+    # Z2: the offline double backward along the ACTUAL density change: <ds/dn, (n+ - n-)/2h> with n0 a leaf,
+    # against FD n-only above. Equal -> the model's dn/dR graph is at fault; different -> the inner
+    # Hessian path (create_graph through the cavity) is at fault.
+    h = 0.01
+    pp = a.get_positions().copy(); pp[i, c] += h; nP, *_ = capture(pp)
+    pm = a.get_positions().copy(); pm[i, c] -= h; nM, *_ = capture(pm)
+    dn_dir = (nP - nM) / (2 * h)
+    n_leaf = n0.clone().requires_grad_(True)
+    with torch.enable_grad():
+        nf = VS.vsolv_node_fields(n_leaf, phi0, fr0, grid, params, tp, sigma_b, eps_area, sig, checkpoint=False)
+        s = (nf[i, 0, :] * w).sum()
+        (g_n,) = torch.autograd.grad(s, n_leaf)
+    jvp = float((g_n * dn_dir).sum())
+    fd_n = (s_of(nP, phi0, fr0) - s_of(nM, phi0, fr0)) / (2 * h)
+    print(f"   Z2 (h {h}): offline <ds/dn, dn/dR> {jvp:+.6f}  vs FD n-only {fd_n:+.6f}  (AD phi,pos-detached from Y is the model's value)")
+    # the same for the three terms separately (which term's Hessian path?)
+    for name in ("cav", "diel", "ion"):
+        n_leaf2 = n0.clone().requires_grad_(True)
+        with torch.enable_grad():
+            nz = int(grid.shape[2]); phi_z = VS.fourier_resample_1d(phi0, nz)
+            A = VS.free_energies(n_leaf2, phi_z, grid, params, tp, sigma_b, eps_area)
+            a_t = {"cav": A[0], "diel": A[1], "ion": A[2]}[name]
+            (gr,) = torch.autograd.grad(a_t, n_leaf2, create_graph=True)
+            v_t = VS.VSOLV_SIGN * gr / (grid.volume / float(grid.ngrid))
+            val, grad = VS.smoothed_value_and_gradient(v_t, grid, fr0, float(sig[0]))
+            s_t = (torch.cat([val[i:i+1], grad[i]]) * w).sum()
+            (g2,) = torch.autograd.grad(s_t, n_leaf2)
+        jvp_t = float((g2 * dn_dir).sum())
+        def s_term(n):
+            with torch.enable_grad():
+                nl = n.detach().requires_grad_(True); A = VS.free_energies(nl, phi_z, grid, params, tp, sigma_b, eps_area)
+                (gr,) = torch.autograd.grad({"cav": A[0], "diel": A[1], "ion": A[2]}[name], nl)
+            with torch.no_grad():
+                v_t = VS.VSOLV_SIGN * gr / (grid.volume / float(grid.ngrid))
+                val, grad = VS.smoothed_value_and_gradient(v_t, grid, fr0, float(sig[0]))
+                return float((torch.cat([val[i:i+1], grad[i]]) * w).sum())
+        fd_t = (s_term(nP) - s_term(nM)) / (2 * h)
+        print(f"      term {name:4s}: offline JVP {jvp_t:+.6f}  vs FD {fd_t:+.6f}  (diff {jvp_t-fd_t:+.6f})")
+        del n_leaf2; torch.cuda.empty_cache()
     evict()
 
 
