@@ -3838,8 +3838,7 @@ verified against the offline-corrected epoch-499 values to 1e-4):
    neutral slightly worse), the E_bl pair variation is slightly LARGER with the input. The
    charging bias of ~+4 eV at epoch 25 is the training stage (production 59 -> 1.33, 235 -> 0.26),
    identical in both arms.
-   Density-grid comparison (audits/density_profile_eval.py): gate numbers below; production's in
-   the next entry when 3459891 finishes.
+   Density-grid comparison (audits/density_profile_eval.py), gate alone first, then both arms:
    gate e25: 3-D rmse 0.03457 (charged) / 0.03468 (neutral) e/A^3 over all 178 planes x 168^2
    points of the DFT window (z 3.7-19.6 A); window L1 2.99 / 3.03 e; electron tails (22 planes =
    2 A beyond the outermost atom + 1 A): bottom model-DFT +0.093 / +0.066 e (L1 0.370 / 0.364),
@@ -3849,6 +3848,30 @@ verified against the offline-corrected epoch-499 values to 1e-4):
    level of the response itself; integral -1.062 vs -1.062 e (exact), centroid 12.57 vs 12.55 A,
    share of the extra charge in the metal region (z <= top solute atom + 1 A) 0.141 vs DFT 0.331
    -- the model puts less than half of DFT's share on the metal and the rest into the water.
+   Density-grid comparison at epoch 25, production (3459891) vs gate, same 94 frames:
+                                              prod e25    gate e25   gate/prod-1
+     charged: 3-D rmse (e/A^3)                 0.03395     0.03457     +1.8%
+              window L1 (e)                     3.0350      2.9886     -1.5%
+              tail bottom L1 / dN (e)      0.3955/+0.0812  0.3701/+0.0927   -6.4%
+              tail top    L1 / dN (e)      0.0789/+0.0776  0.0805/+0.0762   +2.0%
+     neutral: 3-D rmse (e/A^3)                 0.03405     0.03468     +1.8%
+              window L1 (e)                     3.1014      3.0271     -2.4%
+              tail bottom L1 / dN (e)      0.3884/+0.0838  0.3640/+0.0658   -6.3%
+              tail top    L1 / dN (e)      0.1073/+0.1060  0.1129/+0.1113   +5.3%
+     charge response dn(z), 47 pairs:
+              L1(model-DFT) (e)                 1.6332      1.6149     -1.1%   (L1 of DFT dn 1.509)
+              |dN model - dN dft| (e)           0.0012      0.0006
+              |zc model - zc dft| (A)           0.219       0.207      -5.7%   (DFT centroid 12.55 A)
+              |metal share model - dft|         0.1696      0.1904    +12.3%   (DFT share 0.331)
+   Reading at epoch 25: the 3-D density rmse is 1.8% worse with the input (same size as the
+   validation density_3d ratio 1.016-1.019, so it is the same effect measured on all points);
+   the plane-averaged window L1 is 1.5-2.4% better and the bottom (vacuum-side) tail 6% better,
+   the top (solvent-side) tail 2-5% worse; the charge response is unchanged (-1.1%) and equally
+   wrong in both arms: L1(model-DFT) exceeds the L1 of the DFT response itself, and both arms
+   put 0.14-0.16 of the extra charge in the metal region against DFT's 0.33 (the gate slightly
+   farther). None of the density-tail or charge-response quantities the input was meant to
+   improve moved beyond a few percent at this epoch; the only consistent change is the worse F
+   (+6-7% structural, +2.6 to +16.9% validation) and worse density_3d / occ_aug.
 
 
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
