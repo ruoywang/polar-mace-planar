@@ -3657,6 +3657,47 @@ Round 2, wiring test (3459287, sid 28 / 628):
     Fixed (this commit): the inner partial is built under enable_grad regardless of the caller,
     create_graph only when the caller records gradients. F to be re-run.
 
+
+### 2026-09-21 v_new acceptance, rounds 3-5: sampler, tolerance/step sweep, path attribution, the fix  (b1ff1cd -> 5ebab20; jobs 3459296 / 3459298 / 3459304 / 3459314)
+
+Round 3 (3459296): sampler changed from trilinear interpolation to a truncated spectral sum
+(|G| < 5/sigma, smooth in positions). S improves (z-gradient rel 1.1e-4 / 7.5e-4), G fine
+(4.2e-3 / 2.4e-5), but F ON unchanged: sid 628 atom 181 (H) z still 22.25 meV/A -> not the
+sampler.
+Round 4 (3459298, section X): the gap is independent of the solver tolerance (1e-3 -> 1e-6:
+identical digits; Newton converges to rms 1e-12 anyway) and does not vanish with the FD step
+(22.25 / 22.81 / 24.91 at h = 0.002 / 0.005 / 0.01 -> ~22 as h -> 0; sid 28's 1.3 -> 0 like h^2,
+truncation). A genuine derivative inconsistency on that component.
+Round 5 (3459304, section Y): the FEATURE's own derivative is wrong: d/dz of a functional of
+atom 181's vsolv node fields, AD +0.0994 vs FD -0.0884 (-0.0875, -0.0866 at h 0.005, 0.01).
+Cutting the outer dependence on phi* alone -> -0.0830; on n_e alone -> -0.0787; both -> -0.0747;
+i.e. the two paths were NOT additive: with both live an extra +0.17 appeared.
+CAUSE (the user's warning of the morning, in a different guise): phi* is solved from the same
+density tensor n_e_density, so phi*'s autograd history passes through that tensor;
+autograd.grad(A(n, phi*), n_e_density, create_graph=True) followed A -> lambda(phi*) -> phi* ->
+n_e_density too and returned the TOTAL derivative dA/dn|_phi + dA/dphi dphi*/dn. The standalone
+evaluator used an independent phi leaf and could not see it.
+FIX 5ebab20: differentiate w.r.t. a fresh node n_in = n_e.clone(): only the cavity paths pass
+through the clone, so the grad is the fixed-phi partial; the clone's history keeps the outer
+dependence on n_e and phi keeps its own. After the fix (3459314, sid 628):
+  Y  feature derivative AD -0.0870 vs FD -0.0884 / -0.0875 / -0.0866 (h -> 0 ~ -0.087); path
+     contributions now add (phi -0.004, n -0.008, pos -0.075); force atom 181 z: FD -495.82,
+     AD -495.92 (0.10 meV/A).
+  F  ON worst 0.204 meV/A over the six components (OFF 0.211): the input's force derivative is as
+     consistent as the existing path.
+  G  ON rel 4.8e-6 (OFF 2.6e-5).
+  S  unchanged (PASS). M new rows 61% of the channel rows on the neutral frame (3% charged);
+     energy with the untrained head +0.013 eV; forces ON-OFF 3.5 meV/A.
+  T  per frame: E+F OFF 0.65 s / 6.0 GiB -> ON 0.74 s / 10.2 GiB (ckpt) or 0.69 s / 11.9 GiB;
+     force-loss double backward OFF 1.09 s / 16.9 GiB -> ON 1.18 s / 23.4 GiB (ckpt) or 3.6 s /
+     24.2 GiB. Net: +4.2 GiB and +6.5 GiB per frame, +0.1 s.
+Other lessons recorded (memory partial-derivative-needs-own-node): sbatch --export splits on
+commas (KIT_SIDS=628,28 dropped the 28 -- sid 28 re-run as 3459324); inner autograd.grad under
+no_grad raised and was swallowed into the planar fallback ("FALLBACK rms=nan").
+Gate prepared, NOT submitted: 3-residual_3D/gate_vsolv (production config + solvent_pb1d_vsolv_input:
+True, 34 epochs, seed 123, job_seg.sh on gpu-a100-dev with 3 ranks / 6000 s segments). The
+control is production's own epochs 0-33 (same seed; the code differs only inside the flag).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
