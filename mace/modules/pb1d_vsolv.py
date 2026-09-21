@@ -26,6 +26,7 @@ receiver Gaussians and its gradient at the atoms; an added electron density dn_e
 from __future__ import annotations
 
 import math
+import os
 from typing import List, Optional, Tuple
 
 import torch
@@ -173,6 +174,15 @@ def _vsolv_core(n_e: torch.Tensor, phi_z_solver: torch.Tensor, pos_frac: torch.T
                 tp, sigma_b: float, eps_area: float, sigmas: List[float]) -> torch.Tensor:
     """node fields [n_atoms, n_sigma, 4] = [V, dV/dx, dV/dy, dV/dz] with V = VSOLV_SIGN * smoothed v_new."""
     nz = int(grid.shape[2])
+    # DIAGNOSTIC ONLY: MACE_PB1D_VSOLV_DETACH="phi,n,pos" cuts the named outer dependence
+    # (used by audits/vsolv_wiring_test.py to attribute an AD-FD gap to a path); never set in training
+    _det = set(x.strip() for x in os.environ.get("MACE_PB1D_VSOLV_DETACH", "").split(",") if x.strip())
+    if "phi" in _det:
+        phi_z_solver = phi_z_solver.detach()
+    if "n" in _det:
+        n_e = n_e.detach()
+    if "pos" in _det:
+        pos_frac = pos_frac.detach()
     # the inner partial needs a graph even when the caller runs under no_grad (inference,
     # finite-difference probes): build it under enable_grad; keep the outer dependence
     # (create_graph) only when the caller itself records gradients

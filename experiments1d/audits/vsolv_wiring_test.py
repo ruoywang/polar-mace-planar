@@ -298,11 +298,70 @@ def sec_X(a):
     evict()
 
 
+@section("Y")
+def sec_Y(a):
+    """Is the AD-FD force gap in the FEATURE computation or downstream? Derivative of a scalar
+    functional of the vsolv node fields of atom 181, s = sum_k w_k nf[181, 0, k], w.r.t. the z
+    position of atom 181: autograd (input ON, everything live) vs central FD; then autograd with
+    one outer dependence cut at a time (phi*, n_e, positions) to attribute the paths."""
+    i, c = 181, 2
+    w = torch.tensor([1.0, 0.3, -0.7, 0.5], dtype=torch.float64, device=device)
+
+    def scalar_from_forward(positions=None, want_grad=False):
+        model.solvent_pb1d_vsolv_input = True; cap.clear()
+        b = batch_of(a, positions)
+        if want_grad:
+            b["positions"].requires_grad_(True)
+            with torch.enable_grad():
+                model(b.to_dict(), compute_force=False, training=False)
+                nf = cap["r"]["vsolv_node_fields"]
+                s = (nf[i, 0, :] * w).sum()
+                (g,) = torch.autograd.grad(s, b["positions"])
+            return float(s), float(g[i, c])
+        with torch.no_grad():
+            model(b.to_dict(), compute_force=False, training=False)
+            nf = cap["r"]["vsolv_node_fields"]
+            return float((nf[i, 0, :] * w).sum()), None
+
+    print(f"--- Y: derivative of the vsolv node-field functional of atom {i} w.r.t. its z ---")
+    s0, g_ad = scalar_from_forward(want_grad=True)
+    fds = []
+    for h in (0.002, 0.005, 0.01):
+        pp = a.get_positions().copy(); pp[i, c] += h; sp, _ = scalar_from_forward(pp)
+        pm = a.get_positions().copy(); pm[i, c] -= h; sm, _ = scalar_from_forward(pm)
+        fds.append((h, (sp - sm) / (2 * h)))
+    print(f"   s = {s0:+.6e}; AD ds/dz {g_ad:+.6e}; FD " + "  ".join(f"h {h}: {v:+.6e}" for h, v in fds))
+    for det in ("phi", "n", "pos", "phi,n", "phi,pos", "n,pos"):
+        os.environ["MACE_PB1D_VSOLV_DETACH"] = det
+        try:
+            _, g = scalar_from_forward(want_grad=True)
+            print(f"   AD with {det:8s} detached: {g:+.6e}   (path contribution of the cut part {g_ad - g:+.6e})")
+        except Exception as exc:
+            print(f"   AD with {det} detached: FAILED {str(exc)[:80]}")
+    os.environ.pop("MACE_PB1D_VSOLV_DETACH", None)
+    # the same for the energy: AD force component vs FD with each path cut (the FD is the same energy)
+    E0, F0, _ = energy_forces(a, True)
+    pp = a.get_positions().copy(); pp[i, c] += 0.002; Ep, _, _ = energy_forces(a, True, pp, want_forces=False)
+    pm = a.get_positions().copy(); pm[i, c] -= 0.002; Em, _, _ = energy_forces(a, True, pm, want_forces=False)
+    f_fd = -(Ep - Em) / 0.004
+    print(f"   force atom {i} comp {c}: FD {f_fd*1e3:+9.3f}  AD all live {F0[i,c]*1e3:+9.3f} meV/A")
+    for det in ("phi", "n", "pos"):
+        os.environ["MACE_PB1D_VSOLV_DETACH"] = det
+        try:
+            _, F, _ = energy_forces(a, True)
+            print(f"   AD force with {det:4s} detached: {F[i,c]*1e3:+9.3f}  (diff to FD {(F[i,c]-f_fd)*1e3:+8.3f}; cut-path contribution {(F0[i,c]-F[i,c])*1e3:+8.3f} meV/A)")
+        except Exception as exc:
+            print(f"   AD force with {det} detached: FAILED {str(exc)[:80]}")
+    os.environ.pop("MACE_PB1D_VSOLV_DETACH", None)
+    evict()
+
+
 for sid in SIDS:
     a = atoms_by_sid[sid]
     print(f"\n===================== sid {sid} ({'charged' if abs(float(a.info.get('total_charge',0)))>1e-6 else 'neutral'}, {len(a)} atoms) =====================")
     head = model.field_dependent_charges_maps[0]
     theta = next(p for p in head.parameters())
+    sec_Y(a)
     sec_X(a)
     res_S = sec_S(a)
     E_off, F_off, feats_ch = res_S if res_S is not None else (None, None, None)
