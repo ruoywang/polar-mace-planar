@@ -264,11 +264,46 @@ def sec_G(a, theta):
         evict()
 
 
+@section("X")
+def sec_X(a):
+    """F2: the worst force component with the input ON: is the AD-FD gap a derivative error or
+    solve-tolerance noise in phi* propagated through the new features? Sweep the FD step and the
+    solver tolerance; print the solve provenance (n_outer, rms_last) of the displaced forwards."""
+    sym = np.array(a.get_chemical_symbols())
+    backend = model._get_pb1d_backend()
+    tol0 = float(backend.tol)
+    comps = [(181, 2), (32, 2)]
+    print(f"--- X: AD-FD gap of selected components with the input ON, vs FD step and solver tolerance (default tol {tol0:g}) ---")
+    for tol in (tol0, 1.0e-6):
+        backend.tol = tol
+        E_ad, F_ad, _ = energy_forces(a, True)
+        prov_ad = (cap["r"].get("n_outer"), cap["r"].get("rms_last"))
+        for (i, c) in comps:
+            line = f"   tol {tol:g} atom {i:3d} {sym[i]:2s} comp {c}: AD {F_ad[i,c]*1e3:+9.3f} (n_outer {prov_ad[0]}, rms {prov_ad[1]:.1e})"
+            for h in (0.002, 0.005, 0.01, 0.02):
+                pp = a.get_positions().copy(); pp[i, c] += h
+                Ep, _, _ = energy_forces(a, True, pp, want_forces=False); pr_p = (cap["r"].get("n_outer"), cap["r"].get("rms_last"))
+                pm = a.get_positions().copy(); pm[i, c] -= h
+                Em, _, _ = energy_forces(a, True, pm, want_forces=False); pr_m = (cap["r"].get("n_outer"), cap["r"].get("rms_last"))
+                f_fd = -(Ep - Em) / (2 * h)
+                line += f" | h {h}: FD {f_fd*1e3:+9.3f} diff {(f_fd-F_ad[i,c])*1e3:+7.3f} [it {pr_p[0]}/{pr_m[0]}]"
+            print(line)
+        # the same component with the input OFF at this tolerance (control)
+        E_ad0, F_ad0, _ = energy_forces(a, False)
+        i, c = comps[0]
+        pp = a.get_positions().copy(); pp[i, c] += 0.002; Ep, _, _ = energy_forces(a, False, pp, want_forces=False)
+        pm = a.get_positions().copy(); pm[i, c] -= 0.002; Em, _, _ = energy_forces(a, False, pm, want_forces=False)
+        print(f"   tol {tol:g} control OFF atom {i} comp {c}: AD {F_ad0[i,c]*1e3:+9.3f} FD {-(Ep-Em)/0.004*1e3:+9.3f} diff {(-(Ep-Em)/0.004-F_ad0[i,c])*1e3:+7.3f} meV/A")
+    backend.tol = tol0
+    evict()
+
+
 for sid in SIDS:
     a = atoms_by_sid[sid]
     print(f"\n===================== sid {sid} ({'charged' if abs(float(a.info.get('total_charge',0)))>1e-6 else 'neutral'}, {len(a)} atoms) =====================")
     head = model.field_dependent_charges_maps[0]
     theta = next(p for p in head.parameters())
+    sec_X(a)
     res_S = sec_S(a)
     E_off, F_off, feats_ch = res_S if res_S is not None else (None, None, None)
     res_M = sec_M(a, E_off, F_off, feats_ch) if res_S is not None else None
