@@ -354,6 +354,7 @@ def _build_model(
             solvent_cavity_energy=getattr(args, "solvent_cavity_energy", False),
             solvent_baseline_coupling=getattr(
                 args, "solvent_baseline_coupling", False),
+            solvent_pb1d_vsolv_input=getattr(args, "solvent_pb1d_vsolv_input", False),
             solvent_pb1d_fresh_stage1=getattr(args, "solvent_pb1d_fresh_stage1", False),
             occ_aug_enabled=float(getattr(args, "occ_aug_weight", 0.0)) > 1.0e-12,
             occ_aug_channel_spec=getattr(args, "occ_aug_channel_spec", None),

@@ -553,6 +553,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "lives in the compensation term, this adds the missing baseline part)",
     )
     parser.add_argument(
+        "--solvent_pb1d_vsolv_input", type=str2bool, default=False,
+        help="pb1d: feed the parent (VASPsol++) solvent effective potential "
+        "d(A_cav+A_diel+A_ion)/dn_e at the stage-1 field, receiver-smoothed at the "
+        "atoms, into the charge recursion through the external-field block "
+        "(mace/modules/pb1d_vsolv.py); the reaction potential input is unchanged",
+    )
+    parser.add_argument(
         "--save_latest_every", type=int, default=0,
         help="also save a rolling restart checkpoint every N epochs "
         "regardless of validation improvement (0 = off); keeps chained "

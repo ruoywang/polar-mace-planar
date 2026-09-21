@@ -304,6 +304,31 @@ def _slab_compensation_profile_features(
     return features, phi_ref, field_ref
 
 
+def _vsolv_projection_features(
+    external_field_block: torch.nn.Module,
+    node_fields: torch.Tensor,
+    feature_sigmas: List[float],
+) -> torch.Tensor:
+    """Stage-1 effective-potential input (pb1d_vsolv): node_fields [n_nodes, n_sigma, 4] =
+    [V, dV/dx, dV/dy, dV/dz] of the receiver-smoothed physics-sign potential at each atom, one
+    set per receiver width, projected through the external-field block with the same row
+    mapping as _slab_compensation_profile_features (l=0 row per width, then the three l=1
+    rows). It is a projection of a potential: no Poisson solve, no de-meaning."""
+    matrix = external_field_block.matrix.to(node_fields.dtype)
+    n_sigmas = len(feature_sigmas)
+    features = node_fields.new_zeros((node_fields.shape[0], matrix.shape[0]))
+    for i_s in range(n_sigmas):
+        nf = node_fields[:, i_s, :][:, [0, 3, 1, 2]]
+        rows = [i_s]
+        if matrix.shape[0] >= n_sigmas * 4:
+            rows.extend(range(n_sigmas + i_s * 3, n_sigmas + (i_s + 1) * 3))
+        row_index = torch.tensor(rows, dtype=torch.long, device=node_fields.device)
+        features[:, row_index] = torch.einsum(
+            "rf,nf->nr", torch.index_select(matrix, 0, row_index), nf
+        )
+    return features
+
+
 def _slab_compensation_slab_correction_features(
     external_field_block: torch.nn.Module,
     total_charge: torch.Tensor,
@@ -825,6 +850,7 @@ class PolarMACE(ScaleShiftMACE):
         solvent3d_energy: bool = False,
         solvent_baseline_coupling: bool = False,
         solvent_cavity_energy: bool = False,
+        solvent_pb1d_vsolv_input: bool = False,
         occ_aug_enabled: bool = False,
         occ_aug_channel_spec: str = None,
         fermi_level_baseline: float = 0.0,
@@ -1242,6 +1268,11 @@ class PolarMACE(ScaleShiftMACE):
         # DFT E_solv-E_vac = A_cav 3.84 + A_solv -1.01 + relax 0.12).
         self.solvent_cavity_energy = bool(solvent_cavity_energy)
         self.solvent3d_energy = bool(solvent3d_energy)
+        # stage-1 effective-potential input (pb1d_vsolv.py): the parent's
+        # d(A_cav+A_diel+A_ion)/dn_e at the stage-1 field, receiver-smoothed at the
+        # atoms, added to the compensation (external-field) features of the charge
+        # recursion. Default off; the reaction potential stays as before.
+        self.solvent_pb1d_vsolv_input = bool(solvent_pb1d_vsolv_input)
         # baseline-coupling energy (audit 2026-09-08): solvent profile x
         # baseline solute potential, the 1-D term the compensation (net-only)
         # never contained; zero-mean-potential convention (G0 pends the
@@ -1658,6 +1689,14 @@ class PolarMACE(ScaleShiftMACE):
         e_cav_g = positions.new_zeros(num_graphs)
         e_s3d_g = positions.new_zeros(num_graphs)
         e_bl_g = positions.new_zeros(num_graphs)
+        # stage-1 effective-potential input (pb1d_vsolv): node fields [n, n_sigma, 4];
+        # only the stage-1 (use_head=False) pass computes them; graphs that take the
+        # cached / warm-up / fallback path keep zeros (input off for that graph)
+        vs_on = (not use_head) and bool(getattr(self, "solvent_pb1d_vsolv_input", False))
+        vsolv_nf_all = (
+            positions.new_zeros(positions.shape[0], len(self.field_feature_widths), 4)
+            if vs_on else None
+        )
         # supervision-side projected grid fields per graph (the loss
         # interpolates these at its sampled points, so loss and energy score
         # the same discrete plane-projected field); dict keyed by graph —
@@ -1791,6 +1830,8 @@ class PolarMACE(ScaleShiftMACE):
                     s3d_energy=s3d_e_on,
                     cav_energy=cav_on,
                     bl_energy=bl_on,
+                    vsolv_input=vs_on,
+                    vsolv_sigmas=list(self.field_feature_widths),
                 )
                 solved_ok = True
             except RuntimeError as exc:
@@ -1929,6 +1970,8 @@ class PolarMACE(ScaleShiftMACE):
                 ).detach()
             rho_bound_mask[g] = 1.0
             layer_mean[g] = float(result["layer_mean"])  # detached: feeds solv_center/energy
+            if vsolv_nf_all is not None and result.get("vsolv_node_fields") is not None:
+                vsolv_nf_all[atom_mask] = result["vsolv_node_fields"].to(positions.dtype)
             if e_cav_g is not None and result.get("e_cav") is not None:
                 e_cav_g[g] = result["e_cav"].to(positions.dtype)
             if result.get("e_bl") is not None:
@@ -1982,6 +2025,8 @@ class PolarMACE(ScaleShiftMACE):
         }
         if prof_feat_grad is not None:
             out["profile_features_grad"] = prof_feat_grad
+        if vsolv_nf_all is not None:
+            out["vsolv_node_fields"] = vsolv_nf_all
         if s3d_coeffs is not None:
             out["solvent3d_coeffs"] = s3d_coeffs
             out["solv3d_env_b"] = s3d_env_b
@@ -2209,6 +2254,20 @@ class PolarMACE(ScaleShiftMACE):
                         or os.environ.get("MACE_PB1D_DFORCE"))
                     else pb_solvent_data["solvent_mu"].detach()),
             )
+            # stage-1 effective-potential input: the parent's solvent potential
+            # (receiver-smoothed value + gradient at the atoms, physics sign) enters
+            # the recursion through the same external-field rows as the reaction
+            # potential. Off unless solvent_pb1d_vsolv_input.
+            if (getattr(self, "solvent_pb1d_vsolv_input", False)
+                    and pb_solvent_data.get("vsolv_node_fields") is not None):
+                compensation_external_features = (
+                    compensation_external_features
+                    + _vsolv_projection_features(
+                        self.external_field_contribution,
+                        pb_solvent_data["vsolv_node_fields"],
+                        self.field_feature_widths,
+                    ).to(compensation_external_features.dtype)
+                )
         else:
             (
                 compensation_external_features,

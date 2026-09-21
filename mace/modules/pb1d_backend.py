@@ -324,6 +324,8 @@ class PB1DBackend:
         s3d_energy: bool = False,
         cav_energy: bool = False,
         bl_energy: bool = False,
+        vsolv_input: bool = False,
+        vsolv_sigmas=None,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -848,7 +850,23 @@ class PB1DBackend:
                         rho_bound_z=rho_bound_z.detach(),
                         rho_ion_z=rho_ion_z.detach(),
                     )
+        # stage-1 effective-potential input (user design 2026-09-21): the parent's
+        # d(A_cav + A_diel + A_ion)/dn_e at THIS solve's phi (partial at fixed phi, phi
+        # kept live for the outer dependence), receiver-smoothed value + gradient at the
+        # atoms; checkpointed. Uses the same live density / positions as the solve.
+        vsolv_nf = None
+        if vsolv_input:
+            from .pb1d_vsolv import vsolv_node_fields
+            with self._Phase(self, "7_vsolv", device):
+                _sig_b = float(self.params["R_B"]) if float(self.params["R_B"]) > 0.0 else float(self.params["A_K"])
+                vsolv_nf = vsolv_node_fields(
+                    n_e_density, out["phi"], pf_in, grid, self.params, self._tp, _sig_b,
+                    float(os.environ.get("MACE_PB1D_AREA_EPS", "1e-30")),
+                    list(vsolv_sigmas) if vsolv_sigmas is not None else [1.0],
+                    checkpoint=not bool(os.environ.get("MACE_PB1D_VSOLV_NOCKPT")),
+                )
         return {
+            "vsolv_node_fields": vsolv_nf,
             "z": z,
             "phi_z": out["phi"],
             "rho_ion_z": rho_ion_z,
