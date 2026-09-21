@@ -3491,6 +3491,90 @@ driven by the model's solvent-profile error (Q2) and the interaction form omits 
 internal free energy (~+0.25 eV/frame, half the scatter variance when added back). Both
 are formula/field questions to settle before any retrain; the user decides the route.
 
+
+## 2026-09-21 DESIGN NOTE: the free energy of the 1-D closure, its fixed variable, reference, and the new potential v_new  (step 1 deliverable; user's corrections of the same day folded in)
+
+Purpose: define -- before differentiating -- the approximate solvent free energy that
+is CONSISTENT with the 1-D PB closure the model solves, with an explicit parent
+functional and reference, so that the electron effective potential derived from it is
+unique. The 94-frame numbers are checks of these definitions, not their source. No
+outer self-consistency loop is added: v_new enters the charge recursion with the same
+one-feedback (stage-1, lagged) approximation as the reaction potential.
+
+1. Parent functional and the closure as its expansion. Parent = VASPsol++ A_tot in the
+   POTENTIAL form (paper eq. 58; phi is the independent field variable, maximised):
+     A[phi; n_e] = A_TXC + int phi rho_sol - (1/2K) int |grad phi|^2 + A_cav[n_e]
+                   + n_mol int S_diel[n_e] lambda_diel(E) + n_max int S_ion[n_e] lambda_ion(phi)
+   with lambda_ion(phi) = -(1/beta) ln(1 - theta_b + theta_b cosh(z beta phi)), lambda_ion(0) = 0
+   (eq. 48; the solver's ion_density_values is exactly n_max S_ion dlambda_ion/dphi with the
+   same theta_b, ZBETA, n_max), and lambda_diel(E) = min over the molecular DOFs of Abar_diel
+   (rotational entropy -(1/beta) ln(sinh y / y), polarisation energy, self-interaction
+   correction; eqs. 16-33), whose second field derivative is the response a(E) =
+   f_loc N_MOL s_diel (alpha0_rot g(y) + alpha_pol)/EDEPS that pb1d_closure.response_a3
+   evaluates.
+   The closure (pb1d_solver / pb1d_closure) is the plane-averaged QUADRATIC EXPANSION of
+   lambda_diel about the screened-vacuum field E_scr[n_e] = -(w_b * grad phi_sol)/eps(r):
+     a1(z)   = <a(E_scr)>_plane                        (A_scr)
+     p_off(z)= <a(E_scr) E_scr> - a1 <E_scr> + delta_p (prior + head residual; the prior is
+               exactly P_scr - a1 E_scr in the plane-averaged sense)
+     bound charge rho_b = -d/dz (w_b * (a1 E + p_off)),  E = -d/dz (w_b * phi)
+   so the closure's eliminated dielectric free energy per unit area is
+     Lambda_diel[phi; n_e] = sum_z [ C_z[n_e] - 1/2 a1 E^2 - p_off E ] dz,
+     C_z = <n_mol s_diel lambda_diel(E_scr)> + P_scr E_scr - 1/2 a1 E_scr^2   (plane means).
+   C_z is the term the user warned about: it does not enter the PB equation (no phi), it DOES
+   enter delta A/delta n_e. It is FIXED by the parent functional at the linearisation point,
+   not free. The head residual delta_p has no parent free energy: it is treated as a fixed
+   external polarisation with zero self-energy (C = 0 for that part) -- stated, not derived.
+   A_cav = TAU * int |grad s_cav3[n_e]| dV (3-D, the discretised, regularised expression with
+   the AREA_EPS floor; "exact" below means exact for THIS expression).
+
+2. The closure functional actually solved (per unit area, solver grid, values convention):
+     A_1D[phi; n_e] = int phi rho_sol,eff - (1/2K) int (dphi/dz)^2 + Lambda_diel + n_max int S_ion_z lambda_ion(phi)
+   with K = EDEPS = 180.95 eV A, rho_sol,eff = the source behind phi_sol = cvhar_z + cvdip(d),
+   i.e. the baseline solute + model net charge PLUS the fixsol dipole-correction layer
+   (d = solute valence dipole + solvent moment about center_z, the mixer fixed point).
+   Stationarity delta A_1D/delta phi = 0  <=>  the solver residual
+     R(phi) = n_b(phi) + n_ion(phi) - L0 (phi - phi_sol) + q_sol = 0,
+   where the G0 row is the charge constraint int rho_ion = -q_sol (rho_b integrates to 0)
+   and the zero mode of phi is fixed by the ions' Boltzmann response (bulk electrolyte
+   potential = 0, as in the parent), and cvdip is the dipole-feedback term (its energy is
+   the slab dipole correction). These three pieces (constraint, zero mode, fixsol) are part
+   of the stationarity CHECK, not assumed.
+   A_solv*[n_e] = max_phi A_1D[phi; n_e] - A_1D[phi_sol; n_e]|_{rho_solv = 0}  (reference: no
+   solvent charge; lambda_ion(0) = 0; Lambda_diel at E = E_scr with the parent's value).
+
+3. What is new and what is already fed. Envelope theorem at phi* (potential functional:
+   phi is the fixed variable, NOT the charges):
+     dA_solv*/dn_e(r) = dA_1D/dn_e(r) |_{phi = phi*} = [-e phi_solv(r)]  +  v_new(r)
+   The first term is the reaction potential the recursion already receives through the
+   compensation features (electron-PE sign). v_new is ONLY the explicit cavity/closure path:
+     v_cav (r) = TAU  d A[s_cav3(n_e)] / d n_e(r)                                  (3-D, exact)
+     v_ion (r) = n_max sum_z lambda_ion(phi*(z)) d S_ion_z[n_e] / d n_e(r)          (S_ion_z = plane mean of s_ion3)
+     v_diel(r) = sum_z [ dC_z/dn_e(r) - 1/2 E*(z)^2 da1_z/dn_e(r) - E*(z) dp_off,z(prior)/dn_e(r) ]
+   E* and phi* from the stage-1 solve (lagged, as the reaction potential is). a1, p_off(prior),
+   C_z depend on n_e through s_diel3, s_ion3, the local-field factor and E_scr[n_e]; that whole
+   explicit path is differentiated (frozen inside one PB solve does not mean frozen here).
+   Implementation of the partial: torch.autograd.grad(A_partial, n_e_grid, create_graph=True)
+   with phi* a LIVE tensor -- the grad is taken w.r.t. n_e only (partial at fixed phi), while
+   the graph keeps v_new's dependence on phi* (stage-1 adjoint) and on positions, so forces
+   and loss gradients through the new input are complete. No permanent detach of rho_solv.
+
+4. Projection into the recursion: v_new(r) is a potential (eV per electron, electron-PE
+   convention). It is sampled at the atoms with the receiver Gaussians sigma_k (value and
+   gradient), NOT treated as a charge density, NOT Poisson-solved, NOT de-meaned (it vanishes
+   away from the interface; its constant is physical and must sit on the same reference as
+   the electron chemical potential). Sign and units are fixed by pushing the reaction
+   potential through the same sampler and matching the existing compensation features.
+
+5. Acceptance BEFORE any training (few representative frames, then the gate):
+   (a) stationarity: delta A_1D/delta phi at the solver's phi* reproduces R(phi*) incl. the
+       q_sol row and cvdip, to solver tolerance;
+   (b) FD in density directions: A_solv*[n_e + eps dn] (re-solve) vs int (-e phi_solv + v_new) dn,
+       and the partial alone at fixed phi against v_new;
+   (c) wired in: force FD and force-loss parameter gradients through the new input
+       (LIVE_POS path), step time and memory measured;
+   (d) then the 34-epoch 3-GPU gate and the A/B against production.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
