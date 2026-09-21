@@ -63,6 +63,9 @@ model = torch.load(f=MO, map_location=device).to(device)
 model.load_state_dict(torch.load(CK, map_location=device)["model"], strict=True)
 EPOCH = int(CK.rsplit("epoch-", 1)[1].split(".")[0])
 model.eval(); model._pb1d_epoch = EPOCH
+if os.environ.get("KIT_VSOLV", "") not in ("", "0"):   # checkpoint trained with the stage-1 effective-potential input
+    model.solvent_pb1d_vsolv_input = True
+print(f"[{TAG}] solvent_pb1d_vsolv_input = {getattr(model, 'solvent_pb1d_vsolv_input', False)}")
 for p in model.parameters():
     p.requires_grad_(False)
 print(f"[{TAG}] {os.path.basename(MO)} @ epoch {EPOCH}; solvent_baseline_coupling={model.solvent_baseline_coupling} "
