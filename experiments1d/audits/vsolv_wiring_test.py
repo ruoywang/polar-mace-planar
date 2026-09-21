@@ -331,6 +331,13 @@ def sec_Y(a):
         pm = a.get_positions().copy(); pm[i, c] -= h; sm, _ = scalar_from_forward(pm)
         fds.append((h, (sp - sm) / (2 * h)))
     print(f"   s = {s0:+.6e}; AD ds/dz {g_ad:+.6e}; FD " + "  ".join(f"h {h}: {v:+.6e}" for h, v in fds))
+    # Y2: is s smooth in z at the FD scale? line scan and a quadratic fit
+    ts = np.linspace(-0.01, 0.01, 11); svals = []
+    for t in ts:
+        pp = a.get_positions().copy(); pp[i, c] += t; sv, _ = scalar_from_forward(pp); svals.append(sv)
+    svals = np.array(svals); coef = np.polyfit(ts, svals, 2); resid = svals - np.polyval(coef, ts)
+    print(f"   Y2 line scan z +/- 0.01 A (11 pts): quadratic-fit slope at 0 {coef[1]:+.6e} (AD {g_ad:+.6e}), curvature {2*coef[0]:+.3e}, "
+          f"fit residual rms {resid.std():.2e} (s scale {abs(s0):.2e}); local slopes " + " ".join(f"{(svals[k+1]-svals[k])/(ts[k+1]-ts[k]):+.4f}" for k in range(len(ts)-1)))
     for det in ("phi", "n", "pos", "phi,n", "phi,pos", "n,pos"):
         os.environ["MACE_PB1D_VSOLV_DETACH"] = det
         try:
