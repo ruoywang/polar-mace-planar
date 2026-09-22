@@ -4099,6 +4099,44 @@ Section 10 (bands from the fully-ML CHGCAR, VASPsol non-SCF, same INCAR/KPOINTS/
    run, DFT reference dft_sol reused): job 3461965 -- result appended below when finished.
 
 
+## 2026-09-22 Phi1D construction: neutral SOLVATED frames get a spurious 0.17 eV step + ramp  (found on the sid 122/722 pair page; user question about the sloped potential at z = 18-45 A)
+
+Observation (structure_pair_sid122_722.npz, prod500_w1000_ref, electron-PE convention, upper-vacuum
+alignment): charged sid 122 -- model and DFT flat in 18-45 A (residual slope 24-40 A +0.00001 eV/A,
+|residual| <= 0.003 eV beyond 20 A). Neutral sid 722 -- DFT flat (0.0000), the MODEL potential is a
+straight line from +0.098 eV (18 A) to -0.020 eV (44 A), slope -0.0036 eV/A, identical in the implicit
+solvent (24-40 A: -0.00359) and the top vacuum (40.5-44.5 A: -0.00362); the bottom-vacuum plateau
+(1-3 A) sits 0.17 eV below the 18 A value relative to DFT. The vacuum plateaus themselves are flat
+(0.5-3 A: DFT 0.000, model -0.0007 / -0.0043 eV/A); what looks like a slope below the slab is the
+model's potential falling earlier on the lower flank (3-5.5 A: -0.34 vs DFT -0.15 eV/A, both states,
+= the shorter electron tail below the sheet seen in the density-grid comparison). A 0.5-5.5 A straight-line
+fit reported earlier in the conversation mixed the two regimes and is withdrawn.
+
+Cause (loss.py potential_1d_profile_residuals): the 1-D potential is the periodic Poisson solution of
+raw_total = raw_neutral - raw_residual(GTO density) + raw_ion + raw_solvent, followed by a VASP-style
+cdipol sawtooth whose dipole is pred["dipole"] = explicit multipole dipole + solvent_mu (the solver's
+solvent dipole), NOT the dipole of raw_total. The two are different representations of the same
+charge (multipole head vs GTO profile; a legacy of the planar construction, commit a930e92, 2026-07-02,
+no recorded intent) and agree as long as raw_total carries the same charge. For the solved PB profile
+raw_solvent = raw_prof * (s_gauss / s_prof) rescales the profile to the gaussian layer's net charge
+s_gauss = total_charge. For a NEUTRAL solvated frame s_gauss = 0, so the whole solvent profile --
+including the bound charge with dipole mu_bound = +0.175 e A -- is zeroed in the Poisson profile,
+while pred["dipole"] still contains it. Fingerprints, predicted vs observed:
+    step across the layer  4 pi K mu_bound / A = +0.1669 eV      observed resid(18 A) - resid(2 A) = +0.1685 eV
+    residual ramp         -step / H           = -0.00371 eV/A    observed (24-44.5 A)              = -0.00360 eV/A
+Charged frame: s_gauss/s_prof ~ 1 (bound charge nets 0, ion = q), profile retained, mu_bound -5.86 e A
+consistent on both sides, observed residual ramp +0.00000 -- as the mechanism predicts.
+
+Scope: every solvated neutral frame (sid 601-800, 200 of 800 frames) has had its Phi1D residual built
+against this artifact since the mix800 package went into training; the neutral Phi1D residual on this
+pair (0.101 eV vs 0.064 charged) contains it, as does RMSE_potential_1d_profile on those frames. Fix
+candidates (code, training-affecting, USER'S DECISION): (a) for total_charge = 0 keep the solved profile
+unrescaled (or rescale the ion part only); (b) use the dipole of raw_total for the sawtooth (the existing
+dipole=None fallback), which makes the two sides consistent by construction. An evaluation-only rerun
+with the corrected construction would show how much of the neutral residual is the artifact, without
+retraining. Not applied.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
