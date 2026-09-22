@@ -1258,20 +1258,15 @@ def potential_1d_profile_residuals(
             if sp is not None:
                 prof_g = sp.view(sp.shape[0], -1)[graph_idx].to(dtype=z_ref.dtype)
                 if float(torch.sum(torch.abs(prof_g))) > 1.0e-8:
-                    raw_prof = _resample_profile_to_zref(prof_g, height, z_ref) * volume.to(dtype=z_ref.dtype)
-                    s_prof = torch.sum(raw_prof)
-                    s_gauss = torch.sum(raw_solvent)
-                    if float(torch.abs(s_gauss)) > 1.0e-8 and float(torch.abs(s_prof)) > 1.0e-8:
-                        # charged graph: rescale to the gaussian layer's net charge (the ratio is
-                        # -1 up to the solver's q_ion closure; the profile is physics-sign e/A^3,
-                        # the raw_* arrays carry the opposite sign, raw_solvent = -rho * V)
-                        raw_solvent = raw_prof * (s_gauss / s_prof)
-                    else:
-                        # neutral solvated graph (2026-09-22 fix): s_gauss = 0 used to zero the
-                        # whole profile here while pred["dipole"] kept the bound-charge dipole,
-                        # leaving a 4 pi K mu_bound / A step and a -step/H ramp in the potential.
-                        # Keep the solved profile with the explicit sign convention instead.
-                        raw_solvent = -raw_prof
+                    # The solved profile IS the solvent charge of the system (the solver closes
+                    # q_ion = -q_solute to 1e-12; the bound charge nets to zero). It is physics-sign
+                    # e/A^3; the raw_* arrays carry the opposite sign, raw_solvent = -rho * V.
+                    # Until 2026-09-22 this line rescaled the profile to the gaussian layer's net
+                    # charge (s_gauss / s_prof, = -1 on every charged graph), a convention shortcut
+                    # that multiplied NEUTRAL solvated graphs by 0 and dropped their bound charge
+                    # while pred["dipole"] kept it -> a 4 pi K mu_bound / A step and a -step/H ramp
+                    # in the potential. No coefficient: the convention is written out instead.
+                    raw_solvent = -_resample_profile_to_zref(prof_g, height, z_ref) * volume.to(dtype=z_ref.dtype)
         raw_total = raw_neutral - raw_residual + raw_ion + raw_solvent
         phi_pred = _solve_potential_1d_from_raw_profile(
             raw_profile_e=raw_total,
