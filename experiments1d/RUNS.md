@@ -4058,6 +4058,47 @@ ANSWERS
   is to be decided from this localisation.
 
 
+## 2026-09-22 pair report sid 122 / 722 for the 500-epoch production model  (user request: the same analysis as docs/pb1d-w200-pair-sid122.html for prod500_w1000_ref; work dir claude/2-1D_PB/exp_pair122_prod500; GPU job 3461619 c301-001 (one job: pair dump + two ML CHGCARs + electron profiles + 200-pair Fermi/potential); band job 3461965; code 927bbd6; page https://claude.ai/artifact/NoEkrbdogoEctkv6wRTtM9)
+
+Model = 3-residual_3D/prod500_w1000_ref/models/prod500_w1000_ref.model (final weights of the 500-epoch
+run, flag OFF). Pair = sid 122 (charged, q = -0.9424 e) and its solvated neutral twin sid 722 (mix800
+numbering k + 600; the reference page's twin was the unsolvated sid 522). Both frames are in the TEST
+split. Pipeline = the published page's own scripts adapted (tools1d/dump_structure_pair_v2.py:
+solvated neutral captured too, solver wrapped instead of re-solved, model density on the DFT grid
+planes; gen_prod500_pair_docs_page.py; add_sections_prod500.py for 7b/7c and 10; build_chgcar_prod500.py
+= the band pipeline's hard-clamp recipe; bands_prod500.py). First submission failed on the model's
+cwd-relative ./cal1_train.json (known pitfall); the file is staged in the work dir now.
+
+Section 0 (training curves, val split, final epoch): prod500 potential 0.106 / Fermi 0.058 eV vs the
+reference page's d3-w200 0.118 / 0.044 (different packages and splits; context only).
+Section 0b (200 twin pairs, DFT vs model, whole set): Fermi rmse charged 0.037 / neutral 0.042 eV
+(train 160 pairs 0.031 / 0.039; val 20: 0.062 / 0.058; test 20: 0.047 / 0.042); potential rmse
+0.103 / 0.100 eV; charging shift of the Fermi level: DFT mean +3.897, model +3.869 eV, rmse of the
+pair shift 0.060 eV. (Reference page model on its mix400 set: 0.029 / 0.026 eV.)
+Section 1 (scalars):
+   electrode potential  charged -0.3565 / DFT -0.2646 (-0.092)   neutral +2.8403 / +2.7974 (+0.043) eV
+   Fermi level          charged -4.0831 / -4.1483 (+0.065)       neutral -7.2799 / -7.2979 (+0.018) eV
+   q_ion +0.9424 (solute -0.9424), ionic layer centre 22.82 A, mu_bound -5.86 e A (neutral: q_ion 0,
+   mu_bound +0.18); energy error +2.47 / +0.45 meV/atom; charging energy model -5.3827 vs DFT -5.8018 eV
+   (+0.42 eV residual, the known pair bias).
+Section 2 (per-atom charges, sum of dq per element): O -1.591, H +0.663, C -0.047, Ni +0.036, N -0.005 e
+   -- the atomic-charge head puts the extra electron on the water oxygens (net -0.93 e on water, -0.01
+   on the sheet), the same picture as the charge-response diagnosis of 2026-09-21.
+Sections 3/4 (Phi1D residual rms): charged 0.0640 eV (reference page 0.0613), neutral 0.1009 eV.
+Sections 5/6 (net density, common LS factor 0.9839; neutral alone 0.9877, ratio 1.0039).
+Section 7 (charged - neutral): integrated -0.9273 e (model, LS-scaled, whole cell; raw -0.9424 exact) vs
+   DFT -0.9422 e on its window; point-wise rms 0.00033 e/A^3 against a DFT peak 0.0020 e/A^3.
+Sections 7b/7c (electron density, ion baseline restored): peak 1.230 e/A^3 at z 6.93 A; rms difference
+   2.15e-3 e/A^3 = 0.175 % of the peak (reference page 0.17 %), same for the neutral twin (0.175 %).
+   ML CHGCAR build: 32.5 % (122) / 34.3 % (722) of the grid points clamped at zero (vacuum), renormalisation
+   x0.99974 / x0.99963, augmentation-occupancy rmse 3.8e-3 / 3.4e-3, net-density rmse on the window
+   0.0303 / 0.0304 e/A^3.
+Sections 8-9: 1-D PB profiles vs VASPsol RHOION / RHOB of the same calculation; P_off head correction
+   peaks at 11.6 % of the prior peak (reference page 7 %).
+Section 10 (bands from the fully-ML CHGCAR, VASPsol non-SCF, same INCAR/KPOINTS/POTCAR as the earlier
+   run, DFT reference dft_sol reused): job 3461965 -- result appended below when finished.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
