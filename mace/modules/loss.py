@@ -1250,9 +1250,8 @@ def potential_1d_profile_residuals(
         # In PB mode the actual solvent charge is the solved profile
         # (ion + bound polarization), not a gaussian at solv_center. When
         # enabled and available, score the real profile: resample it onto
-        # z_ref and rescale to the same net charge as the gaussian layer
-        # (robust to sign/unit conventions; the gaussian carries the correct
-        # q_sol). Falls back to the gaussian for planar graphs / when off.
+        # z_ref and take it as is (sign convention below). Falls back to the
+        # gaussian for planar graphs / when off.
         if use_solvent_profile:
             sp = pred.get("solvent_profile_features")
             if sp is not None:

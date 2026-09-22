@@ -4142,12 +4142,14 @@ retraining. Not applied.
 User decision (2026-09-22): fix the construction, then retrain 500 epochs WITH the first-stage
 solvent effective-potential input (solvent_pb1d_vsolv_input: True).
 
-Fix (mace/modules/loss.py, potential_1d_profile_residuals, commit a60e6ae): the solved solvent
-profile (rho_ion + rho_bound, physics sign, e/A^3) is rescaled to the gaussian layer's net charge
-only when that net charge is non-zero (charged graphs; the ratio is -1 up to the solver's q_ion
-closure). For a neutral solvated graph the profile is now taken with the explicit convention
-raw_solvent = -raw_prof (the raw_* arrays carry the opposite sign of the physics density), instead
-of being multiplied by s_gauss / s_prof = 0. Charged graphs and unsolvated graphs are unchanged.
+Fix (mace/modules/loss.py, potential_1d_profile_residuals; a60e6ae kept the ratio on charged graphs,
+c16ab1b removes it everywhere after the user's objection): the solved solvent profile (rho_ion +
+rho_bound, physics sign, e/A^3) enters the 1-D charge as raw_solvent = -raw_prof, the explicit sign
+convention of the raw_* arrays, with NO net-charge rescaling. The old coefficient s_gauss / s_prof
+was a convention shortcut: -1.0000000000 on every charged graph (the solver closes q_ion = -q to
+1e-12 and the bound charge nets to 0.00000), 0 on neutral solvated graphs, and it would also have
+hidden a failed ionic-charge closure. Charged graphs change at the 1e-12 level; unsolvated graphs
+are untouched (no profile).
 The sawtooth still uses pred["dipole"] (multipole dipole + solvent_mu); with the profile retained
 the two representations carry the same solvent dipole again, which is what made charged frames flat.
 
