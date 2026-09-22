@@ -46,7 +46,7 @@ for x in ticks:
 plt.xticks(ticks, ["Gamma", "M", "K", "Gamma"])
 plt.xlim(kd[0], kd[-1])
 plt.xlabel("k path"); plt.ylabel("E - E_F (eV)")
-plt.title("sid 122, VASPsol solvent: DFT (black) vs fully-ML CHGCAR, prod500_w1000_ref (red)")
+plt.title("sid 122, VASPsol solvent: DFT (black) vs fully-ML CHGCAR of prod500_w1000_ref (red)", fontsize=10)
 plt.tight_layout()
 plt.savefig(HERE / "bands_122_sol_prod500.png", dpi=220)
 plt.close()

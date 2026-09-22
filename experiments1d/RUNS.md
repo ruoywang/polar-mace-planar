@@ -4095,8 +4095,14 @@ Sections 7b/7c (electron density, ion baseline restored): peak 1.230 e/A^3 at z 
    0.0303 / 0.0304 e/A^3.
 Sections 8-9: 1-D PB profiles vs VASPsol RHOION / RHOB of the same calculation; P_off head correction
    peaks at 11.6 % of the prior peak (reference page 7 %).
-Section 10 (bands from the fully-ML CHGCAR, VASPsol non-SCF, same INCAR/KPOINTS/POTCAR as the earlier
-   run, DFT reference dft_sol reused): job 3461965 -- result appended below when finished.
+Section 10 result (job 3461965, c301-001/002, 03:32 -> ~04:05, 15 non-SCF iterations, VASPsol, ICHARG = 11,
+same INCAR/KPOINTS/POTCAR as the reference run; DFT reference exp_band/sid122_bands/dft_sol): each run
+against its own Fermi level, 24 bands around the edge (band 330 +- 12): Fermi-window RMSE 0.143 eV,
+all-band RMSE 0.164 eV, Fermi level ML -4.535 vs DFT -4.104 eV (-0.431). The reference page's d3-w200
+model gave 0.041 eV and -0.25 eV on the same structure. The ML CHGCAR (7b) matches the DFT density to
+0.175 % of the peak in the plane average, the same as d3-w200's 0.17 %, so the band-window gap is not
+in the plane-averaged density; which part of the 3-D density / occupancies carries it is not
+determined here. Final page (sections 0-10) https://claude.ai/artifact/NoEkrbdogoEctkv6wRTtM9 .
 
 
 ## 2026-09-22 Phi1D construction: neutral SOLVATED frames get a spurious 0.17 eV step + ramp  (found on the sid 122/722 pair page; user question about the sloped potential at z = 18-45 A)
