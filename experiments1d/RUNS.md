@@ -4137,6 +4137,33 @@ with the corrected construction would show how much of the neutral residual is t
 retraining. Not applied.
 
 
+## 2026-09-22 DECISION + FIX: Phi1D neutral-solvated construction fixed (a60e6ae); gate 3462092; new production prod500_vsolv_fix prepared
+
+User decision (2026-09-22): fix the construction, then retrain 500 epochs WITH the first-stage
+solvent effective-potential input (solvent_pb1d_vsolv_input: True).
+
+Fix (mace/modules/loss.py, potential_1d_profile_residuals, commit a60e6ae): the solved solvent
+profile (rho_ion + rho_bound, physics sign, e/A^3) is rescaled to the gaussian layer's net charge
+only when that net charge is non-zero (charged graphs; the ratio is -1 up to the solver's q_ion
+closure). For a neutral solvated graph the profile is now taken with the explicit convention
+raw_solvent = -raw_prof (the raw_* arrays carry the opposite sign of the physics density), instead
+of being multiplied by s_gauss / s_prof = 0. Charged graphs and unsolvated graphs are unchanged.
+The sawtooth still uses pred["dipole"] (multipole dipole + solvent_mu); with the profile retained
+the two representations carry the same solvent dipole again, which is what made charged frames flat.
+
+Gate (3-residual_3D/gate_phi1dfix_probe, job 3462092, dev): (A) pair 122/722 dumped again with the
+fixed construction -> compare neutral residual rms / ramp (24-44.5 A) / step (18 A vs 2 A) against
+structure_pair_sid122_722.npz (before: rms 0.0985, ramp -0.00360 eV/A, step +0.1685 eV; charged must
+stay rms 0.0640, ramp 0.00000); (B) one training epoch, warm-up 0, flag ON, 3 ranks, step timing on
+(crash / loss sanity). Production is submitted only after (A) and (B) pass.
+
+New production (3-residual_3D/prod500_vsolv_fix, NOT yet submitted): config = prod500_w1000_ref +
+name + solvent_pb1d_vsolv_input: True; seed 123, warm-up 20, weights E 1000 / F 100, 3 ranks,
+gpu-a100 48 h, segment_time_budget 169200 s; job_prod.sh self-chains a RESUME continuation when the
+segment state exists and training is not complete (the input's +12% step cost puts 500 epochs past
+one 48 h job: prod500_w1000_ref needed 45 h 52 min).
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
