@@ -191,7 +191,8 @@ err_series = []
 cls_cycle = ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7"]
 for i, c in enumerate(CKS):
     a = c["aggregate_all"]
-    err_series.append({"x": a["z"], "y": [u - v for u, v in zip(a["R_ml_per_e"], a["R_dft_per_e"])], "label": c["label"], "cls": cls_cycle[i % 8]})
+    err_series.append({"x": a["z"], "y": [u - v for u, v in zip(a["R_ml_per_e"], a["R_dft_per_e"])], "label": c["label"], "cls": cls_cycle[i % 8],
+                       "dash": c["flag_in_training"] == "ON"})
 figs.append(("图 2  平均响应误差 (R_ML − R_DFT)/ΔN_e：按检查点", svg_plot(err_series, "z (Å)", "(R_ML − R_DFT) / ΔN_e  (1/Å)", regions=regmean)))
 figs.append(("图 3  沿 z 累计的新增电子数 C(z)/ΔN_e（全部 47 对平均）",
              svg_plot([{"x": agg_m["z"], "y": agg_m["C_dft_per_e"], "label": "DFT", "cls": "dft"},

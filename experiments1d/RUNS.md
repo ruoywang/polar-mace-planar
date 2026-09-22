@@ -3991,6 +3991,73 @@ is independent of the input and is the lead to follow. Decision on the flag (dro
 is the user's; the code stays optional-off (solvent_pb1d_vsolv_input default False).
 
 
+## 2026-09-21 charging density response dn(r) = n(charged) - n(neutral) vs DFT, by checkpoint  (user decision: keep the v_new input, no training, diagnose with saved checkpoints; densities: job 3461093 for prod e59/100/200/400/499 in ONE process (code 2a8a6ae, ~900-1000 s per checkpoint), e25/30/33 of both arms from the gate evaluations (b396deb); report audits/charge_response_report.py + charge_response_page.py; page https://claude.ai/artifact/NaL6dUc6YimsRfrNC5KhcS)
+
+User decisions recorded first: keep the first-stage (v_cav + v_diel + v_ion) input with the accepted
+one-pass approximation and full derivative path, feature floor 1e-8, energy floor 1e-12; future
+models train with solvent_pb1d_vsolv_input=True; no mid-run flag switch, no new long training now.
+The small negative F / density_3d / occ_aug changes of the gate stand as recorded, especially the
+neutral solvent-side density tail (+5 to +13%), but the warm-up divergence and correlated
+checkpoints of one trajectory are not independent evidence of a degradation caused by the input.
+
+WHAT WAS CHECKED FIRST (definitions), all 47 pairs (train 27 / val 20, sids k / k+600):
+  * geometry identical atom by atom (max |dr| = 0), same cell, same density grid (168x168x500,
+    178 valid planes, lattice = cell), same valid planes; the manifest's z_min label differs
+    between the twins (3.6463 vs 3.69) but the plane coordinates come from the meta files and
+    are identical.
+  * sign / units: the grid is net charge density (electrons negative, e/A^3); the model's GTO
+    density is evaluated on the same points with the same convention; everything below is
+    multiplied by -1 so added electrons are positive.
+  * int dn dV = dN_e = -q(charged): |N_ML - dN_e| <= 0.007 e, |N_DFT - dN_e| <= 0.0006 e on
+    every pair and checkpoint. The response error E below is a SHAPE error, not missing charge.
+  Definitions: R(z) = -A <dn>_xy(z) (e/A); E = int |R_ML - R_DFT| dz; S = int |R_DFT| dz; regions
+  from the charged frame's geometry: sheet = C within 1 A of the median C height + Ni + N (71
+  atoms, z 6.59-7.32 A); electrode [z_sheet_min - 1.5, z_sheet_max + 1.5] = [5.09, 8.82] A;
+  interface (.., z_sheet_max + 4.0] = to 11.32 A (adsorbate C at 9.16 A + first water layer);
+  water (.., z_water_max + 1.0] = to 17.49 A; vacuum below / above = the rest of the window.
+  Share = N_region / N with each side's own window integral: a spatial partition, not an atomic
+  charge. (The "metal share 0.13-0.16 vs 0.33" of the gate entries used z <= top solute atom
+  + 1 A = 10.4 A, which mixes the sheet with the negative interface lobe; superseded here.)
+
+RESULTS (production checkpoints, flag OFF in training, EMA weights; E, S in electrons):
+   epoch   E train / val   S train / val   E/S train / val   electrode N_ML/N_DFT (share)   interface   water           vac above
+     25    1.639 / 1.625   1.518 / 1.496   1.078 / 1.086     +0.17/+0.50 (0.16/0.47)   +0.04/-0.08   +0.80/+0.62 (0.74/0.58)   +0.05/+0.02
+     33    1.483 / 1.485                   0.975 / 0.990     +0.27/+0.50 (0.25/0.47)   -0.14/-0.08   +0.89/+0.62 (0.83/0.58)   +0.04/+0.02
+     59    1.270 / 1.214                   0.841 / 0.810     +0.39/+0.50 (0.37/0.47)   -0.25/-0.08   +0.90/+0.62 (0.84/0.58)   +0.02/+0.02
+    100    1.029 / 0.959                   0.682 / 0.641     +0.42/+0.50 (0.39/0.47)   -0.16/-0.08   +0.77/+0.62 (0.72/0.58)   +0.03/+0.02
+    200    0.837 / 0.802                   0.555 / 0.540     +0.41/+0.50 (0.39/0.47)   -0.07/-0.08   +0.65/+0.62 (0.60/0.58)   +0.05/+0.02
+    400    0.807 / 0.791                   0.537 / 0.536     +0.41/+0.50 (0.39/0.47)   -0.06/-0.08   +0.62/+0.62 (0.57/0.58)   +0.06/+0.02
+    499    0.754 / 0.729                   0.502 / 0.493     +0.40/+0.50 (0.37/0.47)   -0.02/-0.08   +0.59/+0.62 (0.54/0.58)   +0.07/+0.02
+   (region columns are train means; val within 0.01-0.04 of train everywhere; centroid error
+   0.21-0.27 A early -> 0.13-0.17 A at 499.)
+   Gate (flag ON in training), the only ON checkpoints that exist (0-33): e25 E/S 1.061 / 1.082,
+   e33 0.997 / 1.025 -- the same as production at matched epochs. No mature ON checkpoint; none
+   is faked by switching the flag on an OFF model.
+   Where E sits at 499 (share of E per region, all pairs): water 0.43, electrode 0.28, interface
+   0.20, vacuum 0.10.
+
+ANSWERS
+  * Total electron count: correct on every pair and checkpoint (<= 0.007 e).
+  * "1.48-1.62 e against 1.51 e": true only up to epoch 33. The mature model has E/S = 0.50
+    (train 0.502 / val 0.493), i.e. the response error is half the size of the response.
+  * Where the bias is: early (25-59) the sheet gets half of DFT's electrons (+0.17..+0.39 vs
+    +0.50 e) and the surplus sits in the water region (+0.80..+0.90 vs +0.62 e). Mature
+    (200-499): the water integral has converged to DFT (+0.57..+0.65 vs +0.62 e) but the sheet
+    is still short by 0.09-0.10 e (share 0.37-0.40 vs 0.47-0.48) -- flat since epoch 100; the
+    interface depletion of DFT (-0.08 e) is nearly absent in the model (-0.01..-0.02 e); the
+    vacuum tails carry +0.05 e (above) and +0.02 e (below) too much. So yes, the mature model
+    still assigns part of the electrode response elsewhere, but 0.10 e instead of 0.23-0.33 e,
+    and to the interface and the vacuum tails rather than to the water. Point-wise, the largest
+    share of E is still inside the water layer (0.43 at 499): the water-region integral is right
+    while its z-shape is not (figure 1: the DFT lobes at 11 and 15.7 A are split / lowered).
+  * Improvement with training: strong to epoch 100-200 (E/S 0.98 -> 0.55, electrode share
+    0.25 -> 0.39), then a plateau (0.55 -> 0.50 between 200 and 499; electrode share unchanged).
+    The early response bias therefore persists in the mature model at reduced size: an
+    electrode deficit of 0.10 e per pair that training no longer removes.
+  No change to the network, loss weights, learning rate or supervision was made; the next change
+  is to be decided from this localisation.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
