@@ -4172,6 +4172,34 @@ segment state exists and training is not complete (the input's +12% step cost pu
 one 48 h job: prod500_w1000_ref needed 45 h 52 min).
 
 
+## 2026-09-22 gate for the Phi1D fix PASSED (3462092, c301-004, code b3c7081); production prod500_vsolv_fix SUBMITTED (3462229, gpu-a100)
+
+Gate A -- pair 122/722 dumped with the coefficient-free construction (structure_pair_sid122_722_fix.npz)
+against the earlier dump (same model prod500_w1000_ref, same frames):
+                                 before          after
+   neutral 722  Phi1D rms        0.1009 eV       0.0798 eV
+                ramp 24-44.5 A   -0.00360 eV/A   -0.00012 eV/A
+                step 18 A - 2 A  +0.1685 eV      +0.0449 eV
+   charged 122  Phi1D rms        0.0640 eV       0.0641 eV
+                ramp             +0.00000        -0.00009 eV/A
+                step             -0.1026 eV      -0.0998 eV
+The artifact (0.167 eV step, -0.0037 eV/A ramp predicted from mu_bound = 0.175 e A) is gone; the
+remaining +0.045 eV step on the neutral frame is the model's own potential error. The charged frame
+moves at the 1e-4 level: the old coefficient also renormalised the small net-charge error of the
+1024 -> 500-point resampling of the solvent profile, which is now carried as is.
+Gate B -- one training epoch, warm-up 0, flag ON, 3 ranks, seed 123 (3-residual_3D/gate_phi1dfix_probe):
+run_train rc 0, 213 steps, step mean 1.67 s max 5.3 s, CUDA peak 26.24 GiB, n_outer 9.62 / 16, no
+Traceback; epoch-0 values are warm-up-0 noise as in the earlier probes.
+
+PRODUCTION prod500_vsolv_fix: job 3462229 submitted 2026-09-22 06:58 to gpu-a100 (48 h, 3 ranks, seed 123,
+segment_time_budget 169200 s, self-chaining continuation in job_prod.sh). Config = prod500_w1000_ref +
+solvent_pb1d_vsolv_input: True; code b3c7081 (loss fix c16ab1b/399b03e included). Watcher (read-only):
+claude/2-1D_PB/exp_vsolv/watch_prodfix.sh. Reference for matched-epoch comparison: prod500_w1000_ref
+(flag OFF, old construction) with the w1000_ref replicate as the noise floor -- note that the Phi1D
+validation metric itself changed for the 25 % solvated-neutral frames, so RMSE_potential_1d_profile
+is not comparable across the fix on those frames.
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
