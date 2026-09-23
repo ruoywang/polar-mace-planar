@@ -4225,6 +4225,9 @@ probe bars are gone (the probes were 2-epoch, warm-up-0 cost measurements, not r
 table reduced to F / density_3d / E / Phi1D / occ_aug; acceptance table reduced to five checks.
 Training length per epoch from the log timestamps: warm-up 114 s, PB phase production 331 s vs gate
 372 s (+12 %); production 500 epochs 45.4 h measured; at the gate's speed 500 epochs = 50.3 h.
+Revision 3 (user 2026-09-23, audits/vsolv_report_page3.py, same URL): the whole page in English; the
+Phi1D-fix section gained the predicted potential curves themselves (DFT, model before, model after; whole
+cell and a z = 18-44.5 A window) next to the residual figure -> 9 figures.
 
 
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
