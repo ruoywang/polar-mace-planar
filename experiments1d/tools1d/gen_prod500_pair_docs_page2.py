@@ -187,7 +187,7 @@ train_table = f"""
 </table>
 """
 NOTE0 = ('<p class="note">Linear scale, validation RMSE per epoch (the first warm-up epochs lie above the plotted range); all three runs validate on the same 80 frames of the mix800 package. '
-         'The energy comparison run is the last 500-epoch production before the native local-electron energy head and the energy weight 1000 were introduced (it stopped at epoch 475).</p>')
+         'The energy comparison run is the last production before the native local-electron energy head and the energy weight 1000 were introduced; it was killed by its 30 h wall-time limit after epoch 475 (Slurm TIMEOUT, 2026-09-03), so its curve ends there.</p>')
 
 # ---- section 0b: per-structure Fermi, charged and neutral (DFT) -----------
 fp = np.load(pairs_npz)
