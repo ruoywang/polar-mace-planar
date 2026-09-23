@@ -63,10 +63,22 @@ def path_of(xs, ys, xlo, xhi, ylo, yhi, w, h):
 
 
 def ticks(lo, hi, n=6):
-    return np.linspace(lo, hi, n)
+    """Round tick values inside [lo, hi] (steps 1, 2, 2.5, 5 x 10^k), never the raw data bounds."""
+    span = hi - lo
+    if span <= 0:
+        return np.array([lo])
+    mag = 10.0 ** np.floor(np.log10(span / n))
+    step = mag
+    for m in (1.0, 2.0, 2.5, 5.0, 10.0):
+        step = m * mag
+        if span / step <= n:
+            break
+    first = np.ceil(lo / step - 1e-9) * step
+    t = np.round(np.arange(first, hi + 1e-9 * step, step), 10) + 0.0   # + 0.0 turns -0.0 into 0.0
+    return t
 
 
-def axis_svg(xlo, xhi, ylo, yhi, w, h, xlab, ylab, xfmt="{:.0f}", yfmt="{:.2g}", ylog=False):
+def axis_svg(xlo, xhi, ylo, yhi, w, h, xlab, ylab, xfmt="{:g}", yfmt="{:g}", ylog=False):
     out = []
     for tv in ticks(xlo, xhi):
         px = scale(tv, xlo, xhi, ML, w - MR)
@@ -83,7 +95,7 @@ def axis_svg(xlo, xhi, ylo, yhi, w, h, xlab, ylab, xfmt="{:.0f}", yfmt="{:.2g}",
             lab = f"{v:g}"
             out.append(f'<text x="{ML-6}" y="{py+4:.1f}" class="tick" text-anchor="end">{lab}</text>')
     else:
-        for tv in ticks(ylo, yhi, 5):
+        for tv in ticks(ylo, yhi, 6):
             py = scale(tv, ylo, yhi, h - MB, MT)
             out.append(f'<line x1="{ML}" y1="{py:.1f}" x2="{w-MR}" y2="{py:.1f}" class="grid"/>')
             out.append(f'<text x="{ML-6}" y="{py+4:.1f}" class="tick" text-anchor="end">{yfmt.format(tv)}</text>')
@@ -109,12 +121,15 @@ def line_chart(cid, series, xlab, ylab, h=H_MAIN, ypad=0.06, yclip=None, legend_
     pad = (yhi - ylo) * ypad or 1e-6
     ylo, yhi = ylo - pad, yhi + pad
     if yclip:
-        ylo, yhi = max(ylo, yclip[0]), min(yhi, yclip[1])
+        ylo, yhi = float(yclip[0]), float(yclip[1])   # the requested window exactly (axis from 0 when asked)
     parts = [f'<svg id="{cid}" viewBox="0 0 {W} {h}" data-xlo="{xlo}" data-xhi="{xhi}" data-ylo="{ylo}" data-yhi="{yhi}" data-h="{h}">']
     parts.append(axis_svg(xlo, xhi, ylo, yhi, W, h, xlab, ylab, ylog=ylog))
     for (name, xs, ys, slot, dash), yv in zip(series, raw):
         dash_attr = ' stroke-dasharray="6 4"' if dash else ""
-        parts.append(f'<path d="{path_of(xs, np.clip(yv, ylo, yhi), xlo, xhi, ylo, yhi, W, h)}" class="ln {slot}"{dash_attr} fill="none"/>')
+        xs_a, yv_a = np.asarray(xs, dtype=float), np.asarray(yv, dtype=float)
+        if yclip:   # points outside the window are left out instead of being flattened onto the frame
+            keep = (yv_a >= ylo) & (yv_a <= yhi); xs_a, yv_a = xs_a[keep], yv_a[keep]
+        parts.append(f'<path d="{path_of(xs_a, yv_a, xlo, xhi, ylo, yhi, W, h)}" class="ln {slot}"{dash_attr} fill="none"/>')
     if legend_xy:
         lx, ly = legend_xy
         for i, (name, *_rest) in enumerate(series):
