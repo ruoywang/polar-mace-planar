@@ -157,11 +157,11 @@ fer_series = [(MODEL_LABEL, ep_m, fer_m, "s1", False)]
 if CPMACE_TXT:
     ep_c, pot_c, fer_c, e_c, f_c = load_eval(CPMACE_TXT)
     fer_series.append(("FermiMACE (11-cpmace_800)", ep_c, fer_c, "s2", True))
-curve_fer = line_chart("tfer", fer_series, "epoch", "validation RMSE Fermi level (eV)", legend_xy=(ML + 200, MT + 12), unit="eV", ylog=True)
+curve_fer = line_chart("tfer", fer_series, "epoch", "validation RMSE Fermi level (eV)", legend_xy=(ML + 200, MT + 12), unit="eV", ylog=False, yclip=(0.0, 0.6))
 e_series = [(MODEL_LABEL, ep_m, e_m, "s1", False)]
 if HAS_ECOMP:
     e_series.append((COMPARE_LABEL, ep_p, e_p, "s6", True))
-curve_E = line_chart("tene", e_series, "epoch", "validation RMSE energy (meV/atom)", legend_xy=(ML + 200, MT + 12), unit="meV/atom", ylog=True)
+curve_E = line_chart("tene", e_series, "epoch", "validation RMSE energy (meV/atom)", legend_xy=(ML + 200, MT + 12), unit="meV/atom", ylog=False, yclip=(0.0, 25.0))
 
 train_table = f"""
 <table class="kv">
@@ -171,7 +171,7 @@ train_table = f"""
 {(f'<tr><td>FermiMACE (11-cpmace_800) — same package, plain MACE with a Fermi-level head</td><td>{int(ep_c[-1])+1}</td><td>{e_c[-1]:.2f}</td><td>{fer_c[-1]:.3f}</td><td>{f_c[-1]:.1f}</td></tr>') if CPMACE_TXT else ''}
 </table>
 """
-NOTE0 = ('<p class="note">Log scale, validation RMSE per epoch; all three runs validate on the same 80 frames of the mix800 package. '
+NOTE0 = ('<p class="note">Linear scale, validation RMSE per epoch (the first warm-up epochs lie above the plotted range); all three runs validate on the same 80 frames of the mix800 package. '
          'The energy comparison run is the last 500-epoch production before the native local-electron energy head and the energy weight 1000 were introduced (it stopped at epoch 475).</p>')
 
 # ---- section 0b: per-structure Fermi, charged and neutral (DFT) -----------
