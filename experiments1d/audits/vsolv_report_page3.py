@@ -292,9 +292,6 @@ fig_fix = line_chart("fFix", [{"x": zphi, "y": res_b, "label": "before the fix",
 phi_ref = pb["phi_ref_cmp_n"].astype(float); phi_b = pb["phi_pred_cmp_n"].astype(float); phi_a = pf["phi_pred_cmp_n"].astype(float)
 fig_phi = line_chart("fPhi", [{"x": zphi, "y": phi_ref, "label": "DFT", "cls": "s6"}, {"x": zphi, "y": phi_b, "label": "model, before the fix", "cls": "s2", "dash": True}, {"x": zphi, "y": phi_a, "label": "model, after the fix", "cls": "s1"}],
                      "z (Å)", "plane-averaged potential φ(z) − φ(upper vacuum) (eV)", regions=regmean, unit="eV")
-mz = (zphi >= 18.0) & (zphi <= 44.5)
-fig_phiz = line_chart("fPhiZ", [{"x": zphi[mz], "y": phi_ref[mz], "label": "DFT", "cls": "s6"}, {"x": zphi[mz], "y": phi_b[mz], "label": "model, before the fix", "cls": "s2", "dash": True}, {"x": zphi[mz], "y": phi_a[mz], "label": "model, after the fix", "cls": "s1"}],
-                      "z (Å)", "φ(z) − φ(upper vacuum) (eV), z = 18–44.5 Å", unit="eV")
 fig_time = bar_chart([("OFF\nproduction prod500_w1000_ref", round(ep_prod), "s1"), ("ON\ngate gate_vsolv", round(ep_gate), "s2")], "wall time per epoch (s), PB phase, mean of epochs 21–33", "s")
 
 
@@ -418,8 +415,7 @@ svg.fig{{display:block;background:var(--surf);border:1px solid var(--grid)}}
 {EQ["step"]}
 {tbl_fix}
 {fig("Figure 7  Neutral frame sid 722: plane-averaged 1-D potential, DFT and the model before and after the fix", fig_phi, "Aligned to the upper vacuum, whole cell. The slab sits at 6.6–9.4 Å, explicit water up to 16.7 Å, the implicit electrolyte beyond.")}
-{fig("Figure 8  The same curves for z = 18–44.5 Å (implicit electrolyte and upper vacuum)", fig_phiz, "Before the fix the model's potential is a straight line from +0.10 eV at 18 Å to −0.02 eV at 44 Å where DFT is flat at 0; after the fix it is flat too.")}
-{fig("Figure 9  1-D potential residual (model − DFT), neutral sid 722, before and after the fix", fig_fix, "Fix: the coefficient is removed and ρ_solv enters with the explicit sign convention for every frame (commit c16ab1b). It affects the Φ1D loss of the 200 solvated neutral frames (sid 601–800) since they entered training; charged frames are unchanged (0.0640 → 0.0641 eV).")}
+{fig("Figure 8  1-D potential residual (model − DFT), neutral sid 722, before and after the fix", fig_fix, "Fix: the coefficient is removed and ρ_solv enters with the explicit sign convention for every frame (commit c16ab1b). It affects the Φ1D loss of the 200 solvated neutral frames (sid 601–800) since they entered training; charged frames are unchanged (0.0640 → 0.0641 eV).")}
 
 <h2>8 · Final changes and status</h2>
 <ul>
