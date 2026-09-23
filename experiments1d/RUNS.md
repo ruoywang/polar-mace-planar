@@ -4217,6 +4217,14 @@ table, residual before/after figure); final changes and status (prod500_vsolv_fi
 pending on gpu-a100 at 02:30 on 09-23: 197 pending / 50 running, priority 1499 vs 5645 at the head).
 Palette = the dataviz reference categorical palette, validated (light: all checks pass, contrast
 relief on aqua/yellow/magenta -> legends + tables; dark: pass). Page https://claude.ai/artifact/JVFgFoGD6HiAiqwTENyYgK .
+Revision 2 (user review: fewer error metrics, rendered formulas, training length per epoch, only the
+essential tests; audits/vsolv_report_page2.py, same URL): 13 formulas rendered offline with matplotlib
+mathtext to inline SVG (no CDN); 7 figures (pipeline, epoch wall time, F ratio with noise band,
+structural dot plot 8 rows, charge-response curves, E/S vs epoch, Phi1D residual before/after); the
+probe bars are gone (the probes were 2-epoch, warm-up-0 cost measurements, not results); validation
+table reduced to F / density_3d / E / Phi1D / occ_aug; acceptance table reduced to five checks.
+Training length per epoch from the log timestamps: warm-up 114 s, PB phase production 331 s vs gate
+372 s (+12 %); production 500 epochs 45.4 h measured; at the gate's speed 500 epochs = 50.3 h.
 
 
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
