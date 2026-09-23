@@ -4090,6 +4090,11 @@ Section 7 (charged - neutral): integrated -0.9273 e (model, LS-scaled, whole cel
    DFT -0.9422 e on its window; point-wise rms 0.00033 e/A^3 against a DFT peak 0.0020 e/A^3.
 Sections 7b/7c (electron density, ion baseline restored): peak 1.230 e/A^3 at z 6.93 A; rms difference
    2.15e-3 e/A^3 = 0.175 % of the peak (reference page 0.17 %), same for the neutral twin (0.175 %).
+   [2026-09-23 revision of section 0 (user): the Fermi-level curve now compares prod500_w1000_ref with
+   FermiMACE 11-cpmace_800 (same package, same 80 val frames; endpoint 0.058 vs 0.139 eV), the Phi1D
+   curve is gone, and an energy curve compares with s3d_prod500 (the last 500-epoch production before
+   the native local-electron energy head and energy weight 1000: weight 1, warm-up 30, stopped at
+   epoch 475; endpoint E 0.89 vs 8.43 meV/atom). tools1d/gen_prod500_pair_docs_page2.py; same URL.]
    ML CHGCAR build: 32.5 % (122) / 34.3 % (722) of the grid points clamped at zero (vacuum), renormalisation
    x0.99974 / x0.99963, augmentation-occupancy rmse 3.8e-3 / 3.4e-3, net-density rmse on the window
    0.0303 / 0.0304 e/A^3.
