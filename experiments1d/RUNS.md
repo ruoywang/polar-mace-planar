@@ -4200,6 +4200,25 @@ validation metric itself changed for the 25 % solvated-neutral frames, so RMSE_p
 is not comparable across the fix on those frames.
 
 
+## 2026-09-23 report page: the solvent effective-potential input, all tests, results and final changes  (audits/vsolv_report_page.py; user request 2026-09-23)
+
+One page (Chinese, static SVG + hover read-out, 13 figures, 9 sections): summary; background (how the
+solvent enters the charge recursion, VASPsol++ v_corr = e phi_solv + v_solv, the three non-training
+checks); theory (parent functional, lambda_ion / lambda_diel = rot + pol + sic, the closure's quadratic
+expansion a1 / p_off / Lambda_diel, stationarity <-> solver residual, envelope theorem, v_cav / v_ion /
+v_diel, partial at fixed phi via the cloned node, projection and VSOLV_SIGN, the two eps floors);
+implementation; the pre-training acceptance table C0-C5 / S / M / F / G / X / Y / Z / T with the two
+defects (total-vs-partial derivative, area-floor curvature, figure of the Z3 eps sweep); real-training
+cost (step time, CUDA peak); the gate against production with the w1000_ref noise band (validation
+ratio table + per-epoch figures for F, density_3d, occ_aug, E; structural table e25/30/33 and a
+dot plot of the relative changes; charge-response curves gate vs prod at e33); the charge-response
+diagnosis (E/S vs epoch, region shares vs epoch); the Phi1D neutral-solvated fix (formula, fingerprint
+table, residual before/after figure); final changes and status (prod500_vsolv_fix 3462229 still
+pending on gpu-a100 at 02:30 on 09-23: 197 pending / 50 running, priority 1499 vs 5645 at the head).
+Palette = the dataviz reference categorical palette, validated (light: all checks pass, contrast
+relief on aqua/yellow/magenta -> legends + tables; dark: pass). Page https://claude.ai/artifact/JVFgFoGD6HiAiqwTENyYgK .
+
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config

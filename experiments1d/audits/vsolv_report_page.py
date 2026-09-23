@@ -139,6 +139,10 @@ def fmt(v):
     return f"{v:g}" if abs(v) < 1e4 else f"{v:.2e}"
 
 
+def tw(text, px_ascii=7.0, px_cjk=13.0):
+    return sum(px_cjk if ord(ch) > 0x2E7F else px_ascii for ch in text)
+
+
 def line_chart(cid, series, xlabel, ylabel, regions=None, y0line=True, bands=None, xr=None, yr=None, unit="", hlines=None, xticks=None):
     """series: dict(x, y, label, cls, dash). bands: list of (x, ylo, yhi, cls) shaded ranges. hlines: [(y, label, cls)]."""
     xs = [v for s in series for v in s["x"]]; ys = [v for s in series for v in s["y"]]
@@ -148,6 +152,8 @@ def line_chart(cid, series, xlabel, ylabel, regions=None, y0line=True, bands=Non
     if hlines:
         ys += [h[0] for h in hlines]
     x0, x1 = (min(xs), max(xs)) if xr is None else xr
+    if xr is None and regions is None:
+        xp = 0.025 * (x1 - x0); x0 -= xp; x1 += xp
     ylo, yhi = (min(ys), max(ys)) if yr is None else yr
     if y0line:
         ylo, yhi = min(ylo, 0.0), max(yhi, 0.0)
@@ -190,8 +196,7 @@ def line_chart(cid, series, xlabel, ylabel, regions=None, y0line=True, bands=Non
                 o.append(f'<circle cx="{X(a):.1f}" cy="{Y(b):.1f}" r="4" class="dot {s["cls"]}"/>')
     lx = ML + pw
     for s in reversed(series):
-        tw = 7.2 * len(s["label"]) + 34
-        lx -= tw
+        lx -= tw(s["label"]) + 34
         dash = ' stroke-dasharray="6 4"' if s.get("dash") else ""
         o.append(f'<line x1="{lx}" x2="{lx+22}" y1="{MT-34}" y2="{MT-34}" class="line {s["cls"]}"{dash}/>')
         o.append(f'<text x="{lx+27}" y="{MT-30}" class="lgd">{html.escape(s["label"])}</text>')
@@ -251,7 +256,7 @@ def dot_rows(cid, rows, cols, xlabel, unit="%"):
     lx = ml
     for name, cls in cols:
         o.append(f'<circle cx="{lx+6}" cy="{MT-30}" r="5.5" class="dot {cls}"/>')
-        o.append(f'<text x="{lx+16}" y="{MT-26}" class="lgd">{html.escape(name)}</text>'); lx += 7.2 * len(name) + 40
+        o.append(f'<text x="{lx+16}" y="{MT-26}" class="lgd">{html.escape(name)}</text>'); lx += tw(name) + 40
     o.append(f'<text x="{ml+pw/2:.1f}" y="{Hd-12}" class="axis">{html.escape(xlabel)}</text></svg>')
     return "\n".join(o)
 
