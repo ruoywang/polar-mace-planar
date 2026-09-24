@@ -4235,6 +4235,20 @@ Phi1D-fix section gained the predicted potential curves themselves (DFT, model b
 cell and a z = 18-44.5 A window) next to the residual figure -> 9 figures.
 
 
+
+## 2026-09-24 prod500_vsolv_fix: job 3462229 FAILED at start (exit 0:53, 1 s, no output); resubmitted as 3468071
+
+sacct: 3462229 PENDING 2026-09-22 06:55 -> Start 2026-09-24 11:07:05 on c302-004 -> FAILED 11:07:06,
+ExitCode 0:53, batch step CANCELLED, Elapsed 00:00:01. No logs/prod.o3462229 / prod.e3462229 was
+created, run.log does not exist, checkpoints/ models/ cache/ logs/ are all still empty: the batch
+script never ran (its first line writes the CODE line to the -o file). Run directory exists and is
+writable from the login node; node c302-004 is back in state alloc with reason none. Cause not
+established from my side (no other 0:53 records visible to this account today).
+Resubmitted unchanged from the run directory (no RESUME; segments/ empty so the REFUSING guard
+does not trigger): job 3468071, gpu-a100, 2026-09-24 ~13:40, Reason=Resources. Watcher
+(claude/2-1D_PB/exp_vsolv/watch_prodfix.sh) finds the job by name p500vfix, unchanged.
+The 2 d 4 h of accumulated queue age is lost; the new job starts at the back of the priority order.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
