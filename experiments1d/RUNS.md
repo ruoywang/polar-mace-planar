@@ -4276,6 +4276,26 @@ CUDA peak 26.30 GiB = gate_vsolv (1.60 s, 26.30 GiB; flag OFF production 1.43 s,
 19->20 381 s, 20->21 389 s: 480 remaining epochs do not fit the 169200 s budget, so the segment will stop at
 an epoch boundary and self-chain the RESUME continuation as designed.
 
+
+## 2026-09-27 prod500_vsolv_fix 3468071 at epoch 100: matched-epoch comparison with prod500_w1000_ref (10-epoch window means)
+
+Single epochs (this run / prod500_w1000_ref): e50 E 3.25/3.46, F 37.48/36.90, pot 0.1391/0.1379, fermi
+0.0978/0.1045, dens3d 0.03173/0.03139, occ 0.00857/0.00759; e75 E 2.07/2.43, F 32.79/32.11, pot 0.1240/0.1265,
+fermi 0.0797/0.0920, occ 0.00705/0.00637; e100 E 1.97/1.60, F 31.48/29.41, pot 0.1100/0.1167, fermi
+0.0748/0.0738, dens3d 0.03092/0.03065, occ 0.00666/0.00562 (E meV/atom, F meV/A, pot/fermi eV, dens e/A^3).
+Window means, ratio this/prod (replicate floor w1000_ref/prod in the 41-50 window: E 0.992, F 0.981,
+pot 1.048, fermi 0.983, dens 1.006, occ 1.024; w1000_ref ends at epoch 59):
+  41-50 : E 0.840  F 1.021  pot 1.042  fermi 0.998  dens 1.011  occ 1.153
+  66-75 : E 0.814  F 1.026  pot 1.024  fermi 0.942  dens 1.005  occ 1.151
+  91-100: E 0.917  F 1.054  pot 1.073  fermi 1.018  dens 1.004  occ 1.109
+Reading: energy 8-19% better in every window (outside the floor); forces 2-5% worse and drifting up
+(1.021 -> 1.054, floor 0.981); occupation 11-15% worse (floor 1.024), the same direction as gate_vsolv
+0-33; density at the floor; potential and Fermi within the replicate spread (potential floor itself 1.048).
+Phi1D not compared (definition changed on neutral solvated frames by the fix). No cause assigned: this run
+differs from the reference by two things at once (solvent effective-potential input ON, Phi1D fix).
+Cost: 75->100 = 25 epochs in 2 h 37 min 20 s = 378 s/epoch; step 1.62 s, CUDA peak 26.36 GiB; 15 fallbacks,
+all pre-epoch-0. Epoch 100 reached 06:44 CDT (9 h 19 min after start).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
