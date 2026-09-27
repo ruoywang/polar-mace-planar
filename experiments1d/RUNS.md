@@ -4249,6 +4249,33 @@ does not trigger): job 3468071, gpu-a100, 2026-09-24 ~13:40, Reason=Resources. W
 (claude/2-1D_PB/exp_vsolv/watch_prodfix.sh) finds the job by name p500vfix, unchanged.
 The 2 d 4 h of accumulated queue age is lost; the new job starts at the back of the priority order.
 
+
+## 2026-09-26 prod500_vsolv_fix job 3468071 RUNNING (c303-003, start 21:25 CDT); warm-up 0-19 and first PB epochs checked against the references
+
+Start-up: CODE a4e97cc (training code = gate b3c7081; only RUNS.md / page scripts since), RESUME=none, env
+LIVE_POS=1 GRAD_PASSES=2 AREA_EPS=1e-12 on all 3 ranks. Config identical to prod500_w1000_ref except name
+and solvent_pb1d_vsolv_input: True; loss weights identical. Pre-training "Initial" evaluation identical to
+prod500_w1000_ref / w1000_ref / gate_vsolv in every printed digit (E 19723.17, F 21401.28, potential
+306.5654, fermi 306.5399, dens3d 0.15910, occ 0.49036) except potential_1d_profile 141.11170 vs 141.11163
+(the Phi1D fix). The 15 PB1D-FALLBACK lines all precede Epoch 0 and are the same sids/values as in every
+reference run; 0 fallbacks afterwards (checked through epoch 21).
+
+Warm-up (planar, epochs 0-19): step 0.41-0.53 s, CUDA peak 9.72-9.85 GiB (references 0.41-0.53 s, same
+memory). Two single-epoch outliers vs the three references, which agree among themselves: epoch 0 F 1201.95
+vs 852.5-853.6 meV/A (E 30.09 in band); epoch 1 E 143.67 vs 32.7-56.7 meV/atom (F 781 in band). Both closed:
+epoch 2-5 E in band, F +21% at epoch 5 (303.84 vs 184-252), epoch 10 E 20.85 / F 189.75 vs refs 20.7-23.0 /
+151-183, epoch 15 E 21.61 / F 184.12 vs 18.8-20.4 / 175-190, epoch 19 E 18.44 / F 129.09 vs 18.9-19.4 /
+162-181. Cause of the two outliers not established; the only training-code difference to gate_vsolv is the
+Phi1D fix (a60e6ae, c16ab1b, 399b03e), which changes the 1-D potential loss on the 31% neutral solvated
+training frames from epoch 0.
+
+PB phase: epoch 20 E 11.23 / F 75.97 / pot 0.3253 / fermi 0.3130 (refs 11.13-11.53 / 73.1-79.2 / 0.287-0.333 /
+0.313-0.333); epoch 21 E 10.04 / F 68.13 / pot 0.3136 / fermi 0.2861 / dens3d 0.03452 / occ 0.01240 (refs
+10.36-10.66 / 60.8-68.8 / 0.260-0.265 / 0.239-0.249 / 0.03381-0.03422 / 0.01000-0.01162). Step time 1.66-1.69 s,
+CUDA peak 26.30 GiB = gate_vsolv (1.60 s, 26.30 GiB; flag OFF production 1.43 s, 23.89 GiB). Epoch wall
+19->20 381 s, 20->21 389 s: 480 remaining epochs do not fit the 169200 s budget, so the segment will stop at
+an epoch boundary and self-chain the RESUME continuation as designed.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
