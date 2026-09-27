@@ -4296,6 +4296,24 @@ differs from the reference by two things at once (solvent effective-potential in
 Cost: 75->100 = 25 epochs in 2 h 37 min 20 s = 378 s/epoch; step 1.62 s, CUDA peak 26.36 GiB; 15 fallbacks,
 all pre-epoch-0. Epoch 100 reached 06:44 CDT (9 h 19 min after start).
 
+
+## 2026-09-27 prod500_vsolv_fix 3468071 at epoch 200 (17:15 CDT, 19 h 50 min after start): window means vs prod500_w1000_ref
+
+Single epochs (this / prod): e150 E 1.33/1.50, F 27.58/26.50, pot 0.1250/0.1160, fermi 0.0644/0.0700, occ
+0.00557/0.00496; e175 E 0.93/1.07, F 26.69/25.57, pot 0.1261/0.1220, fermi 0.0639/0.0670, occ 0.00550/0.00478;
+e200 E 0.90/1.17, F 25.78/24.92, pot 0.1133/0.1132, fermi 0.0598/0.0625, dens3d 0.03019/0.03009, occ
+0.00535/0.00462.
+10-epoch window ratios this/prod (floor w1000_ref/prod 41-50: E 0.992 F 0.981 pot 1.048 fermi 0.983 dens 1.006 occ 1.024):
+  116-125: E 0.961  F 1.035  pot 1.083  fermi 0.969  dens 1.002  occ 1.104
+  141-150: E 0.911  F 1.035  pot 1.043  fermi 0.914  dens 1.003  occ 1.116
+  166-175: E 0.963  F 1.039  pot 1.053  fermi 0.970  dens 1.005  occ 1.143
+  191-200: E 0.988  F 1.036  pot 1.024  fermi 0.941  dens 1.004  occ 1.160
+Reading: the energy advantage of epochs 41-100 (0.81-0.92) has closed to 0.99 by 191-200; forces steady at
++3.5-4% (floor 0.981); occupation +10-16% and drifting up; potential within the replicate spread; Fermi
+3-9% better in three of four windows; density at the floor. Phi1D still not compared (definition change).
+Cost: 175->200 = 25 epochs in 2 h 38 min 06 s = 379 s/epoch; step 1.63 s, CUDA peak 26.36 GiB; 15 fallbacks,
+all pre-epoch-0; no errors.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
