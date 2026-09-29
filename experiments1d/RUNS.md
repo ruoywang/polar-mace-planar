@@ -4314,6 +4314,43 @@ Reading: the energy advantage of epochs 41-100 (0.81-0.92) has closed to 0.99 by
 Cost: 175->200 = 25 epochs in 2 h 38 min 06 s = 379 s/epoch; step 1.63 s, CUDA peak 26.36 GiB; 15 fallbacks,
 all pre-epoch-0; no errors.
 
+
+## 2026-09-29 prod500_vsolv_fix: segment 1 (3468071) stopped at epoch 456 by the budget; self-chain FAILED (LS6 forbids sbatch on compute nodes); final segment 3477849 submitted from the login node
+
+Segment 1: job 3468071, c303-003, 2026-09-26 21:25:17 -> 2026-09-28 20:22:14 (1-22:56:57), COMPLETED 0:0. run.log:
+"time budget: 168831 s elapsed, last epoch 375 s, budget 169200 s -> stopping at this epoch boundary";
+"Segment state written ... (next epoch 457, 3 ranks' RNG streams, raw weights + EMA + optimizer + scheduler)".
+Epochs 0-456 done. prod.o3468071 printed "continuation: " (empty) and no job was queued.
+Cause (direct, probe job 3477850 on c306-006, development): sbatch on a compute node returns rc=1 with
+"[TACC]: Job submission is not allowed from this host. Please submit through one of the available login
+resources." The chain line filtered sbatch output with grep -E "Submitted|error"; the TACC text contains
+neither word, so the refusal was hidden. The self-chain design could never have worked on LS6. The
+run sat idle from 09-28 20:22 until 09-29 ~01:10; the session watcher was not running over that span.
+job_prod.sh changes (not training code): segment budget from env BUDGET (default 169200); the chain
+block is replaced by a printed "SEGMENT STOPPED, NOT COMPLETE: resubmit from a login node" line
+(3477849 was submitted before this last edit and still carries the full-output sbatch attempt, which
+will fail visibly with rc=1 if its budget is ever hit). watch_prodfix.sh greps SEGMENT STOPPED.
+Final segment: job 3477849, gpu-a100, --time=08:00:00, RESUME=checkpoints/segments/prod500_vsolv_fix_run-
+123_segment_state.pt (79,694,540 B, 09-28 20:21), BUDGET=25200. Needed: 43 epochs x ~378 s + start-up
+~5.5 min + post-training evaluation (prod500_w1000_ref: 21 min) ~ 5 h; the 8 h wall is for backfill.
+Resume path already exercised in ab_deriv_A/B, ab_head_*, gate_vsolv, w1000_ref.
+
+Epochs 300-456 vs prod500_w1000_ref (single epoch this/prod; E meV/atom, F meV/A, pot/fermi eV):
+  e300 E 0.94/0.91 F 23.91/23.77 pot 0.1221/0.1196 fermi 0.0593/0.0626 occ 0.00489/0.00435
+  e400 E 0.83/0.86 F 22.76/22.80 pot 0.1173/0.1059 fermi 0.0597/0.0564 occ 0.00456/0.00412
+  e456 E 0.90/0.85 F 22.54/23.01 pot 0.1226/0.1010 fermi 0.0621/0.0504 dens3d 0.02986/0.02972 occ 0.00443/0.00405
+10-epoch window ratios this/prod (floor w1000_ref/prod: E 0.992 F 0.981 pot 1.048 fermi 0.983 dens 1.006 occ 1.024):
+  266-275: E 1.031 F 1.025 pot 1.066 fermi 1.027 dens 1.005 occ 1.140
+  291-300: E 0.960 F 1.013 pot 1.062 fermi 1.006 dens 1.004 occ 1.127
+  341-350: E 0.908 F 0.998 pot 1.039 fermi 0.981 dens 1.004 occ 1.104
+  391-400: E 1.001 F 0.994 pot 1.088 fermi 1.050 dens 1.005 occ 1.098
+  447-456: E 0.988 F 0.979 pot 1.026 fermi 1.022 dens 1.003 occ 1.097
+Reading: forces reached the reference from epoch ~340 (0.98-1.00, at the floor); energy within the
+floor; occupation still +10% (floor 1.024); potential +3-9%; Fermi within +-5%; density at the floor.
+Reference end point (prod500_w1000_ref e499): E 0.89, F 22.94, pot 0.1057, fermi 0.0579, dens3d 0.02969,
+occ 0.00399, Phi1D 0.07118 (Phi1D not comparable across the fix). 15 fallbacks, all before epoch 0; step
+1.64 s, CUDA peak 26.36 GiB at epoch 456.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
