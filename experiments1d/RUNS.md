@@ -4351,6 +4351,33 @@ Reference end point (prod500_w1000_ref e499): E 0.89, F 22.94, pot 0.1057, fermi
 occ 0.00399, Phi1D 0.07118 (Phi1D not comparable across the fix). 15 fallbacks, all before epoch 0; step
 1.64 s, CUDA peak 26.36 GiB at epoch 456.
 
+
+## 2026-09-29 prod500_vsolv_fix: remaining 43 epochs queued on two tracks at once (user): gpu-a100 3477861 + gpu-a100-dev chain 3477862 -> 3477863 -> 3477864; job-script lock
+
+User (2026-09-29): submit a chain of 2 h dev jobs in parallel with the a100 job, both waiting. 3477849
+(submitted with the previous script, no lock) was cancelled while PENDING and replaced.
+job_prod.sh (not training code) now: (0) exits "NOTHING TO DO" when run.log says Training complete;
+(1) takes checkpoints/segments/.run_lock with an atomic mkdir; a job that finds the lock held by a job
+that squeue lists as RUNNING (fallback when squeue fails: run.log touched < 1200 s ago) prints LOCKED
+and exits without training; a dead holder's lock is renamed atomically and taken over; the lock is
+removed on exit; (2) plans the budget from WALL and the next epoch in the last "Segment state written"
+line: finish if 300 + R*400 + 1350 <= WALL - 460 (budget WALL - 460 - 1350), else partial with budget
+min(WALL - 460, 150 + (R+0.15)*360 - 1), so no job can end inside the post-training phase (1281 s in
+prod500_w1000_ref: model save 262 s, TorchScript attempt 226 s, evaluations 791 s). train.py stops when
+elapsed + 1.15*last_epoch > budget and never after the final epoch; its clock starts ~94-160 s after
+job start; resume -> first epoch ~180 s (w1000_ref 3439590).
+Gate (login node, DRYRUN=1 in a fake run dir with a PATH squeue shim): next 457 dev -> partial 6740 s;
+a100 28800 -> finish 26990 s; R=9 dev -> finish 5390 s; R=17 dev -> partial 6322 s; lock held + squeue
+RUNNING -> LOCKED, lock untouched; holder absent -> STALE takeover; squeue failing + fresh run.log ->
+LOCKED; + 30 min old run.log -> takeover; Training complete -> NOTHING TO DO; missing RESUME -> REFUSING
+with the lock released. Real-dir dry run: next epoch 457, remaining 43. Stop-rule simulation over
+epoch 360-398 s, start-up 150-300 s, clock offset 94-160 s, post-training 1281-1400 s: the dev chain
+always finishes in 3 jobs (e.g. 457-473 | 474-490 | 491-499 at 378 s), longest dev wall 6853 s of 7200.
+Queued 2026-09-29 01:29: 3477861 gpu-a100 8 h WALL=28800 (plan: finish); 3477862 gpu-a100-dev 2 h
+WALL=7200; 3477863 afterany:3477862; 3477864 afterany:3477863. Whichever track starts first trains;
+the other exits LOCKED when it starts during a segment, or trains from the segment state left behind.
+Watcher lists every p500vfix job and reports PLAN / LOCKED / NOTHING TO DO / SEGMENT STOPPED.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
