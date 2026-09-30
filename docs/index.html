@@ -208,11 +208,27 @@
   </div>
 
   <div class="chapter" id="ch-solvent3d">
-  <button class="section" aria-expanded="true">6 · Residual-3D solvent charge (800 structures)<span class="cnt">1 page</span><span class="chev">&#9662;</span></button>
+  <button class="section" aria-expanded="true">6 · Residual-3D solvent charge (800 structures)<span class="cnt">3 pages</span><span class="chev">&#9662;</span></button>
   <div class="chbody">
   <p class="chlede">Completing the solvent bound and ionic charge on the full 3-D grid:
   a zero-init equivariant head on top of the 1-D solvation model, supervised at
   sampled label points, gradients flowing only through the head into the backbone.</p>
+
+  <a class="report" href="./solvent3d-vsolvfix-eval.html">
+    <div class="date">2026-09-30<span class="tag">result</span></div>
+    <h2>3-D Solvent Charge vs DFT: Bound, Ionic and Total (prod500_vsolv_fix, validation set)</h2>
+    <p>Full-grid comparison on 60 validation frames: slices through the active site and the
+    response layer, isosurfaces, lateral charge and per-frame statistics for each channel.
+    Bound &epsilon;<sub>3D</sub> 0.60&ndash;0.81, ionic 0.25; the lateral bound response is the largest gap.</p>
+  </a>
+
+  <a class="report" href="./pb1d-vsolvfix-pair-sid122.html">
+    <div class="date">2026-09-30<span class="tag">result</span></div>
+    <h2>prod500_vsolv_fix: Training Record + Pair Report sid 122 / 722 (TEST)</h2>
+    <p>The 500-epoch model with the solvent effective-potential input and the corrected
+    &Phi;1D construction on a held-out twin pair: Fermi rmse over 200 pairs 0.034 / 0.037 eV,
+    band-window RMSE 0.106 eV from the fully-ML CHGCAR, against prod500_w1000_ref.</p>
+  </a>
 
   <a class="report" href="./residual3d-solvent-charge.html">
     <div class="date">2026-09-02<span class="tag">method</span></div>
