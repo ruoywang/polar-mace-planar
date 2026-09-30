@@ -411,7 +411,7 @@ def fig(key, caption, note=""):
 
 def xz_note(k):
     i = INFO[k]
-    return (f"Shown z window {i['z0']:.1f}–{i['z1']:.1f} Å (where the DFT charge is above 1 % of its peak). Colour scale of the DFT and ML "
+    return (f"Shown z window {i['z0']:.1f}–{i['z1']:.1f} Å (where the DFT charge is above 1 % of its peak, extended to 2 Å below the Ni atom). Colour scale of the DFT and ML "
             f"rows: ±{i['v']:.2e} e/Å³ (99.9th percentile of |ρ| on this slice, both rows); error row ±{i['ve']:.2e} e/Å³. "
             f"Largest |DFT| on the slice {i['dmax']:.2e}, largest |error| {i['emax']:.2e} e/Å³. Atoms within 1 Å of the plane are drawn.")
 
