@@ -4378,6 +4378,35 @@ WALL=7200; 3477863 afterany:3477862; 3477864 afterany:3477863. Whichever track s
 the other exits LOCKED when it starts during a segment, or trains from the segment state left behind.
 Watcher lists every p500vfix job and reports PLAN / LOCKED / NOTHING TO DO / SEGMENT STOPPED.
 
+
+## 2026-09-29 prod500_vsolv_fix COMPLETE (500 epochs); final tables vs prod500_w1000_ref; structural evaluation 3479857 queued
+
+Segments: 3468071 gpu-a100 epochs 0-456 (1-22:56:57); 3477862 dev 457-473 (01:51:08, budget stop at 6503 s,
+margin 532 s); 3477863 dev 474-489 (01:47:39, stop at 6339 s); 3477864 dev 490-499 + post-training
+(01:18:59, plan "finish", budget 5390 s; post-training 23:04:28 -> 23:17:05 = 757 s). Every resume restored
+valid_loss equal to the last epoch's (0.66261952 / 0.65091190 / 0.65211737); first resumed step 79-97 s as in
+all earlier resumes. 3477861 (a100 backup) never started; cancelled after completion. 15 fallbacks, all
+before epoch 0. models/prod500_vsolv_fix.model written; TorchScript export failed as in the reference
+(python .model unaffected).
+Final error tables (this / prod500_w1000_ref; E meV/atom, F meV/A, pot/fermi eV, dens e/A^3):
+  train  E 0.9/0.9   F 22.3/22.1  pot 0.0904/0.0859  fermi 0.0355/0.0355  dens 0.02966/0.02963  occ 0.00425/0.00390
+  valid  E 0.8/0.9   F 22.0/22.9  pot 0.1036/0.1057  fermi 0.0528/0.0579  dens 0.02973/0.02969  occ 0.00436/0.00399
+  test NiN44       E 1.5/1.5  F 21.3/20.7  pot 0.0876/0.0902  fermi 0.0445/0.0469  occ 0.00447/0.00401
+  test NiN44neusol E 0.6/0.7  F 24.1/25.6  pot 0.0938/0.0840  fermi 0.0424/0.0424  occ 0.00434/0.00407
+  test NiN44vac    E 0.7/0.9  F 20.5/20.7  pot 0.0671/0.0588  fermi 0.0360/0.0324  occ 0.00432/0.00409
+  test NiN88       E 0.5/0.5  F 20.4/20.5  pot 0.1075/0.1035  fermi 0.0608/0.0628  occ 0.00405/0.00370
+  Phi1D (not comparable across the fix): valid 0.06285/0.07118; test NiN44neusol 0.05881/0.09233.
+Last 10 epochs (490-499) window ratio this/prod: E 0.953 F 0.978 pot 1.008 fermi 0.991 dens 1.002 occ 1.091
+(441-450: E 0.940 F 0.984 pot 0.996 fermi 0.906 dens 1.002 occ 1.103; floor w1000_ref/prod 41-50: E 0.992
+F 0.981 pot 1.048 fermi 0.983 dens 1.006 occ 1.024).
+Reading: at the end the two runs agree within the replicate spread on E, F, potential, Fermi and density;
+occupation is 9-12% worse in every set (train 1.090, valid 1.093, test 1.08-1.11), the one metric outside
+the floor, same direction as gate_vsolv 0-33. Two changes at once (effective-potential input ON + Phi1D
+fix) -> no attribution.
+Next: 3479857 (gpu-a100-dev, job_density_multi.sh, RUN=prod500_vsolv_fix, EPOCHS 499 400 200 100 59,
+KIT_VSOLV=1, model object = this run's .model): the same density-profile / charge-response evaluation
+that was done for prod500_w1000_ref (3461093), for the matched structural comparison.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
