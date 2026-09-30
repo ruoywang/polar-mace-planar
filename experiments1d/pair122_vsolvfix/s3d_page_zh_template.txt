@@ -1,0 +1,66 @@
+PAIRLAB = next((f"sid {p['sid_c']} − {p['sid_n']}" for p in PAIRS if p["split"] != SPLIT), "")
+page = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>三维溶剂电荷</title>
+<style>
+:root{{--bg:#f9f9f7;--surf:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--mute:#898781;--grid:#e1e0d9;--rule:rgba(11,11,11,.10)}}
+@media (prefers-color-scheme: dark){{:root:not([data-theme="light"]){{--bg:#0d0d0d;--surf:#1a1a19;--ink:#ffffff;--ink2:#c3c2b7;--mute:#898781;--grid:#2c2c2a;--rule:rgba(255,255,255,.10)}}}}
+:root[data-theme="dark"]{{--bg:#0d0d0d;--surf:#1a1a19;--ink:#ffffff;--ink2:#c3c2b7;--mute:#898781;--grid:#2c2c2a;--rule:rgba(255,255,255,.10)}}
+html,body{{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 system-ui,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif}}
+main{{max-width:1040px;margin:0 auto;padding:32px 16px 72px}}
+h1{{font-size:1.75rem;margin:0 0 6px;text-wrap:balance}} h2{{font-size:1.2rem;margin:44px 0 12px;padding-top:14px;border-top:1px solid var(--rule)}}
+p,li{{max-width:46em}} .sub{{color:var(--ink2);margin:0 0 18px}} .note{{color:var(--ink2);font-size:.9rem;margin:6px 0 0}}
+.eq{{margin:10px 0 12px;overflow-x:auto;padding:2px 0}} .eq svg{{color:var(--ink)}}
+.tw{{overflow-x:auto;margin:10px 0 16px}} table{{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums;background:var(--surf)}}
+th,td{{padding:7px 10px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap;vertical-align:top}} th{{color:var(--ink2);font-weight:600}}
+td:first-child,th:first-child{{text-align:left;white-space:normal}}
+figure{{margin:28px 0}} figcaption{{font-size:.95rem;color:var(--ink2);margin:0 0 6px}}
+figure img{{display:block;width:100%;height:auto;border:1px solid var(--grid);border-radius:4px;background:#fcfcfb;margin:0 0 8px}}
+</style></head><body><main>
+<h1>prod500_vsolv_fix 的三维溶剂电荷与 DFT 对比</h1>
+<p class="sub">模型 {html.escape(M['model'])}，取 500 轮训练的最终权重。数据是{SPN}中带 DFT 溶剂标签的 {nval} 帧：NiN44 带电 {gsum['NiN44 charged']} 帧、NiN88 带电 {gsum['NiN88 charged']} 帧、NiN44 中性带溶剂 {gsum['NiN44 solvated neutral']} 帧。比较用到 DFT 网格
+500 × 168 × 168 的全部格点，束缚电荷 ρ_b 和离子电荷 ρ_ion 分开比较，再比较两者之和。真空中性帧没有溶剂，不在其中。</p>
+
+<h2>比较的对象</h2>
+<p>模型的三维溶剂电荷就是训练损失打分的那个场：最后一次溶剂求解得到的一维剖面铺满每个 z 平面，再加上一个横向残差，这个残差在每个平面上的平均值按构造为零。这里用与训练损失相同的插值，把它重建到 DFT 网格上。DFT 参考是 VASPsol 给出的溶剂电荷 RHOB 和 RHOION，符号约定相同，单位 e/Å³。</p>
+{EQ['field']}
+<p>下面的量都逐帧、逐通道计算。溶剂电荷有正有负，所以分母取绝对值；表中同时给出分子的绝对量，单位 e。</p>
+{EQ['eps']}
+<p>横向部分：每个 z 平面减去该平面自己的平均值，ML 和 DFT 分别处理。这样能把平面内的电荷分布和平面平均剖面分开看：平面平均剖面对了，平面内的分布仍可能是错的。</p>
+{EQ['lat']}
+<p>误差沿 z 的位置：先取绝对值，再做平面积分。</p>
+{EQ['perz']}
+<p>孪生配对的充电响应：带电帧 ρ<sup>(q)</sup> 减去同一几何的中性带溶剂帧 ρ<sup>(0)</sup>，模型和 DFT 各自计算。</p>
+{EQ['delta']}
+
+<h2>1 · {SPN}统计</h2>
+{tbl_stats}
+<p class="note">"ε 平面平均"是只对平面平均部分计算的同一比值。在中性帧上，模型的离子通道按构造为零：它的残差由总电荷门控，一维离子剖面也不带净电荷。而 DFT 的离子电荷有分开的正负两部分，所以中性帧上这个比值接近 1，不代表误差大小。带电帧上离子通道的净电荷误差，检验的是离子层所带的总电荷是否正确。</p>
+{fig('eps3d', f'每帧的 ε₃D，{SPN}，黑色横线为中位数')}
+{fig('epslat', f'每帧的 ε⊥，只看横向部分，{SPN}')}
+{fig('neterr', f'每帧的净电荷误差，{SPN}')}
+{fig('perz_b', '束缚电荷：误差沿 z 的分布', '实线是 |ML − DFT| 的平面积分；虚线是同一批帧 |DFT| 的平面积分，作为量级参照。两者都是每组各帧的平均。')}
+{fig('perz_i', '离子电荷：误差沿 z 的分布', '实线是 |ML − DFT| 的平面积分；虚线是 |DFT| 的平面积分。')}
+
+<h2>2 · 代表帧</h2>
+{tbl_rep}
+<p class="note">误差中位帧：{SPN}带电帧中，合计电荷的 ε₃D 最接近这些帧中位数的一帧。误差最大帧：其中合计电荷 ε₃D 最大的一帧。xz 切面穿过 Ni 原子，沿 b 方向固定在一个格点行上；xy 切面取该帧 DFT 束缚电荷和离子电荷各自的峰值平面。</p>
+{fig('med_xz_b', '误差中位帧：束缚电荷，xz 切片', xz_note('med_xz_b') if 'med_xz_b' in INFO else '')}
+{fig('med_xz_i', '误差中位帧：离子电荷，xz 切片', xz_note('med_xz_i') if 'med_xz_i' in INFO else '')}
+{fig('med_xz_t', '误差中位帧：溶剂电荷合计，xz 切片', xz_note('med_xz_t') if 'med_xz_t' in INFO else '')}
+{fig('med_xy_b', '误差中位帧：束缚电荷，束缚电荷峰值平面上的 xy 切片', xy_note('med_xy_b') if 'med_xy_b' in INFO else '')}
+{fig('med_xy_i', '误差中位帧：离子电荷，离子电荷峰值平面上的 xy 切片', xy_note('med_xy_i') if 'med_xy_i' in INFO else '')}
+{fig('med_lat_b', '误差中位帧：界面平面上束缚电荷的横向部分 ρ⊥', xy_note('med_lat_b', True) if 'med_lat_b' in INFO else '')}
+{fig('med_iso_b', '误差中位帧：束缚电荷等值面', ('阈值固定，DFT 与 ML 相同：' + LEVTXT + f'。三幅图视角相同；z 范围 {INFO["med_iso_b"]["z0"]:.1f}–{INFO["med_iso_b"]["z1"]:.1f} Å；灰点是该范围内显式水分子的氧原子；网格隔点取样，步长 2。等值面只显示一个阈值下的形状，精度以上面的数字为准。') if LEVTXT else '')}
+{fig('max_xz_b', '误差最大帧：束缚电荷，xz 切片', xz_note('max_xz_b') if 'max_xz_b' in INFO else '')}
+{fig('max_xz_i', '误差最大帧：离子电荷，xz 切片', xz_note('max_xz_i') if 'max_xz_i' in INFO else '')}
+{fig('max_xz_t', '误差最大帧：溶剂电荷合计，xz 切片', xz_note('max_xz_t') if 'max_xz_t' in INFO else '')}
+
+<h2>3 · 充电响应：带电减中性</h2>
+{tbl_pairs}
+{fig('pairs', '每个孪生配对的充电响应 Δρ 的 ε₃D')}
+{fig('pair_xz_b', f'配对页结构 {PAIRLAB}：束缚电荷响应 Δρ_b，xz 切片', xz_note('pair_xz_b') if 'pair_xz_b' in INFO else '')}
+{fig('pair_xz_i', f'配对页结构 {PAIRLAB}：离子电荷响应 Δρ_ion，xz 切片', xz_note('pair_xz_i') if 'pair_xz_i' in INFO else '')}
+{fig('pair_xz_t', f'配对页结构 {PAIRLAB}：溶剂电荷合计的响应，xz 切片', xz_note('pair_xz_t') if 'pair_xz_t' in INFO else '')}
+{fig('pair_xy_i', f'配对页结构 {PAIRLAB}：离子电荷响应，离子电荷峰值平面上的 xy 切片', xy_note('pair_xy_i') if 'pair_xy_i' in INFO else '')}
+</main></body></html>
