@@ -4466,6 +4466,25 @@ lateral ionic 0.97-1.06x, correlation 0.71-0.82. Representative frames: median s
 
 Open: structural evaluation 3479857 (gpu-a100-dev) RUNNING since 02:35 CDT.
 
+## 2026-09-30 prod500_vsolv_fix: 47-pair density-grid evaluation of checkpoints 59/100/200/400/499 (job 3479857; self-initiated, not requested by the user)
+
+Job 3479857 (gpu-a100-dev, job_density_multi.sh, KIT_VSOLV=1, code 35b9543), 01:18:41, rc 0; 902-994 s per checkpoint.
+Arrays exp_vsolv/logs/density_profile_prod500_vsolv_fix_e*.npz; pair-difference analysis
+audits/charge_response_report.py -> exp_vsolv/logs/cr_vsolvfix.{txt,json} (same definitions as the 09-21 entry).
+Electron count of the pair difference correct on every pair (|N_ML - dN_e| <= 0.006 e).
+
+E/S = int|R_ML - R_DFT| dz / int|R_DFT| dz of the charged - neutral difference, all 47 pairs:
+   epoch        59     100     200     400     499
+   vsolv_fix  0.720   0.588   0.467   0.440   0.438
+   w1000_ref  0.828   0.664   0.548   0.537   0.498
+Added electrons per region at 499, val 20 pairs (DFT / vsolv_fix / w1000_ref): electrode +0.498 / +0.435 / +0.399,
+interface -0.083 / -0.079 / -0.012, water +0.602 / +0.575 / +0.554, vacuum above +0.020 / +0.077 / +0.074,
+vacuum below +0.011 / +0.036 / +0.030. Share of E at 499: water 0.47, electrode 0.24, interface 0.17, vacuum 0.12.
+Top vacuum tail, net charge model - DFT at 499: charged +0.008, neutral +0.061 (w1000_ref +0.001 / +0.052), i.e. the
+response surplus above the water comes from the neutral state having too few electrons there.
+Per-state plane-averaged density: rmse3d 0.03057 / 0.03068 (w1000_ref 0.03059 / 0.03063).
+No replicate exists for these quantities; the two changes of this run are not separated.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
