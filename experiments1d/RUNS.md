@@ -4407,6 +4407,65 @@ Next: 3479857 (gpu-a100-dev, job_density_multi.sh, RUN=prod500_vsolv_fix, EPOCHS
 KIT_VSOLV=1, model object = this run's .model): the same density-profile / charge-response evaluation
 that was done for prod500_w1000_ref (3461093), for the matched structural comparison.
 
+## 2026-09-30 prod500_vsolv_fix: sid 122/722 pair page recomputed; full-grid 3-D solvent charge evaluation (bound / ion / total) on the validation set
+
+Model: 3-residual_3D/prod500_vsolv_fix/models/prod500_vsolv_fix.model (final epoch 499, code 35b9543).
+Work dir claude/2-1D_PB/exp_pair122_vsolvfix/ (outputs there); scripts copied to experiments1d/pair122_vsolvfix/.
+All model inference on CPU (development queue): cpu_compat.py patches torch.jit.load to map_location="cpu"
+(e3nn TorchScript buffers otherwise ask for a CUDA driver). 64 threads ~4 s/frame; 128 threads ~160 s/frame.
+
+Jobs: 3479925 smoke (CPU, 2 frames, OK); 3479928 full pipeline at 128 threads, cancelled after steps 1-3
+(step 4 at ~160 s/frame); 3479982 steps 4-6 at 64 threads (same metrics as the smoke frames, bit for bit);
+3479983 VASP non-SCF bands from the fully-ML CHGCAR of sid 122 (14 iterations).
+
+### Pair page (same analysis as the prod500_w1000_ref page NoEkrbdogoEctkv6wRTtM9; that page unchanged)
+New artifact https://claude.ai/artifact/HtGtBAN2e2tByZ4oktxsFy (pair122_vsolvfix_full.html; DOM shim: 20 charts).
+Both frames are in the TEST split.
+
+| quantity | DFT | prod500_vsolv_fix | prod500_w1000_ref |
+|---|---|---|---|
+| potential diff, charged 122 (V) | -0.2646 | -0.3398 | -0.3565 |
+| potential diff, neutral 722 (V) | +2.7974 | +2.8519 | +2.8403 |
+| Fermi, charged (eV) | -4.1483 | -4.0617 | -4.0831 |
+| Fermi, neutral (eV) | -7.2979 | -7.2534 | -7.2799 |
+| Phi1D rms charged / neutral (eV) | | 0.0636 / 0.0771 | 0.0640 / 0.1009 (pre Phi1D fix) |
+| 200-pair Fermi rmse charged / neutral (eV) | | 0.0344 / 0.0368 | 0.037 / 0.042 |
+| 200-pair potential rmse charged / neutral (V) | | 0.0997 / 0.1021 | 0.103 / 0.100 |
+| pair Fermi-shift rmse (eV) | | 0.0532 | 0.060 |
+| bands window rmse / all bands (eV) | | 0.106 / 0.148 | 0.143 / 0.164 |
+| bands E_F ML - DFT (eV) | | -0.293 | -0.431 |
+
+CHGCAR builds: 122 clamped 32.4 %, x0.99971, net rmse 0.0304, aug-occ rmse 4.08e-3;
+722 clamped 33.8 %, x0.99958, 0.0305, 3.72e-3. Sections 7b/7c electron-density rms 2.14e-3 e/A^3 = 0.174 % of peak;
+section-5 net-density rms 1.15e-3. q_ion 0.9424, mu_bound -5.8965.
+
+### 3-D solvent charge (solvent3d_full_eval.py, gen_s3d_page.py)
+Artifact https://claude.ai/artifact/5hB6YHL2AuY7yzXwT3ZqBD (s3d_vsolvfix.html).
+Model 3-D charge per channel = 1-D PB profile of the last stage-2 solve + per-plane lateral residual on the model
+grid (exactly what solvent3d_residuals scores), compared against data/solvent3d_grid/sid_*_{b,i}.npy on the DFT grid.
+eps_3D = int|ML-DFT| dV / int|DFT| dV; eps_lat = same for rho - <rho>_xy. Validation medians (20 frames per group):
+
+| group | ch | eps_3D | eps_lat | int|err| (e) | int|DFT| (e) | net err rms (e) |
+|---|---|---|---|---|---|---|
+| NiN44 charged | bound | 0.596 | 0.630 | 1.80 | 3.01 | 1.7e-3 |
+| NiN44 charged | ion | 0.255 | 0.770 | 0.27 | 1.06 | 3.1e-5 |
+| NiN44 charged | total | 0.832 | 0.665 | 1.77 | 2.16 | 1.7e-3 |
+| NiN88 charged | bound | 0.702 | 0.736 | 2.41 | 3.48 | 1.5e-3 |
+| NiN88 charged | ion | 0.251 | 0.785 | 0.29 | 1.06 | 2.4e-5 |
+| NiN88 charged | total | 0.944 | 0.768 | 2.32 | 2.50 | 1.5e-3 |
+| NiN44 neutral solvated | bound | 0.805 | 0.696 | 1.58 | 1.94 | 1.9e-3 |
+| NiN44 neutral solvated | ion | 1.010 | 1.000 | 0.13 | 0.13 | 4.8e-6 |
+| NiN44 neutral solvated | total | 0.808 | 0.706 | 1.63 | 2.00 | 1.9e-3 |
+
+Neutral ionic: the model ionic channel is zero by construction on neutral frames; DFT int|rho_ion| = 0.13 e there.
+Total int|DFT_t| (2.16 e) < bound + ion (4.07 e): the two channels cancel in the DFT reference.
+Per-z abs-error plane integral peaks at the interface layer (NiN44 15-18 A, NiN88 22-26 A), ~60 % of the DFT signal there.
+Charged - neutral twin difference (20 val pairs), medians: bound eps_3D 0.848 (eps_lat 0.997), ion 0.199 (0.712),
+total 1.456 (1.079). Model lateral bound response 11-23 % of the DFT magnitude, correlation 0.09-0.26;
+lateral ionic 0.97-1.06x, correlation 0.71-0.82. Representative frames: median sid 94, max sid 304, pair sid 122.
+
+Open: structural evaluation 3479857 (gpu-a100-dev) RUNNING since 02:35 CDT.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
