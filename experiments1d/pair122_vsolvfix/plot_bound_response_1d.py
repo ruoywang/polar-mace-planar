@@ -1,5 +1,5 @@
 """Plane-integrated bound-charge charging response R_b(z) = A * <rho_b(charged) - rho_b(neutral)>_xy, DFT vs ML,
-pair sid 122 / 722 (user question 2026-09-30). DFT: data/solvent3d_grid full grids; ML: the 1-D bound profiles of the
+pair sid 122 / 722 (user question 2026-09-30), plus each frame on its own. DFT: data/solvent3d_grid full grids; ML: the 1-D bound profiles of the
 final stage-2 solve from structure_pair_sid122_722.npz (the lateral residual has zero plane mean, so the ML plane
 average is exactly this profile). Writes bound_response_1d.html (Chinese) next to this script."""
 import base64, io
@@ -74,6 +74,31 @@ ax.set_xlabel("z (Å)"); ax.set_ylabel("ML − DFT (e/Å)")
 ax.grid(color="#e1e0d9", lw=0.8); ax.set_axisbelow(True); ax.legend(loc="upper right", frameon=False)
 F2 = png(fig)
 
+# each frame on its own (user 2026-09-30): same quantity, same y range for both frames
+Rd_c = A * np.load(G / "sid_122_b.npy").astype(np.float64).mean(axis=(1, 2))
+Rd_n = A * np.load(G / "sid_722_b.npy").astype(np.float64).mean(axis=(1, 2))
+Rm_c = A * p["rho_bound"].astype(float); Rm_n = A * p["rho_bound_n"].astype(float)
+wz_d = (zd >= Z0) & (zd <= Z1); wz_m = (zm >= Z0) & (zm <= Z1)
+ftop = max(Rd_c[wz_d].max(), Rd_n[wz_d].max(), Rm_c[wz_m].max(), Rm_n[wz_m].max())
+fbot = min(Rd_c[wz_d].min(), Rd_n[wz_d].min(), Rm_c[wz_m].min(), Rm_n[wz_m].min())
+fst = nice(ftop - fbot); flo, fhi = np.floor(fbot / fst) * fst, np.ceil(ftop / fst) * fst
+FR = {}
+for tag, RD, RM in (("122", Rd_c, Rm_c), ("722", Rd_n, Rm_n)):
+    fig, ax = plt.subplots(figsize=(12, 5.0))
+    ax.axhline(0, color="#898781", lw=1)
+    ax.plot(zd, RD, color="#3a3a3a", lw=2.2, label="DFT")
+    ax.plot(zm, RM, color="#2a78d6", lw=2.2, label="ML")
+    ax.set_ylim(flo, fhi); ax.set_yticks(np.arange(flo, fhi + fst / 2, fst))
+    ax.set_xlim(Z0, Z1); ax.set_xticks(np.arange(Z0, Z1 + 0.1, 5))
+    ax.set_xlabel("z (Å)"); ax.set_ylabel("A × ⟨ρ_b⟩_xy (e/Å)")
+    ax.grid(color="#e1e0d9", lw=0.8); ax.set_axisbelow(True); ax.legend(loc="upper right", frameon=False)
+    FR[tag] = png(fig)
+    pd_, pm_ = parts(zd, RD, dzd), parts(zm, RM, dzm)
+    print(f"sid {tag}: DFT pos {pd_['pos']:+.4f} @ {pd_['zpos']:.2f}, neg {pd_['neg']:+.4f} @ {pd_['zneg']:.2f}, peak {pd_['pk']:+.4f} @ {pd_['zpk']:.2f}, "
+          f"valley {pd_['mn']:+.4f} @ {pd_['zmn']:.2f}, total {pd_['tot']:+.5f}")
+    print(f"          ML  pos {pm_['pos']:+.4f} @ {pm_['zpos']:.2f}, neg {pm_['neg']:+.4f} @ {pm_['zneg']:.2f}, peak {pm_['pk']:+.4f} @ {pm_['zpk']:.2f}, "
+          f"valley {pm_['mn']:+.4f} @ {pm_['zmn']:.2f}, total {pm_['tot']:+.5f}")
+
 rows = [("正的部分 积分 (e)", f"{PD['pos']:+.4f}", f"{PM['pos']:+.4f}"), ("正的部分 重心 z (Å)", f"{PD['zpos']:.2f}", f"{PM['zpos']:.2f}"),
         ("负的部分 积分 (e)", f"{PD['neg']:+.4f}", f"{PM['neg']:+.4f}"), ("负的部分 重心 z (Å)", f"{PD['zneg']:.2f}", f"{PM['zneg']:.2f}"),
         ("峰值 (e/Å)", f"{PD['pk']:+.4f}", f"{PM['pk']:+.4f}"), ("峰值位置 z (Å)", f"{PD['zpk']:.2f}", f"{PM['zpk']:.2f}"),
@@ -104,6 +129,10 @@ A × ⟨Δρ_b⟩_xy，单位 e/Å，对 z 积分即为电荷。DFT 来自 VASPs
 <p class="note">两条曲线之差的积分 ∫|ML − DFT| dz = {L1:.4f} e，DFT 自身 ∫|DFT| dz = {S:.4f} e，比值 {L1 / S:.3f}。显式原子最高处 z = {zat.max():.2f} Å。</p>
 <figure><figcaption>束缚电荷充电响应的平面积分，DFT 与 ML</figcaption><img src="data:image/png;base64,{F1}" alt="bound charge response along z, DFT and ML"></figure>
 <figure><figcaption>ML − DFT</figcaption><img src="data:image/png;base64,{F2}" alt="ML minus DFT"></figure>
+<h2 style="font-size:1.2rem;margin:40px 0 8px">sid 122 和 sid 722 各自的束缚电荷</h2>
+<p class="sub">同样的平面积分 A × ⟨ρ_b⟩_xy，不做差。两幅图纵轴范围相同。</p>
+<figure><figcaption>sid 122，带电帧：束缚电荷的平面积分，DFT 与 ML</figcaption><img src="data:image/png;base64,{FR['122']}" alt="bound charge along z, sid 122"></figure>
+<figure><figcaption>sid 722，中性带溶剂帧：束缚电荷的平面积分，DFT 与 ML</figcaption><img src="data:image/png;base64,{FR['722']}" alt="bound charge along z, sid 722"></figure>
 </main></body></html>
 """
 (HERE / "bound_response_1d.html").write_text(html)
