@@ -61,7 +61,7 @@ NFIT = int(os.environ.get("KIT_NFIT", "200000")); NHOLD = int(os.environ.get("KI
 ITER = int(os.environ.get("KIT_ITER", "400")); TOL = float(os.environ.get("KIT_TOL", "1e-8"))
 RIDGES = [float(v) for v in os.environ.get("KIT_RIDGES", "1e-2+3e-3").split("+")]          # bound fits (V1, V2)
 ION_RIDGES = [float(v) for v in os.environ.get("KIT_ION_RIDGES", "3e-3").split("+")]       # ionic fits (V1, V1u, V4)
-HEAD_RIDGES = [None if v == "none" else float(v) for v in os.environ.get("KIT_HEAD_RIDGES", "1e-2+3e-3").split("+")]
+HEAD_RIDGE = os.environ.get("KIT_HEAD_RIDGE", "none"); HEAD_RIDGE = None if HEAD_RIDGE == "none" else float(HEAD_RIDGE)
 HEAD_ITER = int(os.environ.get("KIT_HEAD_ITER", "3000"))
 STAGES = set(os.environ.get("KIT_STAGES", "repro+rt+free+pair+head+bg").replace(",", "+").split("+"))  # sbatch --export splits on commas
 torch.set_default_dtype(torch.float64)
@@ -264,7 +264,7 @@ def response(sid_c, tag, fc, fn):
 
 
 # ------------------------------------------------------------------ LSQR on a LinearOperator
-def lsqr_fit(blocks, to_coeffs, x0, label, damp=0.0, tol=TOL, iters=ITER, precond=None, n_probe=int(os.environ.get("KIT_NPROBE", "64")), damp_rel=None, ridge_rel=None):
+def lsqr_fit(blocks, to_coeffs, x0, label, damp=0.0, tol=TOL, iters=ITER, precond=None, n_probe=64, damp_rel=None, ridge_rel=None):
     """blocks: list of (sid, ch, extra) ; to_coeffs(x, sid, ch) -> [N, n_sigma, 9]; fits the lateral target at the
     fit points of every block: minimise ||F(x0 + dx) - t||^2 + damp^2 ||dx||^2 over dx (F affine in x)."""
     x0_t = torch.as_tensor(x0, device=dev)
@@ -621,50 +621,44 @@ if "head" in STAGES and HEAD_PAIRS:
     for k in HEAD_PAIRS:
         if str(k) not in RESULTS["pairs"] or "V0" not in RESULTS["pairs"][str(k)]:
             response(k, "V0", FIELDS[(k, "V0")], FIELDS[(k + 600, "V0")])
-    print(f"[{elapsed()}] V3 head fit on {len(hsids)} training frames; head parameters {int(x0h.size)} ({list(zip(names, sizes_p))}); ridges {HEAD_RIDGES}", flush=True)
-    XH = {}
-    for hr in HEAD_RIDGES:
-        lab = "none" if hr is None else f"{hr:g}"
-        xb, recb = lsqr_fit([(s, "b", None) for s in hsids], head_to_coeffs, x0h, f"V3 shared head, bound, {len(hsids)} train frames, ridge {lab}",
-                            precond="jacobi", ridge_rel=hr, iters=HEAD_ITER)
-        xi, reci = lsqr_fit([(s, "i", None) for s in hsids if abs(CTX[s]["q"]) > 1e-6], head_to_coeffs, x0h,
-                            f"V3 shared head, ion (gated), {len(HEAD_PAIRS)} charged train frames, ridge {lab}", precond="jacobi",
-                            ridge_rel=hr, iters=HEAD_ITER)
-        xh = x0h + (xb - x0h) + (xi - x0h)       # the two objectives touch disjoint output columns of the head
-        np.save(OUT / f"head_params_V3_{lab}.npy", xh)
-        XH[f"V3@{lab}"] = torch.as_tensor(xh, device=dev)
-        RESULTS["meta"][f"head_V3@{lab}"] = dict(n_params=int(x0h.size), bound_dx=float(np.linalg.norm(xb - x0h)),
-                                                 ion_dx=float(np.linalg.norm(xi - x0h)), overlap=float(np.abs((xb - x0h) * (xi - x0h)).sum()))
-    save()
+    print(f"[{elapsed()}] V3 head fit on {len(hsids)} training frames; head parameters {int(x0h.size)} ({list(zip(names, sizes_p))})", flush=True)
+    xb, recb = lsqr_fit([(s, "b", None) for s in hsids], head_to_coeffs, x0h, f"V3 shared head, bound, {len(hsids)} train frames",
+                        precond="jacobi", ridge_rel=HEAD_RIDGE, iters=HEAD_ITER)
+    xi, reci = lsqr_fit([(s, "i", None) for s in hsids if abs(CTX[s]["q"]) > 1e-6], head_to_coeffs, x0h,
+                        f"V3 shared head, ion (gated), {len(HEAD_PAIRS)} charged train frames", precond="jacobi", ridge_rel=HEAD_RIDGE,
+                        iters=HEAD_ITER)
+    xh = x0h + (xb - x0h) + (xi - x0h)
+    # the two objectives touch disjoint output columns; check that the combined vector reproduces both fits
+    xh_t = torch.as_tensor(xh, device=dev)
+    np.save(OUT / "head_params_V3.npy", xh)
+    RESULTS["meta"]["head_V3"] = dict(n_params=int(x0h.size), bound_dx=float(np.linalg.norm(xb - x0h)), ion_dx=float(np.linalg.norm(xi - x0h)),
+                                      overlap=float(np.abs((xb - x0h) * (xi - x0h)).sum()))
 
-    def v3_fields(sid, tag):
+    def v3_fields(sid):
         with torch.no_grad():
-            c = head_coeffs(CTX[sid], unflat(XH[tag]))
+            c = head_coeffs(CTX[sid], unflat(xh_t))
             return {"b": dfield(CTX[sid], "b", c[:, 0]), "i": dfield(CTX[sid], "i", c[:, 1])}
-    for tag in XH:
-        for sid in hsids:
-            FIELDS[(sid, tag)] = evaluate(sid, v3_fields(sid, tag), tag)
-        for k in HEAD_PAIRS:
-            response(k, tag, FIELDS[(k, tag)], FIELDS[(k + 600, tag)])
-            FIELDS.pop((k, tag)); FIELDS.pop((k + 600, tag))
+    for sid in hsids:
+        FIELDS[(sid, "V3")] = evaluate(sid, v3_fields(sid), "V3")
+    for k in HEAD_PAIRS:
+        response(k, "V3", FIELDS[(k, "V3")], FIELDS[(k + 600, "V3")])
     save()
-    # held-out frames: validation pairs (and the test pair for display only); nothing is fitted on them
+    # held-out frames: validation pairs (and the test pair for display only); V0 and V3, nothing fitted on them
     for k in VAL_PAIRS + TEST_PAIRS:
         for sid in (k, k + 600):
             if sid not in CTX:
                 prep(sid)
             FIELDS[(sid, "V0")] = evaluate(sid, d0(sid), "V0")
-            for tag in XH:
-                FIELDS[(sid, tag)] = evaluate(sid, v3_fields(sid, tag), tag)
+            FIELDS[(sid, "V3")] = evaluate(sid, v3_fields(sid), "V3")
             if "rt" in STAGES:
                 roundtrip(sid)
-        for tag in ["V0"] + list(XH):
-            response(k, tag, FIELDS[(k, tag)], FIELDS[(k + 600, tag)])
-            FIELDS.pop((k, tag)); FIELDS.pop((k + 600, tag))
-        for sid in (k, k + 600):          # free the per-frame grids of held-out frames once evaluated
-            CTX.pop(sid, None); LABEL.pop(sid, None)
+            # free the big per-frame tensors of held-out frames once evaluated
+            CTX[sid]["dsup"] = None
+        response(k, "V0", FIELDS[(k, "V0")], FIELDS[(k + 600, "V0")]); response(k, "V3", FIELDS[(k, "V3")], FIELDS[(k + 600, "V3")])
+        for sid in (k, k + 600):
+            FIELDS.pop((sid, "V0")); FIELDS.pop((sid, "V3"))
         save()
-        print(f"[{elapsed()}] held-out pair {k}: bound lat L1 single / response: V0 {RESULTS['frames'][str(k)]['V0']['b']['eps_lat']:.3f} / "
-              f"{RESULTS['pairs'][str(k)]['V0']['b']['eps_lat']:.3f}; " + "; ".join(
-              f"{tag} {RESULTS['frames'][str(k)][tag]['b']['eps_lat']:.3f} / {RESULTS['pairs'][str(k)][tag]['b']['eps_lat']:.3f}" for tag in XH), flush=True)
+        print(f"[{elapsed()}] held-out pair {k}: V0 bound lat {RESULTS['frames'][str(k)]['V0']['b']['eps_lat']:.3f} -> V3 "
+              f"{RESULTS['frames'][str(k)]['V3']['b']['eps_lat']:.3f}; response bound lat {RESULTS['pairs'][str(k)]['V0']['b']['eps_lat']:.3f} -> "
+              f"{RESULTS['pairs'][str(k)]['V3']['b']['eps_lat']:.3f}", flush=True)
 print(f"[{elapsed()}] done", flush=True)

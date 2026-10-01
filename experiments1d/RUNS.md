@@ -4527,6 +4527,29 @@ Total solvent charge potential rms error (eV), charged / neutral / response: V0 
 0.084; V2 3e-3 0.073 / 0.066 / 0.067 -> the free per-frame fits improve the response density but WORSEN the response potential.
 Ion, charged frames: lateral squared error 0.388 -> 0.257 (V1, 3e-3); neutral ungated (not a current capability) 0.735.
 
+## 2026-10-01 offline diagnosis round 1, continued: ion background candidate (H1 3481840) and the real shared head (H1, H2 3482461)
+
+H1 (script snapshot s3d_fit_diag_H1snapshot.py, 2e6 fit points): V4 ion background B_i(z) * env_i / <env_i>_xy on the 3 F1
+charged frames, ridge 3e-3, all istop 2. Ion lateral squared error after refit 0.360 / 0.316 / 0.319 (sid 1 / 52 / 152)
+against 0.276 / 0.260 / 0.233 for the flat background refit at the same ridge; with the current coefficients the candidate is
+worse still (0.55 / 0.52 / 0.49 vs 0.43 / 0.39 / 0.35). Edge case reported, not floored: planes with <env_i> < 1e-6 but
+|B_i| > 1e-9: 1 (sid 1), 0 (sid 52), 60 (sid 152; <env_i> exactly 0), |B_i| there <= 1.5e-9 e/A^3 (1e-6 of its maximum) -> the
+1-D ionic profile keeps a tail where the 3-D ion accessibility is exactly zero.
+H1 V3 without a ridge (1500 it, istop 7, |dw| 2219 bound / 3.2e5 ion vs |w0| 1.57): overfits, val bound lateral L1 0.634 ->
+1.552, potential rms 0.078 -> 0.64 eV. Not a capability estimate.
+H2 (current script, 1e6 fit points, 32 probes): V3 = the model's own linear head (2304 weights) refit on 6 training pairs with node
+features fixed, ridge 1e-2 and 3e-3, all four fits istop 2 (173 / 152 / 576 / 628 it).
+   bound lateral L1, charged / neutral / response     train (6 pairs)          val (20 pairs)           test 122
+   V0 current head                                    0.629 / 0.701 / 0.992    0.634 / 0.695 / 1.002    0.669 / 0.691 / 1.000
+   V3 ridge 1e-2                                      0.630 / 0.687 / 0.994    0.637 / 0.685 / 1.005    0.670 / 0.678 / 1.002
+   V3 ridge 3e-3                                      0.626 / 0.679 / 0.995    0.637 / 0.682 / 1.006    0.668 / 0.675 / 1.004
+   ion lateral squared error, charged: train 0.406 -> 0.363 / 0.301; val 0.392 -> 0.358 / 0.302; test 0.499 -> 0.464 / 0.397
+Head weight change |dw| 0.78 / 3.68 (bound) and 2.88 / 12.4 (ion) at ridge 1e-2 / 3e-3, current |w0| = 1.57.
+Grid round trip on all 54 frames: bound lateral L1 0.080-0.094 charged, 0.086-0.115 neutral; ion 0.33-0.50 charged.
+Share of the bound lateral target where the model envelope < 1e-3, 27 charged / 27 neutral frames: squared 0.011-0.028 /
+0.004-0.020, L1 0.128-0.200 / 0.074-0.138 (< 1e-2: L1 0.170-0.258 / 0.102-0.194).
+Plane-average (1-D) bound error, untouched by every lateral variant: val charged 0.282, neutral 0.916.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
