@@ -4485,6 +4485,48 @@ response surplus above the water comes from the neutral state having too few ele
 Per-state plane-averaged density: rmse3d 0.03057 / 0.03068 (w1000_ref 0.03059 / 0.03063).
 No replicate exists for these quantities; the two changes of this run are not separated.
 
+## 2026-10-01 offline diagnosis of the residual-3D solvent charge, round 1 (no training, no production-code change; user-approved plan)
+
+Tool experiments1d/s3d_diag/s3d_fit_diag.py (work dir claude/2-1D_PB/exp_s3d_diag). Model prod500_vsolv_fix final weights.
+Per frame, one forward captures positions, node features, the head coefficients, the frozen cavity and the 1-D profiles; the
+production field d = env * m(c) - env * <env m>/<env> is rebuilt with the model's own functions (reproduction: max relative
+difference 0.0 for bound, ion and the head on every frame). The map c -> d at DFT grid points is linear; fits minimise the
+squared error of the LATERAL part (rho_DFT - <rho_DFT>_xy) at 2e6 uniform DFT points, checked on 1e6 held-out points and on
+the full 500x168x168 grid; scipy LSQR on a LinearOperator (forward = model evaluation, transpose = autograd), Jacobi column
+scaling from a 64-probe Hutchinson estimate, ridge on the ORIGINAL coefficient change dx with ridge = ridge_rel * ||A||_2.
+
+Jobs: 3480201 (smoke, failed: sbatch --export split KIT_STAGES at commas; grid cache keyed by 'cuda' vs 'cuda:0'), 3480204
+smoke OK, 3480225 convergence study, 3480339 ridge study cancelled (Jacobi scaling did not include the ridge -> acond 1e6),
+3480922 ridge study, 3481839 F1 (3 training pairs, V0/V1/V2 at ridge 1e-2 and 3e-3; script snapshot s3d_fit_diag_F1snapshot.py),
+3481840 H1 queued (V4 ion background candidate, V3 shared head on 6 training pairs, 20 val pairs + test 122).
+
+Convergence (sid 1 bound): without a ridge LSQR never meets the stopping test (istop 7 up to 8000 iterations); held-out
+lateral squared error 0.130 (4000 it, unscaled) -> 0.110 (8000 it, Jacobi) while |dx| grows to 5.7e7 (current |c| = 66).
+A minimiser exists (finite-dimensional least squares) but sits at huge coefficients. Ridge path (converged where marked *):
+   ridge_rel  3e-2*  1e-2*  3e-3*  1e-3   3e-4   1e-4   3e-5   (none, 8000 it)
+   |x|        68     76     127    259    592    1378   4182   5.7e7
+   J_hold     0.220  0.196  0.166  0.146  0.135  0.129  0.125  0.110       (current coefficients 0.29)
+   lat L1     0.623  0.600  0.566  0.542  0.526  0.517  0.511  0.499       (current 0.663)
+Ion (sid 1): 1e-2* J_hold 0.343, 1e-3 0.222, 1e-4 0.184, none 0.120 (current 0.43).
+
+Grid round trip DFT -> model grid (100x100x300, trilinear) -> DFT, 6 training frames: bound lateral L1 0.083-0.101, 3-D peak
+-1 %, plane-average peak height 0-4 % lower; ionic lateral L1 0.37-0.42 on charged frames (the ionic lateral part is small).
+Share of the lateral-target squared norm where the model envelope is below 1e-3 / 1e-2: bound 0.008-0.031 / 0.034-0.065,
+ion (charged) 0.019-0.030 / 0.049-0.058 -> the envelope-zero region explains only a few % of the squared-error floor.
+
+F1, 3 training pairs (1/601, 52/652, 152/752), means; bound lateral L1 / lateral squared error (all 24 fits istop 2):
+   variant              charged        neutral        charged - neutral response
+   V0 current           0.630 / 0.254  0.688 / 0.289  1.001 / 1.043
+   V1 free, 1e-2        0.565 / 0.177  0.536 / 0.170  0.811 / 0.571
+   V1 free, 3e-3        0.535 / 0.148  0.493 / 0.134  0.792 / 0.519
+   V2 pair-shared 1e-2  0.591 / 0.213  0.601 / 0.207  1.005 / 1.057
+   V2 pair-shared 3e-3  0.571 / 0.191  0.566 / 0.175  1.011 / 1.072
+1-D (plane-average) bound error unchanged by construction: 0.256 charged, 0.578 neutral. Pair-shared coefficients fit the
+single states but give no lateral charging response at all (response error >= 1.0 even at a weaker absolute ridge than V1 1e-2).
+Total solvent charge potential rms error (eV), charged / neutral / response: V0 0.086 / 0.079 / 0.065; V1 3e-3 0.073 / 0.074 /
+0.084; V2 3e-3 0.073 / 0.066 / 0.067 -> the free per-frame fits improve the response density but WORSEN the response potential.
+Ion, charged frames: lateral squared error 0.388 -> 0.257 (V1, 3e-3); neutral ungated (not a current capability) 0.735.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
