@@ -4643,6 +4643,30 @@ the expense of the local pattern. Larger floor (C2b) is worse on both; C3 inheri
    (the layer position within the plane), which neither the |grad s_diel| envelope nor a flat floor supplies; and the
    density / potential split means the acceptance has to include both.
 
+## 2026-10-02 1-D cross-substitution I0-I4 (onedim_cross.py, CPU job 3484233, pairs 1/52/152, 64 s, rc 0)
+
+Solute source (net solute charge = density3d_net_grid label through the model's own assembly: n_e, cvhar3, cvhar_z,
+dipole) and cavity density swapped ML <-> DFT; delta_p kept / frozen (replayed from I0) / off; closure and prior recomputed
+by the production code. Consistency: ML vs DFT electron density plane means L1 0.003-0.004, electron counts 661.3 vs 661.0.
+All solves converged by criterion (newton_exit tol, 8 outer, rms ~1e-12) in every configuration.
+Medians over the 3 pairs (L1 vs DFT plane average; phi = 1-D periodic potential rms error, eV):
+                     I0 ML/ML/kept   I1 DFT src   I2 DFT cavity   I3 DFT/DFT frozen   I4 DFT/DFT dp off
+   charged  b L1       0.256           0.233        0.843           0.725               0.739
+            b phi      0.080           0.091        0.312           0.307               0.355
+            i L1       0.154           0.154        0.202           0.203               0.203
+            t phi      0.011           0.019        0.283           0.275               0.337
+   neutral  b L1       0.562           0.648        1.746           1.663               1.549
+            t phi      0.036           0.013        0.123           0.144               0.140
+   response b L1       0.224           0.245        0.802           0.817               0.903
+            t phi      0.023           0.010        0.402           0.413               0.472
+Reading (reviewer's decision table): the solute source hardly matters (I1 ~ I0; the neutral total potential even improves,
+0.036 -> 0.013); the CAVITY DENSITY is the sensitive input, and in the wrong direction: with the DFT electron density the
+1-D closure is 3x further from the DFT bound charge, mu_bound moves by about -1.0 e*A, the potential error x4. The learned
+correction partly compensates the model-cavity closure error (I4 vs I3 mixed: better L1 on charged, worse potential). So
+the 1-D error is not an input error: given the true density the closure (cavity construction or 1-D reduction) does not
+reproduce the DFT bound charge, and the trained model's density + delta_p sit at a compensating point. Which of the two
+-> cavity_check.py (edge position / closure quantities / one-at-a-time mixed solves).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
