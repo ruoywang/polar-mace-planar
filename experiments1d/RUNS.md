@@ -4667,6 +4667,29 @@ the 1-D error is not an input error: given the true density the closure (cavity 
 reproduce the DFT bound charge, and the trained model's density + delta_p sit at a compensating point. Which of the two
 -> cavity_check.py (edge position / closure quantities / one-at-a-time mixed solves).
 
+## 2026-10-02 polarization-divergence lateral candidate, shared alpha (lateral_polarization.py, CPU job 3484245, 864 s, rc 0) -- NOT ACCEPTED YET: consistency check fails
+
+Construction (model's own inputs, production relation E = -(w_b * grad phi), P = a3 E, g = w_b div P, sigma_b = A_K): a3 =
+closure response at the screened vacuum field; lateral structure from the screened solute field ex,ey,ez / eps3, plane mean
+of E_z replaced by the 1-D solver's E_z = -(w_b d phi_1D / dz) so that <g>_xy should equal w_b d/dz (a1 E_z + prior) = the
+solver's rho_b without delta_p (delta_p is 6-16 % of the prior rms). First version (unscreened 3-D solute field + 1-D
+solvent potential) had <g> uncorrelated with rho_b (corr -0.7..0.03) and g_perp 17x the current residual; the screened
+version STILL fails: corr(<g>_xy, rho_b) median 0.05 (range -0.55..0.17), L1 4.2, g_perp rms 9.0e-3 vs current residual
+1.6e-3 (5x). The construction therefore does not reproduce the solver's own bound charge; the debugging block in
+cavity_check.py (job 3484246) rebuilds rho_b term by term (a1 E, prior, delta_p) on the 1-D grid and along the 3-D route.
+Numbers, for the record only (val 20 pairs, medians; alpha = 0.0444 fitted on the 6 training frames, per-frame 0.040-0.058):
+   charged  lateral L1 0.630 -> 0.566 (-10.0 %, 20/20 pairs better, worst -4.8 %); lat sq 0.252 -> 0.220 (-13.6 %);
+            bound potential 0.1122 -> 0.1081 (-3.6 %, 17/20); total potential 0.0786 -> 0.0730 (-7.2 %, 17/20)
+   neutral  lateral L1 0.697 -> 0.675 (-3.0 %, 20/20); potential 0.0744 -> 0.0750 (+0.7 %, 3/20 better)
+   response lateral L1 0.997 -> 0.869 (-12.9 %, 20/20, worst -8.6 %); lat sq 1.036 -> 0.849 (-18.3 %); total potential
+            0.0737 -> 0.0626 (-17.0 %, 20/20)
+   1-D and net charge unchanged by construction; rearrangement: cancellation 0.33 -> 0.71 (env<1e-3: 0.006 -> 0.44),
+   layer addition 0.65 -> 0.76; charge outside the interface window unchanged (0.027 vs DFT 0.014).
+   alpha = 1 (the pure candidate) is catastrophic: lateral L1 5.1, lat sq 18 -- the field is 5x too large and mostly wrong.
+Against the pre-set screening line (>= 15 % on val lateral density AND lateral response, no single-state potential
+degradation, majority same direction): borderline on L1 (10 % / 13 %), passes on the squared error of the response
+(18 %), neutral potential +0.7 % worse. Not a decision until the construction passes its own consistency check.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
