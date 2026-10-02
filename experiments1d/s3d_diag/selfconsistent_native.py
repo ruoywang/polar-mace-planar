@@ -69,7 +69,7 @@ z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 kspec = KeySpecification(info_keys={"energy": "energy", "total_charge": "total_charge", "total_spin": "total_spin", "sample_id": "sample_id",
                                     "solvated": "solvated", "fermi_level": "Fermi", "potential": "potential_diff"}, arrays_keys={"forces": "forces"})
 T0 = time.time()
-os.makedirs("sc_slices", exist_ok=True)
+SLICES = os.environ.get("KIT_SLICES", "sc_slices"); os.makedirs(SLICES, exist_ok=True)
 print(f"model {os.path.basename(MODEL)}; device {dev}; threads {torch.get_num_threads()}; pairs {PAIRS}; runs {RUNS}; maxit {MAXIT} m {M_HIST} beta {BETA} tol {TOL}; sigma_b {SIGMA_B}", flush=True)
 CAP = {}
 _orig_clo = PB.closure_from_fields
@@ -282,7 +282,7 @@ for kpair in PAIRS:
                 Mz = zyx(g); full, _ = metrics(Mz, Dz, lat, dV, pD)
                 fr["runs"][name] = dict(status=status, iterations=len(hist), wall_s=time.time() - t, t_F_mean=float(np.mean([h["t_F"] for h in hist])), final=full, history=hist)
                 keep[sid][name] = Mz
-                np.savez_compressed(f"sc_slices/sid{sid}_{name}.npz", pa_cand=Mz.mean(axis=(1, 2)), pa_ref=Dz.mean(axis=(1, 2)), xz_cand=Mz[:, shape[1] // 2, :], xz_ref=Dz[:, shape[1] // 2, :], lz=lz)
+                np.savez_compressed(f"{SLICES}/sid{sid}_{name}.npz", pa_cand=Mz.mean(axis=(1, 2)), pa_ref=Dz.mean(axis=(1, 2)), xz_cand=Mz[:, shape[1] // 2, :], xz_ref=Dz[:, shape[1] // 2, :], lz=lz)
                 print(f"[{time.time() - T0:5.0f}s] sid {sid} {name}: {status} after {len(hist)} it ({time.time() - t:.0f} s) | final L1 {full['L1']:.3f} lat {full['eps_lat']:.3f} ({full['lat_corr']:+.3f}) pa {full['eps_pa']:.3f} norm {full['norm_ratio']:.3f} phi {full['phi_rms_err']:.3f} eV", flush=True)
                 del g
             del F_dft, specs, x_1d, phi_sol, cv_m, cv_m_pm, s_d, s_m, rho_b_ref, rho_i_ref, ne_d

@@ -14,5 +14,5 @@ BASE=/scratch/08384/tg876840/tmp/c-MACEsol; CODE=$BASE/claude/2-1D_PB/pmp-s3dene
 cd $BASE/claude/2-1D_PB/exp_s3d_diag
 echo "CODE: $(git -C $CODE log --oneline -1 | cut -c1-80)   node $(hostname)   $(date)   pairs ${KIT_PAIRS:-default} runs ${KIT_RUNS:-default} maxit ${KIT_MAXIT:-60}"
 export MACE_PB1D_LIVE_POS=1 MACE_PB1D_GRAD_PASSES=2 MACE_PB1D_AREA_EPS=1e-12 PYTHONPATH=$CODE KIT_DEVICE=cpu OMP_NUM_THREADS=64; unset MACE_PB1D_DFORCE
-$PY -u selfconsistent_native.py selfconsistent_native.json 2>&1 | grep --line-buffered -vE "cuequivariance|UserWarning|return torch|warnings.warn"
+$PY -u selfconsistent_native.py ${KIT_OUT:-selfconsistent_native.json} 2>&1 | grep --line-buffered -vE "cuequivariance|UserWarning|return torch|warnings.warn"
 echo "rc_scnative=${PIPESTATUS[0]}   $(date)"
