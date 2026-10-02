@@ -4839,6 +4839,47 @@ production assembly is adequate (2.7 %), its plane mean must come from the 1-D r
 is the remaining input defect to quantify under self-consistency. No training, no production-code change.
 Files: experiments1d/s3d_diag/grid_attribution.py, job_gridattr.sh, grid_attribution.json; log exp_s3d_diag/logs/gridattr.o3485001.
 
+## 2026-10-02 field-response-consistent bound charge on the native grid (selfconsistent_native.py; CPU jobs 3485049 pair 1 / 3485070 solver settings / 3485197 pairs 52+152; all rc 0; code da19456 + 4c118f2) -- reviewer step 2: with DFT inputs the consistent construction reproduces RHOB and the charging response to ~1 %; explicit field updates diverge; the model cavity caps the result at L1 0.43 and the model solute potential at 0.84 (charged)
+
+Construction: phi_tot = phi_sol + L(rho_b + rho_i) with the production Poisson operator L; E = -(w_b grad phi_tot); rho_b = w_b div(a(|E|, s_diel) E)
+with the production response_a3 -- one total potential, the response evaluated at that field, one polarization field for plane
+average and lateral part. Solved as a fixed point by Anderson acceleration on the DFT native grid (500 x 168 x 168, 14.1 M points);
+ion charge held at DFT RHOION in every run (bound channel only); no prior, no delta_p, no screened-vacuum field; the production
+1-D solution B(z) is only the initial guess. Metrics vs native RHOB as in the previous entries (c / n = means over 3 charged /
+3 neutral frames; resp = charged-minus-neutral per pair).
+Inputs per frame: production 1-D bound charge vs RHOB L1 0.886-0.907 charged (norm 0.26-0.30, pa 0.26), 1.10-1.16 neutral (norm
+0.10-0.17); model solute potential (production cv, Fourier-upsampled) vs DFT: lateral rms error 0.37-0.43 eV of 4.43-4.46 eV
+(8-10 %; the DFT-label assembly: 0.12 eV), plane mean = line (slope +0.009..+0.017 eV/A charged, -0.065..-0.074 neutral) +
+0.05-0.13 eV; model cavity s_diel L1 0.008-0.012 vs DFT.
+Explicit updates (Picard from B(z), DFT inputs): L1 3.5-4.4 after one field update, 8.5-11.9 after two, 10.1-16.3 after three,
+all six frames -> a few explicit field updates are unusable; the 3-D problem has to be solved implicitly.
+Solver: 2.7-3.1 s per field evaluation (CPU, 64 threads, this script; GPU not measured); history 12 / damping 0.05: residual
+still 2e-2..5e-3 after 60 iterations; history 40 / damping 0.2: residual 1e-3 reached in 53-57 iterations for every run
+(220-245 s per solve); the start (zero vs B(z)) does not change the iteration count with the latter settings. No
+preconditioning tried; no statement about achievable speed.
+Results (final metrics, history 40 / damping 0.2 unless noted):
+   S0  DFT solute potential + DFT cavity, from zero:        c L1 0.006 lat 0.007 (1.000) pa 0.004 norm 1.000 phi 0.001 | n 0.010 | resp 0.009 (pair 1; settings run)
+   S1  same, from B(z):                                     c L1 0.005-0.013 (mean 0.009) lat 0.009 (1.000) pa 0.006 phi 0.001 | n 0.008-0.055 (pair-1 frame at maxit 60 with the slow settings) | resp 0.009-0.051 (mean 0.024)
+   S2  DFT solute potential + MODEL cavity:                  c L1 0.370-0.474 (0.430) lat 0.553 (0.74) pa 0.126 norm 0.892 phi 0.034 | n 0.713-0.865 (0.787) pa 0.61 | resp 0.408-0.584 (0.498) lat 0.70 (0.53) phi 0.073
+   S3  MODEL solute potential + model cavity:               c L1 0.794-0.883 (0.840) lat 1.043 (0.64) pa 0.224 norm 0.717 phi 0.141 | n 1.41-1.49 (1.455) pa 1.45 phi 0.52 | resp 0.607-0.717 (0.665) lat 0.82 (0.41) norm 0.81 phi 0.59
+   S3b S3 with the DFT plane mean of the solute potential:  c L1 0.841 (unchanged) phi 0.107 | n 1.438, pa 0.90, phi 0.14 | resp 0.628, pa 0.165, phi 0.068
+Reading:
+ 1. Definition, convention, implementation and the response function are right as a self-consistent model: the fixed point
+    of this operator IS the DFT solution (0.6-1.6 % per frame, 0.9-1.4 % for the charging response once converged); A's 2.5 %
+    was the cost of evaluating the relation at a given field, not of the relation. This is the first construction in this
+    series that reproduces the lateral charging response (lat corr 1.00 vs 0.09-0.26 for the production).
+ 2. "Is 3-D iteration necessary": explicit updates diverge (bulk feedback ~ eps - 1); an implicit solve is required. The cost
+    is a solver question (~55 Anderson iterations here, unpreconditioned, CPU only).
+ 3. Inputs under self-consistency: the model cavity alone costs L1 0.43 / response 0.50 (= D; the consistent field does not
+    repair it), the model solute potential roughly doubles it (0.84 / 0.67); the solute potential's plane-mean error is what
+    breaks the neutral plane average (1.45 -> 0.90) and the response potential (0.59 -> 0.07 eV) -- laterally it is 8-10 % and
+    that part remains. The electron density (cavity) and the lateral solute potential are the two inputs to improve; the
+    plane mean of the solute potential must come from the 1-D route / label, as already concluded in step 1.
+ 4. Not covered: the ion channel (fixed at DFT), the production grid (cannot host the relation, step 1), GPU timing,
+    preconditioning. No training, no production-code change.
+Files: experiments1d/s3d_diag/selfconsistent_native.py, job_scnative.sh, selfconsistent_native.json (pair 1, slow settings),
+selfconsistent_native_p52_152.json, selfconsistent_tune_m40b02.json; slices exp_s3d_diag/sc_slices*/; logs scnative.o3485049/70/197.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
