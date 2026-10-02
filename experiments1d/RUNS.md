@@ -4619,6 +4619,30 @@ Reading: the lateral residual cannot cancel the broadcast 1-D part where the env
 points on charged frames) and under-supplies it (69 %) even inside the envelope; it also under-supplies the layer addition
 (65 %). Both are needed for the spatial rearrangement; the envelope is a real limit for the cancellation half.
 
+## 2026-10-02 candidate lateral representations, offline free-coefficient fits (s3d_fit_diag.py stage "cand", job 3484186, pairs 1/52/152, ridge 1e-2, 2400 s, rc 0; all 30 fits istop 2)
+
+Candidates (bound channel; per-plane zero-mean projection kept in all): C0 = current representation refit (reference with the
+same metrics); C1 = background allocated by the envelope, B(z) * env_b / <env_b>_xy, residual unchanged; C2a / C2b = residual
+support widened to env' = max(env_b, 0.05 / 0.2) on the planes where |B(z)| > 10 % of its max (env unchanged elsewhere);
+C3 = C1 + C2a. Medians over 3 charged / 3 neutral frames; response over the 3 pairs:
+   cand   lat L1 c / n     lat sq c / n     phi_b c / n (eV)   cancel c / n   in-env c   layer c / n    resp L1 / sq / phi_tot
+   C0     0.566 / 0.541    0.177 / 0.173    0.1068 / 0.0575    0.47 / 0.82    0.94       0.79 / 0.90    0.803 / 0.558 / 0.0848
+   C1     0.604 / 0.510    0.211 / 0.165    0.1128 / 0.0561    0.98 / 1.14    0.95       0.92 / 0.88    0.800 / 0.663 / 0.0790
+   C2a    0.617 / 0.653    0.250 / 0.258    0.0859 / 0.0558    0.88 / 0.94    0.68       0.82 / 0.83    0.838 / 0.618 / 0.0362
+   C2b    0.759 / 0.780    0.347 / 0.334    0.0882 / 0.0596    0.88 / 0.85    0.56       0.71 / 0.72    0.961 / 0.765 / 0.0383
+   C3     0.725 / 0.675    0.314 / 0.259    0.1042 / 0.0560    0.96 / 1.17    0.86       0.85 / 0.83    0.962 / 0.743 / 0.0688
+Charge outside the interface window (int |ML| over the other planes / int |DFT|): 0.021 charged, 0.026-0.027 neutral for every
+candidate (DFT itself 0.015 / 0.022): none of the candidates leaks charge outside the interface.
+Reading: no candidate improves density and potential together. C1 completes the cancellation by construction but the envelope
+shape is not the DFT layer shape: lateral error unchanged or worse (sid 152: L1 0.530 -> 0.612, phi 0.122 -> 0.179), one neutral
+frame better (752: 0.547 -> 0.436). C2a halves the response potential error (0.085 -> 0.036 eV) and lowers the charged-frame
+bound potential error (0.107 -> 0.086) but worsens the lateral density everywhere (L1 +0.05 to +0.19, lat sq +0.07 to +0.09);
+the widened support opens charge over the whole interface plane and the fit uses it for long-wavelength (potential) gain at
+the expense of the local pattern. Larger floor (C2b) is worse on both; C3 inherits the worst of both.
+-> The "support outside the envelope" needed for the cancellation has to carry the DFT layer's lateral SHAPE information
+   (the layer position within the plane), which neither the |grad s_diel| envelope nor a flat floor supplies; and the
+   density / potential split means the acceptance has to include both.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
