@@ -126,11 +126,18 @@ def capture(sid, shape):
         eps3 = 1.0 + EDEPS * a3_zero
         ex, ey, ez, emag = grid.grad_from_recip(-torch.conj(w_b) * grid.fft(cv))
         a3 = response_a3(emag / eps3, s_diel3, params, tp)
+        # the closure's own screened vacuum field (3-D) carries the lateral structure; its plane mean along z is replaced
+        # by the 1-D solver's total field E_z = -(w_b * d phi_1D / dz), so that <g>_xy = w_b d/dz (a1 E_z + prior), the
+        # solver's own bound charge without delta_p (consistency check below)
+        ex_s, ey_s, ez_s = ex / eps3, ey / eps3, ez / eps3
         phi_s = res["phi_z"].detach().double(); f = phi_s.numel() // cv.shape[2]
         phi_1d = phi_s[::f] if f > 1 else phi_s                           # solve grid -> model grid planes
-        phi_tot = cv + (phi_1d - cv.mean(dim=(0, 1)))[None, None, :]
-        Ex, Ey, Ez, _ = grid.grad_from_recip(-torch.conj(w_b) * grid.fft(phi_tot))
-        g = grid.ifft_real(torch.conj(w_b) * grid.div_real_vector(a3 * Ex, a3 * Ey, a3 * Ez))
+        nzm = cv.shape[2]; lz_ = float(atoms.cell[2, 2])
+        kz = 2.0 * math.pi * torch.fft.fftfreq(nzm, d=lz_ / nzm, device=dev, dtype=torch.float64)
+        wb1 = torch.exp(-0.5 * (sigma_b * kz) ** 2)
+        ez_1d = torch.fft.ifft(-1j * kz * wb1 * torch.fft.fft(phi_1d)).real
+        Ez3 = ez_s - ez_s.mean(dim=(0, 1))[None, None, :] + ez_1d[None, None, :]
+        g = grid.ifft_real(torch.conj(w_b) * grid.div_real_vector(a3 * ex_s, a3 * ey_s, a3 * Ez3))
         g_mean = g.mean(dim=(0, 1)); g_perp = g - g_mean[None, None, :]
         Bz = res["rho_bound_z"].detach().double(); Bi = res["rho_ion_z"].detach().double()
         B_model_planes = _interp1_periodic(Bz, torch.arange(cv.shape[2], device=dev, dtype=torch.float64) / cv.shape[2])
@@ -219,7 +226,7 @@ def eval_pair(k):
         fr = {}
         for nm, a in ALPHAS:
             M = field(s, a); mb, pMb = metrics(M, D, lat, dV, phiD_b); mt, _ = metrics(M + ION, D + Di, lat, dV, phiD_t)
-            fr[nm] = dict(b=mb, t=dict(phi_rms_err=mt["phi_rms_err"], L1=mt["L1"]), rearr=rearr(M, D, C["B"][:, None, None], C["env"], dV))
+            fr[nm] = dict(b=mb, t=dict(phi_rms_err=mt["phi_rms_err"], L1=mt["L1"]), rearr=rearr(M, D, np.broadcast_to(C["B"][:, None, None], M.shape), C["env"], dV))
             fields[(s, nm)] = M
         rec["frames"][str(s)] = fr
     for nm, a in ALPHAS:
