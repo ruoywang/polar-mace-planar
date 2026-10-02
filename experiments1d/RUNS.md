@@ -4759,6 +4759,41 @@ NATIVE grid from the raw PHI / CHGCAR / RHOB files, so the model-grid reconstruc
 Poisson-rebuilt field) is the first suspect -> abcd_native.py (job 3484908) repeats A/B/C/D on the native grid, no
 resampling of any DFT quantity, D with the model density upsampled.
 
+## 2026-10-02 constitutive comparison A/B/C/D on the DFT NATIVE grid (abcd_native.py, CPU job 3484908, 3 pairs, 224 s, rc 0, code dc105bb) -- A reproduces RHOB; B fails; C adds a 5-10x frozen-response factor; D degrades
+
+Native grid 500 x 168 x 168 (0.09 A) from the raw PHI / CHGCAR / RHOB / RHOION, no resampling of any DFT quantity; native
+RHOB plane mean vs the training-package label identical (L1 3e-10 .. 1.4e-9); electrons 661.0 / 660.0 per frame.
+Candidates (DFT cavity in A / B / C; in B / C the plane mean of E_z is fixed to the DFT total field's; metrics vs -RHOB/V on
+the native grid: L1 total, lat = lateral L1 (corr), pa = plane-average L1 (corr), norm = ||cand|| / ||DFT||, phi = 3-D
+bound-potential rms error eV; c = mean of 3 charged frames, n = mean of 3 neutral, resp = mean of 3 charged-minus-neutral):
+   A  DFT total field, response recomputed:          c L1 0.025 lat 0.031 (0.999) pa 0.002 (1.000) norm 1.001 phi 0.004 | n L1 0.031 pa 0.019 | resp L1 0.017 lat 0.027 pa 0.005 phi 0.002
+   A_frozen  field A, response frozen at |E_scr|:    c L1 5.10 lat 6.43 (0.58) pa 1.57 norm 8.9 phi 0.70 | n L1 7.49 norm 10.2 | resp L1 5.48 norm 8.7
+   B  screened vacuum field, response recomputed:    c L1 1.10 lat 1.12 (0.46) pa 1.16 (0.48) norm 1.07 phi 0.51 | n L1 2.42 pa 7.2 norm 1.50 | resp L1 2.04 lat 2.18 (0.57) pa 1.70 norm 2.9 phi 0.54
+   C  field B, response frozen (production choice):  c L1 5.25 lat 5.76 (0.34) pa 5.79 norm 5.7 phi 2.60 | n L1 5.06 norm 3.6 | resp L1 7.50 lat 9.47 norm 10.4 phi 2.80
+   D  field A, MODEL cavity (model n_e upsampled):    c L1 0.46 lat 0.60 (0.75) pa 0.14 (0.97) norm 0.82 phi 0.040 | n L1 0.81 pa 0.73 norm 0.81 phi 0.087 | resp L1 0.50 lat 0.73 (0.47) pa 0.18 norm 0.89 phi 0.086
+Per-frame spread: A L1 0.024-0.033 (all six); B charged 0.96-1.17, neutral 2.02-2.66; C 4.01-6.78; D charged 0.40-0.50,
+neutral 0.74-0.86. Neutral pa values are relative to a small plane-average RHOB (cancelling layers) and are quoted, not read.
+Reading by the reviewer's table:
+ 1. A matches on the native grid (L1 0.03, response 0.02, norm 1.001, bound potential 0.003 eV): definition, convention and
+    implementation of rho_b = w_b div(a(|E|) E) are right. The model-grid failure (A L1 1.16-1.53, job 3484899) is therefore
+    the model-grid route itself (0.15 A grid + resampled DFT inputs + Poisson-rebuilt field; shares not separated).
+    Consequence: any 3-D constitutive quantity evaluated on the 100 x 100 x 300 model grid -- including the polarization
+    candidate of lateral_polarization.py -- carries an O(1) discretisation error before its physics can be judged.
+ 2. A ok, B bad: the screened-vacuum-field approximation, even with the DFT cavity, the DFT solute source and the DFT 1-D
+    plane mean of E_z, gives L1 1.10 (charged) / 2.42 (neutral), response L1 2.04 with lateral corr 0.46-0.57; the plane
+    average is wrong too (pa 1.16) because the response is evaluated at the approximate |E|. -> the 3-D field construction is
+    the first thing to change ("A 对、B 差，重点改三维场构造").
+ 3. C vs B and A_frozen vs A: freezing the response at the screened vacuum field multiplies the bound charge by 5.3 (C/B
+    norm, charged) and 8.9-10.2 (A_frozen/A, exact field): an independent, larger error on top of the field approximation.
+    The production 1-D closure uses this frozen response (then compensated on the plane average by prior + delta_p). Both the
+    field and the frozen response have to change; fixing either alone does not reach RHOB.
+ 4. D degrades from A: with the exact field and relation, the model cavity alone costs L1 0.03 -> 0.46 (charged), lateral
+    corr 1.00 -> 0.75, 18 % too little bound charge (norm 0.82), bound potential 0.003 -> 0.040 eV, response L1 0.02 -> 0.50.
+    -> "D 明显退化，输入问题仍须处理". Not separated: the model n_e was trilinearly upsampled 0.15 -> 0.09 A; a DFT-n_e
+    down/up round trip through the model grid would bound the interpolation share of this degradation.
+No training, no production-code change (user: 暂不重写生产闭合). Files: experiments1d/s3d_diag/abcd_native.py,
+abcd_native.json; log exp_s3d_diag/logs/native.o3484908.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
