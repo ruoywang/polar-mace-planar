@@ -39,7 +39,7 @@ from mace import data as mace_data
 from mace.data.utils import KeySpecification
 from mace.tools import torch_geometric, utils
 import mace.modules.pb1d_backend as PB
-from mace.modules.pb1d_closure import response_a3
+from mace.modules.pb1d_closure import EDEPS, response_a3
 from mace.modules.solvent3d import _interp3_periodic
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "selfconsistent_native.json"
@@ -48,6 +48,7 @@ PAIRS = [int(s) for s in os.environ.get("KIT_PAIRS", "1 52 152").replace("+", " 
 RUNS = os.environ.get("KIT_RUNS", "S0+S1+S2+S3+S3b").replace("+", " ").split()
 MAXIT = int(os.environ.get("KIT_MAXIT", "60")); M_HIST = int(os.environ.get("KIT_M", "12")); BETA = float(os.environ.get("KIT_BETA", "0.05"))
 TOL = float(os.environ.get("KIT_TOL", "1e-3")); PICARD = os.environ.get("KIT_PICARD", "1") == "1"
+PRECOND = os.environ.get("KIT_PRECOND", "none")   # none | eps : residual scaled by 1/(1 + EDEPS a0 s_diel) (local dielectric Jacobi preconditioner)
 DFT = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single")
 devname = os.environ.get("KIT_DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_dtype(torch.float64)
@@ -70,7 +71,8 @@ kspec = KeySpecification(info_keys={"energy": "energy", "total_charge": "total_c
                                     "solvated": "solvated", "fermi_level": "Fermi", "potential": "potential_diff"}, arrays_keys={"forces": "forces"})
 T0 = time.time()
 SLICES = os.environ.get("KIT_SLICES", "sc_slices"); os.makedirs(SLICES, exist_ok=True)
-print(f"model {os.path.basename(MODEL)}; device {dev}; threads {torch.get_num_threads()}; pairs {PAIRS}; runs {RUNS}; maxit {MAXIT} m {M_HIST} beta {BETA} tol {TOL}; sigma_b {SIGMA_B}", flush=True)
+print(f"model {os.path.basename(MODEL)}; device {dev} {torch.cuda.get_device_name(dev) if dev.type == 'cuda' else ''}; threads {torch.get_num_threads()}; pairs {PAIRS}; runs {RUNS}; maxit {MAXIT} m {M_HIST} beta {BETA} tol {TOL}; precond {PRECOND}; sigma_b {SIGMA_B}", flush=True)
+RESP0 = float(response_a3(torch.zeros(1, device=dev), torch.ones(1, device=dev), params, tp)[0])
 CAP = {}
 _orig_clo = PB.closure_from_fields
 
@@ -199,12 +201,16 @@ def make_F(gd, phi_sol, rho_i, s_d, w_b, V):
     return F
 
 
-def anderson(F, x0, Dt, m=12, beta=0.05, maxit=60, tol=1e-3, label=""):
-    """Anderson-accelerated fixed-point iteration x = F(x). Returns (best iterate g, history, status)."""
+def anderson(F, x0, Dt, m=12, beta=0.05, maxit=60, tol=1e-3, label="", P=None):
+    """Anderson-accelerated fixed-point iteration x = F(x); with P the mixing / history use the preconditioned residual P (F(x) - x)
+    while the stopping residual stays ||F(x) - x|| / ||F(x)||. Returns (last iterate g, history, status)."""
     x = x0.clone(); X = []; Fs = []; hist = []; status = "maxit"; g = None
     for k in range(maxit):
-        t = time.time(); g = F(x); tF = time.time() - t
+        t = time.time(); g = F(x)
+        if dev.type == "cuda": torch.cuda.synchronize()
+        tF = time.time() - t
         f = g - x; res = float(f.norm() / g.norm())
+        if P is not None: f = P * f
         q = quick(g, Dt); q.update(k=k, res_rel=res, t_F=tF); hist.append(q)
         if k % 5 == 0 or res < tol or k == maxit - 1:
             print(f"      [{label}] k {k:2d} res {res:.2e} L1 {q['L1']:.3f} lat {q['eps_lat']:.3f} pa {q['eps_pa']:.3f} norm {q['norm_ratio']:.3f} corr {q['lat_corr']:+.3f} ({tF:.1f} s/F)", flush=True)
@@ -274,16 +280,23 @@ for kpair in PAIRS:
                      "S2": (make_F(gd, phi_sol, rho_i_ref, s_m, w_b, V), x_1d),
                      "S3": (make_F(gd, cv_m, rho_i_ref, s_m, w_b, V), x_1d),
                      "S3b": (make_F(gd, cv_m_pm, rho_i_ref, s_m, w_b, V), x_1d)}
+            cav_of = {"S0": s_d, "S1": s_d, "S2": s_m, "S3": s_m, "S3b": s_m}
             for name in RUNS:
                 if name not in specs:
                     continue
                 Fn, x0 = specs[name]; t = time.time()
-                g, hist, status = anderson(Fn, x0, rho_b_ref, m=M_HIST, beta=BETA, maxit=MAXIT, tol=TOL, label=f"{sid} {name}")
+                P = None if PRECOND == "none" else 1.0 / (1.0 + EDEPS * RESP0 * cav_of[name])
+                if dev.type == "cuda": torch.cuda.reset_peak_memory_stats(dev); torch.cuda.synchronize()
+                g, hist, status = anderson(Fn, x0, rho_b_ref, m=M_HIST, beta=BETA, maxit=MAXIT, tol=TOL, label=f"{sid} {name}", P=P)
+                if dev.type == "cuda": torch.cuda.synchronize()
+                peak_gib = float(torch.cuda.max_memory_allocated(dev)) / 2 ** 30 if dev.type == "cuda" else None
+                del P
                 Mz = zyx(g); full, _ = metrics(Mz, Dz, lat, dV, pD)
-                fr["runs"][name] = dict(status=status, iterations=len(hist), wall_s=time.time() - t, t_F_mean=float(np.mean([h["t_F"] for h in hist])), final=full, history=hist)
+                fr["runs"][name] = dict(status=status, iterations=len(hist), wall_s=time.time() - t, t_F_mean=float(np.mean([h["t_F"] for h in hist])), final=full, history=hist,
+                                        precond=PRECOND, m=M_HIST, beta=BETA, device=str(dev), peak_gpu_gib=peak_gib)
                 keep[sid][name] = Mz
                 np.savez_compressed(f"{SLICES}/sid{sid}_{name}.npz", pa_cand=Mz.mean(axis=(1, 2)), pa_ref=Dz.mean(axis=(1, 2)), xz_cand=Mz[:, shape[1] // 2, :], xz_ref=Dz[:, shape[1] // 2, :], lz=lz)
-                print(f"[{time.time() - T0:5.0f}s] sid {sid} {name}: {status} after {len(hist)} it ({time.time() - t:.0f} s) | final L1 {full['L1']:.3f} lat {full['eps_lat']:.3f} ({full['lat_corr']:+.3f}) pa {full['eps_pa']:.3f} norm {full['norm_ratio']:.3f} phi {full['phi_rms_err']:.3f} eV", flush=True)
+                print(f"[{time.time() - T0:5.0f}s] sid {sid} {name}: {status} after {len(hist)} it ({time.time() - t:.0f} s; {'%.2f GiB peak' % peak_gib if peak_gib else 'cpu'}; precond {PRECOND}) | final L1 {full['L1']:.3f} lat {full['eps_lat']:.3f} ({full['lat_corr']:+.3f}) pa {full['eps_pa']:.3f} norm {full['norm_ratio']:.3f} phi {full['phi_rms_err']:.3f} eV", flush=True)
                 del g
             del F_dft, specs, x_1d, phi_sol, cv_m, cv_m_pm, s_d, s_m, rho_b_ref, rho_i_ref, ne_d
         rec["frames"][str(sid)] = fr
