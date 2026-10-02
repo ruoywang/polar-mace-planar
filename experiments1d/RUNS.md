@@ -4794,6 +4794,51 @@ Reading by the reviewer's table:
 No training, no production-code change (user: 暂不重写生产闭合). Files: experiments1d/s3d_diag/abcd_native.py,
 abcd_native.json; log exp_s3d_diag/logs/native.o3484908.
 
+## 2026-10-02 grid attribution of the constitutive relation (grid_attribution.py, CPU job 3485001, 6 frames, 343 s, rc 0, code 414ac89) -- reviewer step 1 of the single route: cavity-path resampling is minor, the 0.15 A model-grid evaluation itself fails, the rebuilt field adds a plane-mean (dipole-ramp) defect only
+
+Reviewer corrections accepted first: (a) the model-grid A failure cannot be called "resolution" without separating resampling,
+density source and potential reconstruction; (b) D shows the model-density -> cavity path matters, network vs interpolation
+error unseparated, and norm 0.82 is the L2 norm of the bound-charge FIELD (net bound charge is 0 in every frame), not "18 %
+less bound charge"; (c) C's 5.25 is an isolated construction, not the production accuracy (learned compensation exists).
+Reference: native RHOB (500 x 168 x 168, 0.09 A). Metrics as before (L1, lat = lateral L1 (corr), pa, norm, phi = bound-potential
+rms error eV); c / n = means of 3 charged / 3 neutral frames; resp = mean of 3 charged-minus-neutral responses (native grid).
+NATIVE stage -- true field -(w_b grad PHI), only the cavity density changes:
+   A   native CHGCAR cavity:                                   c L1 0.025 lat 0.031 (0.999) norm 1.001 phi 0.004 | n 0.031 | resp 0.017
+   R1  DFT density -> model grid (trilinear) -> native -> cavity: c L1 0.062 lat 0.078 (0.998) norm 0.982 phi 0.005 | n 0.090 | resp 0.054
+   R2  package route n_e = clamp((neutral_v - net_label V)/V) -> native: c L1 0.052 lat 0.065 norm 0.987 | n 0.073 | resp 0.043
+   cavity s_diel vs native: R1 L1 0.0006-0.0007, R2 0.0004-0.0005, no point with |ds| > 0.1, volume -1.9 .. -3.1 A^3;
+   D's cavity (model n_e upsampled): L1 0.0081-0.0118 (14-17x R1), 1.1-1.5 % of points |ds| > 0.1, volume -34 .. -49 A^3.
+   Electron count of n_e on the grid: native 661.01 / 660.01, package route 661.01 / 660.01, MODEL 661.33-661.44 / 660.38-660.43
+   (same clamp assembly, so the +0.33-0.43 e excess is the model's net density, in all six frames).
+   -> interpolation through the model grid costs L1 0.03 -> 0.06-0.09; D's 0.46 is therefore dominated by the model density
+      itself (not strictly subtractable; R1 is the interpolation-only control with D's route).
+MODEL-GRID stage (100 x 100 x 300, 0.15 A); 'mg' = vs RHOB resampled to the model grid, 'nat' = upsampled candidate vs native RHOB:
+   M1  PHI + CHGCAR trilinearly mapped, relation evaluated there: c nat L1 1.90 (mg 2.50) lat 2.26 (0.70) norm 1.09 phi 0.147 | n 3.16 | resp 0.85
+   M1f same with Fourier (low-pass) resampling of PHI/CHGCAR/RHOB: c nat 1.02 (mg 1.47) lat 1.23 (0.80) norm 0.95 phi 0.128 | n 1.64 | resp 0.76
+   M2  cavity of M1, production-assembly rebuilt potential cv_dft + Poisson(solvent_m): c nat 1.32 lat 1.28 (0.79) pa 0.89 (corr 0.55) phi 2.39 | n 2.82 pa 8.3 phi 6.2 | resp 3.31
+   M3  M2 with the E_z plane mean from the 1-D label (the old model-grid A field): c nat 1.14 lat 1.34 (0.78) pa 0.39 phi 0.127 | n 1.90 | resp 0.85
+   M4  M1 field + package cavity:                                 c nat 1.91 (= M1; s_diel differs by 0.0003)
+   M5  M3 field + package cavity (= the model-grid A of job 3484899): c nat 1.15 | n 1.91 | resp 0.86   (sanity: 1.16 / 1.90 / 0.88 before)
+   potential: rebuilt - mapped PHI, lateral rms 0.120 eV of 4.39 eV (2.7 %), entirely the solute assembly (cv_dft vs PHI - Poisson(solvent)
+   identical to 4 digits); plane-mean difference = straight line (slope +0.008..+0.017 eV/A charged, -0.066..-0.073 neutral) + 0.016-0.028 eV
+   (charged) / 0.099-0.110 eV (neutral) line-removed.
+RESOLUTION series, direct trilinear route, nat L1 (lat corr, norm), charged / neutral:
+   50x50x150 (0.30 A): 2.09-2.15 (0.01, 0.40) / 2.92-3.04 | 100x100x300 (0.15 A): 1.87-1.94 (0.70, 1.08) / 3.07-3.27 |
+   134x134x400 (0.11 A): 0.39-0.42 (0.95, 1.01) / 0.64-0.70 | native 168x168x500 (0.09 A, no resampling): 0.024-0.027 / 0.029-0.033.
+Reading (the reviewer's two questions):
+ - "coarse-grid computation itself" vs "input field reconstruction": the computation itself. With the true potential mapped
+   directly (M1, M1f) the 0.15 A grid gives L1 1.0-1.9 (charged) and loses the charging response (0.76-0.85); the rebuilt
+   field is not worse laterally (M2 lat 1.28 vs M1f 1.23) and its only specific defect is the plane mean (dipole ramp +
+   0.02-0.11 eV), which the label replacement (M3) removes. The mapping operator matters (trilinear 1.9 vs Fourier 1.0) but
+   no mapping at 0.15 A approaches the native result; between 0.15 and 0.11 A the error drops 4.5-5x with the same operator.
+ - cavity route: resampling the density through the model grid changes s_diel by 0.0006 and L1 by +0.04-0.06; the package
+   route is equivalent (R2). D's degradation is the model's density (cavity volume -34..-49 A^3, +0.33-0.43 e on the grid).
+Consequences for step 2 (field-response-consistent candidate): the constitutive evaluation must sit on a grid of <= 0.11 A
+(0.11 A: L1 0.4; native: 0.03) -- the production 0.15 A grid cannot host it in this form; the lateral solute potential of the
+production assembly is adequate (2.7 %), its plane mean must come from the 1-D route or the label; the model electron density
+is the remaining input defect to quantify under self-consistency. No training, no production-code change.
+Files: experiments1d/s3d_diag/grid_attribution.py, job_gridattr.sh, grid_attribution.json; log exp_s3d_diag/logs/gridattr.o3485001.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
