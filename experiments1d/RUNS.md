@@ -4729,6 +4729,36 @@ everywhere). The polarization-divergence lateral candidate inherits the same res
 line. No modification is ready for the 10-epoch A/B; the next design step is a reformulation of the 1-D closure whose net
 bound charge is not a difference of large terms (physics decision for the user).
 
+## 2026-10-02 constitutive comparison A/B/C/D on the MODEL grid (constitutive_abcd.py, CPU job 3484899, 3 pairs, 153 s, rc 0) -- A does not match; native-grid rerun queued (abcd_native.py, job 3484908)
+
+Reviewer corrections recorded first (closure-cancellation memory updated): the a1E/prior cancellation is partly the way the
+expression is split (P = <aE_scr> + a(E_1D - E_scr) + dp), so it does not by itself indict the closure; "not input, not
+cavity" withdrawn (edge-region density 37 % off, edge shift 0.15 A vs a 0.27 A layer, prior depends on lateral correlations,
+I1 improved the response total potential 0.023 -> 0.010); the 1-D check does not explain the lateral candidate's failure;
+the 300/600-plane rebuild difference (L1 0.035-0.34) is reported separately from the algebraic identity (exact to 3e-15 on
+the native 600 grid: rho 5.4e-4 = a1E 5.2e-2 + prior 5.5e-2 + dp 4.7e-3, a1E+prior 4.7e-3).
+Convention checks passed: solver phi vs the DFT 1-D potential label rms 0.042-0.065 eV (aligned); plane mean of the
+reconstructed 3-D DFT total potential (production Poisson operator on net + RHOB + RHOION) vs the label: 0.016-0.028 eV
+after removing a straight line (the dipole-correction ramp) on charged frames, 0.10-0.11 eV on neutral frames.
+Candidates vs DFT RHOB on the DFT grid (medians, 3 charged / 3 neutral / 3 responses; L1 total, lat = lateral L1, pa =
+plane-average L1, norm = ||M||/||DFT||, phi = bound-potential rms error eV):
+   A  DFT total field, DFT cavity, response recomputed:  c L1 1.16 lat 1.35 pa 0.37 (pa corr 0.86) norm 1.01 phi 0.127 | n L1 1.90 pa 2.15 | resp L1 0.88 lat 1.16 pa 0.28
+   B  approx. field (screened vacuum), response recomputed: c L1 1.30 lat 1.28 pa 1.32 norm 0.93 phi 0.40 | n L1 2.47 pa 6.17 | resp L1 2.35 lat 2.68 pa 1.83
+   C  field B, response frozen at the screened vacuum field:  c L1 4.88 lat 5.76 pa 5.01 norm 4.70 phi 2.10 | n L1 5.87 | resp L1 9.41 lat 13.8
+   D  field A, model cavity:                                 c L1 0.96 lat 1.13 pa 0.29 norm 0.74 phi 0.133 | n L1 1.69 pa 1.46 | resp L1 0.65 lat 0.87 pa 0.20
+   A_frozen (field A, frozen response):                      c L1 7.23 norm 8.3
+   P_noDp / P  production construction without / with dp:  c L1 4.49 / 4.26, lat 4.93 / 4.93, pa 5.06 / 0.245, norm 4.6 / 4.1
+   DFT round trip through the model grid:                   c L1 0.069 lat 0.084 pa 0.009
+Reading, on this grid: A has the right magnitude (norm 1.01) and a correlated plane average (0.86) but L1 > 1: the
+constitutive relation evaluated at the reconstructed DFT field does NOT reproduce RHOB here. The frozen response is a
+factor 4-5 too large everywhere it appears (C vs B, A_frozen vs A, P_noDp): the production lateral construction is 5x too
+large for that reason, which is the identified cause of the alpha = 1 catastrophe of the polarization candidate. D ~ A
+(cavity input is not what separates A from RHOB). Decision table: "A does not match -> fix definition / implementation /
+discretisation first". The 2026-09-10 audit reproduced RHOB to 0.18 % (plane average) with the SAME relation on the DFT
+NATIVE grid from the raw PHI / CHGCAR / RHOB files, so the model-grid reconstruction (0.15 A grid, resampled thin layers,
+Poisson-rebuilt field) is the first suspect -> abcd_native.py (job 3484908) repeats A/B/C/D on the native grid, no
+resampling of any DFT quantity, D with the model density upsampled.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
