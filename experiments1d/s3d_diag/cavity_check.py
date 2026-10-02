@@ -185,6 +185,42 @@ for k in PAIRS:
                 profs[sid][nm] = (rbd, rid)
                 fr["mix"][nm] = dict(b=m1d(rbd, rb_d, lz), i=m1d(rid, ri_d, lz), t_phi=m1d(rbd + rid, rb_d + ri_d, lz)["phi_rms_err"],
                                      newton_exit=str(out.get("solver_exit", "")).split("'newton_exit': ")[-1][:8])
+        # ---- polarization-divergence consistency (lateral_polarization.py check failed): rebuild the solver's own rho_b
+        # from the closure ingredients, term by term, and along the 3-D route; everything on the 300-plane model grid
+        with torch.no_grad():
+            import math
+            from mace.modules.pb1d_closure import EDEPS, response_a3
+            sigma_b = float(params["R_B"]) if float(params["R_B"]) > 0.0 else float(params["A_K"])
+            w_b3 = tp._normalized_gaussian_kernel_g(grid, sigma_b)
+            a3z = response_a3(sd_ml.new_zeros(1), sd_ml.new_ones(1), params, tp)[0] * sd_ml; eps3 = 1.0 + EDEPS * a3z
+            ex, ey, ez, emag = grid.grad_from_recip(-torch.conj(w_b3) * grid.fft(cv))
+            a3 = response_a3(emag / eps3, sd_ml, params, tp); A1 = a3.mean((0, 1)); ez_s = ez / eps3
+            prior300 = (a3 * ez_s).mean((0, 1)) - A1 * ez_s.mean((0, 1))
+            nzm = cv.shape[2]
+            kz = 2.0 * math.pi * torch.fft.fftfreq(nzm, d=lz / nzm, device=dev, dtype=torch.float64); wb1 = torch.exp(-0.5 * (sigma_b * kz) ** 2)
+            dzs = lambda x: torch.fft.ifft(1j * kz * wb1 * torch.fft.fft(x)).real
+            phi600 = res["phi_z"].detach().double(); E600 = -(solver._core @ phi600)        # the solver's E_z = -(D WB phi)
+            ez_1d = torch.fft.ifft(-1j * kz * wb1 * torch.fft.fft(phi600[::f])).real
+            rho_sol = res["rho_bound_z"].detach().double()
+            B_mat = solver.bound_matrix(kw["a1"]); nb_phi = B_mat @ phi600; nb_off = solver.bound_offset(kw["p_off"])
+            rho_phi_part = -(nb_phi / V); rho_off_part = -(nb_off / V)
+            dp600 = res["delta_p"].detach().double(); prior600 = kw["p_off"] - dp600
+            r_noDp = dzs(A1 * ez_1d + prior300); r_Dp = dzs(A1 * ez_1d + prior300 + dp600[::f])
+            Ez3 = ez_s - ez_s.mean((0, 1))[None, None, :] + ez_1d[None, None, :]
+            g3 = grid.ifft_real(torch.conj(w_b3) * grid.div_real_vector(a3 * ex / eps3, a3 * ey / eps3, a3 * Ez3)); gm = g3.mean((0, 1))
+            cor = lambda a, b: float((a * b).sum() / torch.sqrt((a * a).sum() * (b * b).sum()))
+            L1r = lambda a, b: float((a - b).abs().sum() / b.abs().sum())
+            rs = rho_sol[::f]
+            fr["pol_check"] = dict(prior_repro_maxdiff=float((prior300 - clo_ml["prior"]).abs().max()), a1_repro=float((A1 - clo_ml["A_scr"]).abs().max()),
+                                   E_L1_vs_solver=L1r(ez_1d, E600[::f]), rho_split_repro=float((rho_phi_part + rho_off_part - rho_sol).abs().max()),
+                                   rms_rho_phi_part=float(rho_phi_part.pow(2).mean().sqrt()), rms_rho_off_part=float(rho_off_part.pow(2).mean().sqrt()), rms_rho=float(rho_sol.pow(2).mean().sqrt()),
+                                   rms_dz_prior=float(dzs(prior300).pow(2).mean().sqrt()), rms_dz_dp=float(dzs(dp600[::f]).pow(2).mean().sqrt()), rms_dz_a1E=float(dzs(A1 * ez_1d).pow(2).mean().sqrt()),
+                                   r_noDp=dict(corr=cor(r_noDp, rs), L1=L1r(r_noDp, rs)), r_Dp=dict(corr=cor(r_Dp, rs), L1=L1r(r_Dp, rs)), g3_mean=dict(corr=cor(gm, rs), L1=L1r(gm, rs)),
+                                   g3_vs_r_noDp=dict(corr=cor(gm, r_noDp), L1=L1r(gm, r_noDp)))
+            pc = fr["pol_check"]
+            print(f"[{time.time() - T0:5.0f}s] sid {sid} pol-check: prior repro {pc['prior_repro_maxdiff']:.1e} a1 repro {pc['a1_repro']:.1e} | E_z 1-D vs solver L1 {pc['E_L1_vs_solver']:.3f} | rho split repro {pc['rho_split_repro']:.1e}; "
+                  f"rms rho {pc['rms_rho']:.2e} = phi-part {pc['rms_rho_phi_part']:.2e} + offset-part {pc['rms_rho_off_part']:.2e}; dz-terms a1E {pc['rms_dz_a1E']:.2e} prior {pc['rms_dz_prior']:.2e} dp {pc['rms_dz_dp']:.2e} | "
+                  f"1-D rebuild noDp corr {pc['r_noDp']['corr']:+.3f} L1 {pc['r_noDp']['L1']:.3f}; with Dp corr {pc['r_Dp']['corr']:+.3f} L1 {pc['r_Dp']['L1']:.3f}; 3-D route <g> corr {pc['g3_mean']['corr']:+.3f} L1 {pc['g3_mean']['L1']:.3f}; <g> vs 1-D noDp corr {pc['g3_vs_r_noDp']['corr']:+.3f} L1 {pc['g3_vs_r_noDp']['L1']:.3f}", flush=True)
         fr["check"] = chk
         rec["frames"][str(sid)] = fr
         c = fr["cavity"]

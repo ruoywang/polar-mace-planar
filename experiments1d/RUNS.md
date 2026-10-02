@@ -4690,6 +4690,45 @@ Against the pre-set screening line (>= 15 % on val lateral density AND lateral r
 degradation, majority same direction): borderline on L1 (10 % / 13 %), passes on the squared error of the response
 (18 %), neutral potential +0.7 % worse. Not a decision until the construction passes its own consistency check.
 
+## 2026-10-02 cavity check and closure decomposition (cavity_check.py, CPU job 3484246, 6 frames, 98 s, rc 0)
+
+(1) Closure structure. The solver's rho_b = w_b d/dz (a1 E_z + prior + delta_p) rebuilt term by term (exact: 1-D rebuild
+with delta_p vs solver corr 0.991-1.000, L1 0.035-0.34 from the 300/600-grid resampling). rms per frame (e/A^3):
+   sid    a1*E term   prior term   delta_p term   net rho_b
+   1      5.2e-2      5.5e-2       4.7e-3         5.4e-4
+   601    6.0e-2      6.0e-2       4.0e-3         1.9e-4
+   52     4.2e-2      4.4e-2       4.7e-3         6.1e-4
+   652    5.1e-2      5.0e-2       3.7e-3         2.2e-4
+   152    4.5e-2      5.0e-2       6.9e-3         6.3e-4
+   752    5.3e-2      5.3e-2       4.8e-3         3.3e-4
+The mean-field term and the prior cancel 10:1; the learned delta_p cancels the remaining residual another 10:1. The net
+bound charge is 1 % of either physical term and ~1/10 of the learned correction: the physical closure leaves a residual
+~10x the true bound charge, which the head has learned to remove for the model's own cavity.
+(2) The polarization-divergence construction of lateral_polarization.py IS consistent with the solver: <g>_xy vs the
+1-D rebuild WITHOUT delta_p: corr 1.000, L1 0.002-0.011 on every frame. Its "failed" consistency check compared against
+rho_b WITH delta_p, and delta_p dominates the net; the expectation was wrong, not the construction. Consequently the
+candidate's lateral field is the closure's physical polarization divergence and carries the same ~10x residual
+(alpha = 1 catastrophic, L1 5.1); the alpha = 0.044 gains are a small useful component of a wrong field. Not usable.
+(3) Cavity geometry from the ML vs the DFT electron density (6 frames, all alike): s_diel plane-mean L1 0.014-0.016,
+s_ion 0.003-0.008, dielectric-edge position median -0.15 A (one model grid step; q25 -0.45, q75 0.00), 0.3-0.4 % of
+points flip |ds| > 0.5; edge-region (0.005 < n_e < 0.05) density rmse 0.007 at mean 0.019 e/A^3 (37 % locally).
+Closure outputs: A_scr changes 1.0-1.2 %, S_ion 0.3-0.8 %, w_env 34-45 %, PRIOR 49-65 % (the lateral covariance picks up the
+lateral cavity differences).
+(4) One-at-a-time mixed solves (delta_p frozen), bound L1 vs DFT plane average, sid 1 / 601 / 52 / 652 / 152 / 752:
+   production        0.256 / 0.784 / 0.256 / 0.562 / 0.257 / 0.387
+   a1 <- DFT         10.7 / 53.9 / 7.1 / 32.2 / 9.2 / 19.7
+   prior <- DFT      22.3 / 114 / 16.2 / 74.2 / 22.4 / 48.5
+   s_ion <- DFT      0.280 / 0.784 / 0.284 / 0.562 / 0.265 / 0.387
+   all three (I2)    0.723 / 1.747 / 0.911 / 2.208 / 0.857 / 1.057
+   all three, dp off 0.681 / 1.705 / 0.820 / 2.454 / 0.915 / 1.268
+Replacing one side of the cancellation alone explodes the result; replacing both consistently gives the 3x I2 degradation.
+CONCLUSION of the round (reviewer plan 2026-10-02): the 1-D error source is the closure approximation itself (a 100:1
+cancellation structure whose physical residual is ~10x the signal, absorbed by the learned delta_p at the model's own
+cavity), not the solute input, not the cavity implementation (grid-step geometry differences), not the solver (converged
+everywhere). The polarization-divergence lateral candidate inherits the same residual and does not pass the screening
+line. No modification is ready for the 10-epoch A/B; the next design step is a reformulation of the 1-D closure whose net
+bound charge is not a difference of large terms (physics decision for the user).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
