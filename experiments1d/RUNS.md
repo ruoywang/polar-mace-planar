@@ -4550,6 +4550,30 @@ Share of the bound lateral target where the model envelope < 1e-3, 27 charged / 
 0.004-0.020, L1 0.128-0.200 / 0.074-0.138 (< 1e-2: L1 0.170-0.258 / 0.102-0.194).
 Plane-average (1-D) bound error, untouched by every lateral variant: val charged 0.282, neutral 0.916.
 
+## 2026-10-02 rigid-shift test: is the 3-D solvent-charge error a displacement of a sharp interface peak? (reviewer hypothesis 2026-10-01) -> NO
+
+Slice scan (experiments1d/pair122_vsolvfix/shift_scan_slices.py, 62 frames + 2 pair differences, xz plane through Ni, 500 x 168,
+Fourier phase shift = trigonometric interpolation, no smoothing, shifts along a and z, L2 objective) and full-grid 3-D scan
+(experiments1d/s3d_diag/shift_scan_3d.py, job 3484004 on 6 pairs 28/60/94/128/177/122, 500 x 168 x 168, shifts along x, y, z;
+131 s, rc 0; results shift_scan_3d.json). ML field = the production construction rebuilt on the DFT grid.
+3-D, medians over 6 pairs (bound channel; L1 / L2 = lateral-free ratios on the full field):
+   field                 |ML|/|DFT|  corr   L1 before -> after best 3-D shift   L2 before -> after   best |d| (A), dz
+   charged bound           0.818     0.877    0.610 -> 0.615                  0.234 -> 0.220       0.046, -0.036
+   neutral bound           0.910     0.851    0.809 -> 0.801                  0.280 -> 0.262       0.050, -0.047
+   response bound          0.528     0.410    0.862 -> 0.853                  0.843 -> 0.833       0.254 (inconsistent)
+   response bound LATERAL  0.267     0.081    0.997 -> 0.995                  1.022 -> 1.015       0.253 (inconsistent)
+   charged ion             0.973     0.956    0.262 -> 0.255                  0.086 -> 0.083       0.100
+   charged ion LATERAL     0.713     0.757    0.773 -> 0.732                  0.431 -> 0.330       0.173, dz -0.17 (all 6 negative)
+Best bound shifts are <= 0.06 A in every direction and consistent across pairs: no grid-origin / interpolation / convention
+offset; the shift buys < 1 % in L1. The norm ratio (shift-invariant) is 0.80-0.85 for charged bound and 0.27 for the lateral
+charging response: the error is missing amplitude / excess width, not displacement (consistent with the per-column half-charge
+thickness 0.27 A DFT vs 1.17 A ML measured on the 122-722 slice). Error sits in the DFT-positive region (charged bound L1 0.79
+vs 0.44 in the negative region), unchanged by the shift. Slice scan over 62 frames agrees (NiN44 charged: L1 0.567 -> 0.564,
+best dz -0.002 A [-0.07, +0.05]). Exception: the ionic LATERAL structure sits about 0.17 A too far out (dz -0.08 to -0.26 A,
+same sign on all 6 pairs; L2 0.43 -> 0.33 after the shift), still with a norm ratio 0.71.
+Reviewer's table: "after alignment, amplitude / width differences remain -> fix the response amplitude or the spatial representation".
+Note: the error-row colour scale of the 3-D page is its own 99.9th percentile (narrower than the DFT/ML rows), as the reviewer said.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
