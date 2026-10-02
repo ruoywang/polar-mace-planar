@@ -4574,6 +4574,27 @@ same sign on all 6 pairs; L2 0.43 -> 0.33 after the shift), still with a norm ra
 Reviewer's table: "after alignment, amplitude / width differences remain -> fix the response amplitude or the spatial representation".
 Note: the error-row colour scale of the 3-D page is its own 99.9th percentile (narrower than the DFT/ML rows), as the reviewer said.
 
+## 2026-10-02 where the ML bound layer broadens (broadening_locate.py, job 3484162, pairs 28 / 94 / 122, 68 s, rc 0)
+
+Per-column half-charge thickness of the POSITIVE bound charge inside the interface window (DFT grid, dz 0.09 A; medians over
+columns; all three charged frames agree to one grid step):
+   DFT 0.27 | DFT round trip through the model grid 0.27-0.36 | 1-D part B(z) broadcast 0.99-1.26 | envelope env_b 0.45 |
+   GTO field m_b 0.90 | raw env*m 0.36-0.45 | projected residual d_b 0.27 | ML = B + d 0.54
+   (FWHM of the main positive peak: DFT 0.36-0.45, env 0.72, raw 0.63, d 0.45, ML 0.54, B(z) 0.72-1.53.)
+Neutral frames: DFT 0.27, B(z) 0.36-0.54, d 0.27, ML 0.27-0.36 (the neutral 1-D profile is itself thin, so the full field stays thin).
+-> The residual is as thin as DFT where it acts; the model grid carries the DFT layer (+<= 1 step); the envelope (0.45) and
+   the GTO field (0.90, smooth modulation) do not set the final thickness. The broadening of the full charged field (0.54 vs
+   0.27) is the uncancelled plane-broadcast 1-D part (0.99-1.26): the residual does not carve enough of it into the
+   corrugated layer. This is an amplitude/pattern statement about d relative to B, not a width problem of any one step.
+   The 1.17 A quoted earlier was the 122-722 DIFFERENCE slice; the single-frame ML thickness is 0.54 A.
+Plane-averaged FWHM: sid 28 DFT 1.80 / ML 1.62; sid 94 DFT 2.34 / ML 1.08; sid 122 DFT 0.90 / ML 0.81 (1-D mismatch on sid 94).
+Signed region integrals (3-D, bound, int rho over the DFT>0 region / DFT<0 region, ML divided by DFT): charged 0.75-0.77 /
+0.75-0.77 (-0.37 to -0.41 e in each), neutral 0.64-0.66, charged-minus-neutral response 0.63-0.68 (-0.37 to -0.45 e of
++1.0 to +1.4 e). Both regions carry 23-37 % less magnitude; the L1 of 0.6-1.0 in the positive region is mostly pattern.
+Ionic lateral position vs the ion-accessible edge (first z with env_i >= 0.5, per column): peak - edge DFT +0.18, ML +0.09 A;
+ML - DFT per column +0.00 / +0.09 / +0.09 A. Quantised at 0.09 A and inconsistent in sign with the shift test (ML needs
+dz -0.08 to -0.26 A): this metric cannot resolve the 0.17 A question; both structures sit within 0.2 A of the ion edge.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
