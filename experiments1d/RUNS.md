@@ -4595,6 +4595,30 @@ Ionic lateral position vs the ion-accessible edge (first z with env_i >= 0.5, pe
 ML - DFT per column +0.00 / +0.09 / +0.09 A. Quantised at 0.09 A and inconsistent in sign with the shift test (ML needs
 dz -0.08 to -0.26 A): this metric cannot resolve the 0.17 A question; both structures sit within 0.2 A of the ion edge.
 
+## 2026-10-02 cross-substitution of the 1-D and lateral parts of the bound charge (cross_sub.py, CPU job 3484180, 20 val pairs + test 122, 457 s, rc 0)
+
+Fields on the DFT grid: V0 = ML; A = <DFT>_xy + lat(ML); B = <ML>_xy + lat(DFT). Medians over the 20 validation pairs
+(L1 / L2 relative to DFT; phi = rms error of the periodic potential of the bound charge, eV):
+   field                    charged L1 / L2 / phi       neutral L1 / L2 / phi       response L1 / L2 / phi
+   V0 current               0.596 / 0.237 / 0.112       0.805 / 0.287 / 0.074       0.848 / 0.836 / 0.123
+   A  DFT 1-D + ML lateral  0.527 / 0.231 / 0.075       0.781 / 0.280 / 0.048       0.797 / 0.816 / 0.074
+   B  ML 1-D + DFT lateral  0.184 / 0.007 / 0.087       0.194 / 0.005 / 0.056       0.222 / 0.019 / 0.096
+-> Density error is almost entirely lateral (perfect lateral leaves L1 0.18-0.22, L2 <= 0.02); fixing the 1-D part alone buys
+   0.02-0.07 in L1. The POTENTIAL error splits the other way: the 1-D error costs more (phi 0.112 -> 0.075 when 1-D is fixed,
+   -> 0.087 when lateral is fixed); for the response 0.123 -> 0.074 (1-D fixed) vs 0.096 (lateral fixed). Plane-average error
+   of the response eps_pa 0.238 is untouchable by any lateral head.
+Negative-correction coverage (points in the interface window with |DFT| < 1 % of its max and B(z) > 10 % of its max, i.e.
+where the broadcast 1-D part must be cancelled): charged frames need -0.55 e, the residual supplies -0.19 e (ratio 0.33
+[0.28, 0.47]); 47 % [38, 57] of these points have envelope < 1e-3, where the residual supplies 0.6 % of the need; where the
+envelope >= 1e-2 it supplies 69 % [59, 84]. Neutral frames: ratio 0.89, only 10 % of the points outside the envelope. Where DFT
+HAS the layer (D > 10 % of max), the residual supplies 65 % [58, 70] of the needed addition (D - B), correlation 0.83; neutral 93 %.
+Thickness on ONE common column set (columns with positive DFT charge > 1 % of the strongest; 27.5k of 28.2k columns): DFT 0.27,
+residual 0.27 (positive charge present in 98.5 % of these columns, charged; 87 % neutral), ML 0.45-0.54 (charged) / 0.27-0.36
+(neutral), B(z) 0.99 / 0.45 A.
+Reading: the lateral residual cannot cancel the broadcast 1-D part where the envelope is ~0 (about half of the cancellation
+points on charged frames) and under-supplies it (69 %) even inside the envelope; it also under-supplies the layer addition
+(65 %). Both are needed for the spatial rearrangement; the envelope is a real limit for the cancellation half.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
