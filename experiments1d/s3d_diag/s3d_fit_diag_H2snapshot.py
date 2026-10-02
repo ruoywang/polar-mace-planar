@@ -231,29 +231,7 @@ def physics(M, D, lat):
                 eself_ml=0.5 * float((Mt * pM).sum()) * dV, eself_dft=0.5 * float((Dt * pD).sum()) * dV)
 
 
-def rearrangement(M, D, Bd, E, dV):
-    """Spatial-rearrangement metrics of a bound field M against DFT D (both (nz,ny,nx)); Bd = broadcast 1-D part,
-    E = ORIGINAL envelope on the DFT grid. Window = planes where <|D|>_xy > 1 % of its max. 'nolayer' points (|D| < 1 % of
-    max |D|, B > 10 % of max B, in the window) need -B; 'layer' points (D > 10 % of max D) need D - B. Charge outside the
-    window: int |M| over the other planes / int |D| (DFT reference given too)."""
-    pz = D.abs().mean(dim=(1, 2)); win = pz > 0.01 * pz.max(); W = win[:, None, None]
-    have = M - Bd
-    nol = (D.abs() < 0.01 * D.abs().max()) & (Bd > 0.1 * Bd.max()) & W
-    lay = (D > 0.1 * D.max()) & W
-    need = -Bd
-    def ratio(mask):
-        return float(have[mask].sum() / need[mask].sum()) if bool(mask.any()) else None
-    needp, havep = (D - Bd)[lay], have[lay]
-    cc = torch.corrcoef(torch.stack([needp, havep]))[0, 1] if int(lay.sum()) > 2 else torch.tensor(float("nan"))
-    out_pl = ~win
-    return dict(cancel_ratio=ratio(nol), cancel_ratio_env_lt_1e3=ratio(nol & (E < 1e-3)), cancel_ratio_env_ge_1e2=ratio(nol & (E >= 1e-2)),
-                need_e_lt_1e3=float(need[nol & (E < 1e-3)].sum()) * dV, need_e=float(need[nol].sum()) * dV, have_e=float(have[nol].sum()) * dV,
-                layer_ratio=float(havep.sum() / needp.sum()) if bool(lay.any()) else None, layer_corr=float(cc),
-                outside_abs_ml=float(M[out_pl].abs().sum() / D.abs().sum()), outside_abs_dft=float(D[out_pl].abs().sum() / D.abs().sum()),
-                window_A=[float(win.nonzero().min()), float(win.nonzero().max())])
-
-
-def evaluate(sid, dfields, tag, extra_bg=None, rearr=False):
+def evaluate(sid, dfields, tag, extra_bg=None):
     """dfields: {'b': grid, 'i': grid}; returns and stores per-channel metrics on the full DFT grid + held-out J."""
     ctx, L = CTX[sid], LABEL[sid]
     lab, lat = load_label(sid)
@@ -270,12 +248,6 @@ def evaluate(sid, dfields, tag, extra_bg=None, rearr=False):
     Mt, Dt = fields["b"][0] + fields["i"][0], fields["b"][1] + fields["i"][1]
     out["t"] = metrics(Mt, Dt, dV)
     out["t"].update(physics(Mt, Dt, lat))
-    if rearr:
-        nz = L["shape"][0]
-        Bd = _interp1_periodic(ctx["B"]["b"], torch.arange(nz, device=dev, dtype=torch.float64) / nz)[:, None, None].expand(L["shape"]).contiguous()
-        E = on_dft_grid(torch.zeros(8, device=dev), ctx.get("env0", ctx["env"])["b"], L["shape"])
-        out["b"]["rearr"] = rearrangement(fields["b"][0], fields["b"][1], Bd, E, dV)
-        out["b"]["phi_b"] = physics(fields["b"][0], fields["b"][1], lat)          # potential of the bound channel alone
     RESULTS["frames"].setdefault(str(sid), {})[tag] = out
     return fields
 
@@ -595,58 +567,6 @@ if "pair" in STAGES and DV1:
                   f"{RESULTS['frames'][str(k + 600)][tag]['b']['eps_lat']:.3f} response {RESULTS['pairs'][str(k)][tag]['b']['eps_lat']:.3f}", flush=True)
         save()
 
-
-# ------------------------------------------------------------------ candidate lateral representations (bound channel)
-def bound_bg_lateral(sid):
-    """B_b(z) * (alpha - 1), alpha = env_b / <env_b>_xy (planes with <env> < 1e-6 keep alpha = 1 and are reported)."""
-    ctx = CTX[sid]; env = ctx["env0"]["b"] if "env0" in ctx else ctx["env"]["b"]; nx, ny, nz = env.shape
-    Bm = _interp1_periodic(ctx["B"]["b"], torch.arange(nz, device=dev, dtype=torch.float64) / nz)
-    em = env.mean(dim=(0, 1)); bad = (em < 1e-6) & (Bm.abs() > 1e-9)
-    alpha = torch.where(em[None, None, :] > 1e-6, env / torch.clamp(em, min=1e-300)[None, None, :], torch.ones_like(env))
-    return Bm[None, None, :] * (alpha - 1.0), dict(n_bad_planes=int(bad.sum()), max_absB_bad=float(Bm[bad].abs().max()) if bool(bad.any()) else 0.0)
-
-
-def widened_env(sid, floor):
-    """env' = max(env, floor) on the planes where |B_b(z)| > 10 % of its maximum, env elsewhere."""
-    ctx = CTX[sid]; env = ctx["env0"]["b"] if "env0" in ctx else ctx["env"]["b"]; nz = env.shape[2]
-    Bm = _interp1_periodic(ctx["B"]["b"], torch.arange(nz, device=dev, dtype=torch.float64) / nz)
-    pl = (Bm.abs() > 0.1 * Bm.abs().max())[None, None, :]
-    return torch.where(pl, torch.clamp(env, min=floor), env), int(pl.sum())
-
-
-if "cand" in STAGES:
-    rr = RIDGES[0]
-    CANDS = [("C0", None, None), ("C1", "bg", None), ("C2a", None, 0.05), ("C2b", None, 0.2), ("C3", "bg", 0.05)]
-    for k in FIT_PAIRS:
-        for sid in (k, k + 600):
-            ctx = CTX[sid]; shp = ctx["c0"][:, 0].shape; base = d0(sid)
-            ctx["env0"] = {"b": ctx["env"]["b"], "i": ctx["env"]["i"]}
-            for name, bg, floor in CANDS:
-                extra_bg = None; extra_pts = None
-                if floor is not None:
-                    envp, npl = widened_env(sid, floor); ctx["env"] = {"b": envp, "i": ctx["env0"]["i"]}
-                if bg == "bg":
-                    Lb, info = bound_bg_lateral(sid); extra_bg = {"b": Lb}; extra_pts = _interp3_periodic(Lb, LABEL[sid]["fr_f"])
-                    RESULTS["frames"].setdefault(str(sid), {})[f"{name}_bg_info"] = info
-                with torch.no_grad():
-                    dcur = dfield(ctx, "b", ctx["c0"][:, 0])
-                FIELDS[(sid, f"{name}c0")] = evaluate(sid, {"b": dcur, "i": base["i"]}, f"{name}c0", extra_bg=extra_bg, rearr=True)
-                db, rec = fit_free(sid, "b", rr, extra=extra_pts, label=f"{name} free bound sid {sid} ridge {rr:g}")
-                FIELDS[(sid, f"{name}@{rr:g}")] = evaluate(sid, {"b": db, "i": base["i"]}, f"{name}@{rr:g}", extra_bg=extra_bg, rearr=True)
-                o = RESULTS["frames"][str(sid)][f"{name}@{rr:g}"]; r_ = o["b"]["rearr"]
-                print(f"[{elapsed()}] CAND {name} sid {sid}: bound lat L1 {o['b']['eps_lat']:.3f} (3d {o['b']['eps_3d']:.3f}, Jhold {o['b']['J_hold']:.3f}) | bound phi rms {o['b']['phi_b']['phi_rms_err']:.4f}"
-                      f" | cancel {r_['cancel_ratio']:.3f} (env<1e-3 {r_['cancel_ratio_env_lt_1e3']}, env>=1e-2 {r_['cancel_ratio_env_ge_1e2']}) layer add {r_['layer_ratio']:.3f} corr {r_['layer_corr']:.3f}"
-                      f" | outside-window |charge| ML {r_['outside_abs_ml']:.4f} (DFT {r_['outside_abs_dft']:.4f}) | istop {rec['istop']} itn {rec['itn']} |x| {rec['xnorm']:.1f}", flush=True)
-                ctx["env"] = ctx["env0"]
-            save()
-        for name, _, _ in CANDS:
-            for suf in ("c0", f"@{rr:g}"):
-                tag = f"{name}{suf}"
-                response(k, tag, FIELDS[(k, tag)], FIELDS[(k + 600, tag)])
-                FIELDS.pop((k, tag)); FIELDS.pop((k + 600, tag))
-            o = RESULTS["pairs"][str(k)][f"{name}@{rr:g}"]
-            print(f"[{elapsed()}] CAND {name} pair {k} response: bound lat L1 {o['b']['eps_lat']:.3f} lat sq {o['b']['lat_sq']:.3f} | total phi rms {o['t']['phi_rms_err']:.4f}", flush=True)
-        save(); torch.cuda.empty_cache()
 
 # ------------------------------------------------------------------ V4: ionic background candidate (charged frames)
 def ion_bg_lateral(sid):
