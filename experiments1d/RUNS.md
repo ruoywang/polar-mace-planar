@@ -4988,6 +4988,55 @@ Model-side priority unchanged: solvent-facing interface electron density and the
 No training, no production-code change. Files: experiments1d/s3d_diag/fullclosure_cpu_p1_tight.json, sc_gpu_plain_m40b02.json;
 fields exp_s3d_diag/fc_fields_p1_tight/ (float32 npy, for continuation).
 
+## 2026-10-03 three-arm frozen comparison of the 3-D solvent readout (s3d_head_arms.py @b4b5d26..91d8d6d; GPU jobs 3485925 arm A 11 min, 3485964 arms B+C 20 min; rc 0) -- charge-state inputs fix the response direction, the polarization representation fixes the forbidden zone and the response correlation but, as fitted, not the plane average
+
+Reviewer plan (2026-10-03): modify Solvent3DChargeHead and the 3-D field construction, not local_electron_energy; test "network
+predicts polarization -> bound charge by divergence inside the cavity"; no old 1-D background added back; frozen electron
+model, cache inputs, fit only the solvent readout: (A) current representation / current inputs = same-budget baseline,
+(B) current representation + charge-state input, (C) polarization representation + charge-state input; train-set fit, the
+fixed 20 validation pairs as acceptance; DFT-cavity substitution on a few frames; look at forbidden-zone spurious charge,
+charged and neutral single states, lateral charging response (corr and L1), total solvent potential.
+Set-up: electron model frozen, one forward per frame captured (node features, GTO coefficients, 1-D solve, cavities, model
+per-atom charges); readouts linear and equivariant (e3nn Linear); LSQR on a LinearOperator (forward = grid evaluation,
+transpose = autograd), Jacobi column scaling, ridge 1e-2, 250 iterations; 16 training pairs by stride over the 54
+(1 15 25 40 54 68 85 97 110 120 133 147 162 173 188 200), 3e5 fit points per frame; validation = the 20 fixed pairs; metrics
+on the full DFT grid.  Charge-state scalars per atom: total charge Q, the production 1-D potential at the atom phi_1D(z_a),
+the model's per-atom charge q_a (the model exposes "charges"); standardised over the training atoms; features [f, s1 f, s2 f,
+s3 f].  Arm A = production head refit (2304 weights). Arm B = production head (refit) + zero-initialised augmented head
+(9216). Arm C = psi head (4608) on the augmented features, rho_b = -w_b * div(S_diel grad psi) with the production cavity and
+the closure's w_b (sigma_b 0.125 A); P = grad psi keeps the field equivariant with the existing scalar basis and matches the
+VASPsol relation P = -chi grad phi (a narrower candidate than the reviewer's general P_theta); no 1-D background; ions =
+production ion channel. Objectives: A/B lateral target (the production design), C the full DFT bound charge at the points.
+Forbidden zone = DFT-density cavity (package route) smoothed with sigma 0.25 A, below 1e-3 (and 1e-4), on the DFT grid.
+Fits: A bound converged (174 it, residual 1.000 -> 0.993); B bound 250 it (limit) 0.954; C bound 250 it (limit) 0.505 from zero.
+VALIDATION (20 pairs, medians; bound channel unless noted):
+   arm  c eps3d  c lat  c pa   zone1e-3  n eps3d  n lat | resp lat  resp corr  resp eps3d | phi_t c  phi_t n  phi_t resp | phi_b c  phi_b resp
+   V0   0.596    0.630  0.281  0.050     0.805    0.696 | 0.997     +0.069     0.848      | 0.079    0.076    0.074      | 0.112    0.123
+   A    0.597    0.632  0.281  0.050     0.795    0.685 | 0.999     +0.063     0.849      | 0.078    0.077    0.074      | 0.112    0.123
+   B    0.589    0.622  0.281  0.050     0.745    0.639 | 0.888     +0.463     0.757      | 0.078    0.089    0.091      | 0.111    0.132
+   C    0.781    0.652  0.620  0.000     0.778    0.716 | 0.806     +0.627     0.946      | 0.773    0.170    0.908      | 0.869    0.979
+   ion channel: c 0.255 / 0.253 / 0.252 / 0.255 ; response 0.199 / 0.196 / 0.196 / 0.199.
+   Training-set medians (overfit check): B response corr +0.469 (val +0.463), C +0.639 (val +0.627); no train/val gap.
+   DFT-cavity substituted (no refit, pairs 28/30/43): every arm degrades 3x (V0 0.61 -> 1.78, B 0.60 -> 2.05, C 0.79 -> 1.74):
+   the heads are tuned to the model cavity; the new representation is not "effective only with the DFT cavity".
+Reading:
+ 1. A = V0 within 0.01 everywhere: the production head sits at its own optimum; a same-budget refit changes nothing.
+ 2. B (inputs only): response direction appears (lateral corr 0.07 -> 0.46, 20/20 pairs; response eps3d -11 %, response
+    lateral L1 -11 %), neutral single state -7 %, charged single state -1 %, forbidden zone unchanged (it is the 1-D
+    background: identical under the DFT cavity); but the response potential worsens 0.074 -> 0.091 eV and the neutral total
+    potential 0.076 -> 0.089. Against the screening line (>= 15 % on validation lateral density AND response, no single-state
+    potential degradation): not passed.
+ 3. C (representation): forbidden-zone charge exactly 0 (V0 5.0 % of the bound-charge mass, the 1-D background), response
+    corr 0.63, response lateral L1 -19 %, neutral -3 %; but the plane average is wrong (0.62 vs 0.28), which makes the
+    charged single state 0.78 and the total potential 0.77 eV (10x). Cause: the point-wise objective weights the plane
+    average by its share of the density L2 (3 %) while the potential is 51-66 % plane average, and no 1-D background
+    supplies it -> the planar part was effectively unsupervised. Follow-up C2: plane-average rows added to the objective
+    (norm-balanced, KIT_PA_WEIGHT=1), 400 iterations (job 3486066).
+ 4. Not done: native-grid check of the polarization representation (the fitted psi can be evaluated on the native grid
+    with the saved parameters), force / gradient / step-time / memory of the new path, the 10-epoch A/B.
+No training, no production-code change. Files: experiments1d/s3d_diag/s3d_head_arms.py, job_arms_gpu.sh, arms_A/, arms_BC/
+(results.json, params_*.npy).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
