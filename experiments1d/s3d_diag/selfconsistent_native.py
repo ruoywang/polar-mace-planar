@@ -204,7 +204,8 @@ def make_F(gd, phi_sol, rho_i, s_d, w_b, V):
 def anderson(F, x0, Dt, m=12, beta=0.05, maxit=60, tol=1e-3, label="", P=None):
     """Anderson-accelerated fixed-point iteration x = F(x); with P the mixing / history use the preconditioned residual P (F(x) - x)
     while the stopping residual stays ||F(x) - x|| / ||F(x)||. Returns (last iterate g, history, status)."""
-    x = x0.clone(); X = []; Fs = []; hist = []; status = "maxit"; g = None
+    x = x0.clone(); hist = []; status = "maxit"; g = None
+    DX = []; DF = []; Gm = torch.zeros((0, 0), device=dev); x_prev = f_prev = None     # difference history + incremental Gram matrix
     for k in range(maxit):
         t = time.time(); g = F(x)
         if dev.type == "cuda": torch.cuda.synchronize()
@@ -218,16 +219,22 @@ def anderson(F, x0, Dt, m=12, beta=0.05, maxit=60, tol=1e-3, label="", P=None):
             status = "diverged"; break
         if res < tol:
             status = "converged"; break
-        X.append(x); Fs.append(f)
-        if len(X) > m + 1:
-            X.pop(0); Fs.pop(0)
-        if len(X) >= 2:
-            dX = torch.stack([(X[i + 1] - X[i]).reshape(-1) for i in range(len(X) - 1)])
-            dF = torch.stack([(Fs[i + 1] - Fs[i]).reshape(-1) for i in range(len(Fs) - 1)])
-            A = dF @ dF.T; b = dF @ f.reshape(-1)
-            A = A + 1e-12 * torch.trace(A) * torch.eye(A.shape[0], device=dev)
-            gam = torch.linalg.solve(A, b)
-            x = x + beta * f - ((dX.T + beta * dF.T) @ gam).reshape(x.shape); del dX, dF
+        if x_prev is not None:
+            dx = (x - x_prev).reshape(-1); df = (f - f_prev).reshape(-1)
+            row = torch.stack([torch.dot(df, d_) for d_ in DF] + [torch.dot(df, df)])
+            Gn = torch.empty((len(DF) + 1, len(DF) + 1), device=dev); Gn[:-1, :-1] = Gm; Gn[-1, :] = row; Gn[:, -1] = row; Gm = Gn
+            DX.append(dx); DF.append(df)
+            if len(DX) > m:
+                DX.pop(0); DF.pop(0); Gm = Gm[1:, 1:].clone()
+        x_prev = x; f_prev = f
+        if DX:
+            fv = f.reshape(-1); bvec = torch.stack([torch.dot(d_, fv) for d_ in DF])
+            A = Gm + 1e-12 * torch.trace(Gm) * torch.eye(Gm.shape[0], device=dev)
+            gam = torch.linalg.solve(A, bvec)
+            xn = (x + beta * f).reshape(-1).clone()
+            for i in range(len(DX)):
+                xn.add_(DX[i] + beta * DF[i], alpha=-float(gam[i]))
+            x = xn.reshape(x.shape)
         else:
             x = x + beta * f
     return g, hist, status

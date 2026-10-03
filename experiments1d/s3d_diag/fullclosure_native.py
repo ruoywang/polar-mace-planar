@@ -238,7 +238,8 @@ class FullClosure:
 def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label=""):
     nb = xb0.numel()
     x = torch.cat([xb0.reshape(-1), xi0.reshape(-1)]); shape = xb0.shape
-    X = []; Fs = []; hist = []; status = "maxit"; gb = gi = None; aux = {}
+    hist = []; status = "maxit"; gb = gi = None; aux = {}
+    DX = []; DF = []; Gm = torch.zeros((0, 0), device=dev); x_prev = f_prev = None     # difference history + incremental Gram matrix
     for k in range(maxit):
         t = time.time(); gb, gi, aux = G(x[:nb].reshape(shape), x[nb:].reshape(shape))
         if dev.type == "cuda": torch.cuda.synchronize()
@@ -254,14 +255,22 @@ def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label=""):
             status = "converged"; break
         if Pb is not None:
             f = torch.cat([(Pb.reshape(-1) * f[:nb]), f[nb:]])
-        X.append(x); Fs.append(f)
-        if len(X) > m + 1:
-            X.pop(0); Fs.pop(0)
-        if len(X) >= 2:
-            dX = torch.stack([X[i + 1] - X[i] for i in range(len(X) - 1)]); dF = torch.stack([Fs[i + 1] - Fs[i] for i in range(len(Fs) - 1)])
-            A = dF @ dF.T; b = dF @ f; A = A + 1e-12 * torch.trace(A) * torch.eye(A.shape[0], device=dev)
-            gam = torch.linalg.solve(A, b)
-            x = x + beta * f - ((dX.T + beta * dF.T) @ gam); del dX, dF
+        if x_prev is not None:
+            dx = x - x_prev; df = f - f_prev
+            row = torch.stack([torch.dot(df, d_) for d_ in DF] + [torch.dot(df, df)])
+            Gn = torch.empty((len(DF) + 1, len(DF) + 1), device=dev); Gn[:-1, :-1] = Gm; Gn[-1, :] = row; Gn[:, -1] = row; Gm = Gn
+            DX.append(dx); DF.append(df)
+            if len(DX) > m:
+                DX.pop(0); DF.pop(0); Gm = Gm[1:, 1:].clone()
+        x_prev = x; f_prev = f
+        if DX:
+            bvec = torch.stack([torch.dot(d_, f) for d_ in DF])
+            A = Gm + 1e-12 * torch.trace(Gm) * torch.eye(Gm.shape[0], device=dev)
+            gam = torch.linalg.solve(A, bvec)
+            xn = (x + beta * f).clone()
+            for i in range(len(DX)):
+                xn.add_(DX[i] + beta * DF[i], alpha=-float(gam[i]))
+            x = xn
         else:
             x = x + beta * f
     return gb, gi, hist, status, aux
