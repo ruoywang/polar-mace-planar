@@ -191,7 +191,8 @@ class Solvent3DChargeHead(torch.nn.Module):
     # instance attribute and were trained at 100
     OUT_SCALE = 100.0
 
-    def __init__(self, node_feats_irreps, sigmas, cueq_config=None):
+    def __init__(self, node_feats_irreps, sigmas, cueq_config=None,
+                 charge_state_input: bool = False, ion_gate: bool = True):
         super().__init__()
         from e3nn import o3
         from .wrapper_ops import Linear
@@ -214,9 +215,46 @@ class Solvent3DChargeHead(torch.nn.Module):
         )
         for p in self.linear.parameters():
             torch.nn.init.zeros_(p)
+        # charge-state inputs (reviewer plan 2026-10-03): per-atom scalars
+        # s = standardised (Q_total, phi_1D(z_a) of THIS solve, q_a model
+        # charge) multiply the node features (scalars keep the equivariance)
+        # and feed a second, zero-initialised linear readout:
+        #   c = L(f) + L_aug([s1 f, s2 f, s3 f]).
+        # Standardisation constants come from the training-set statistics of
+        # the baseline model (buffers, not trained). ion_gate=False removes the
+        # global net-charge multiplication of the ion channel (neutral frames
+        # can then carry a local ion rearrangement; the net ion charge is
+        # fixed by construction of the per-plane projection / repair).
+        self.charge_state_input = bool(charge_state_input)
+        self.ion_gate = bool(ion_gate)
+        self.n_scal = 3
+        self.register_buffer("scal_mean", torch.zeros(self.n_scal))
+        self.register_buffer("scal_std", torch.ones(self.n_scal))
+        if self.charge_state_input:
+            self.linear_aug = Linear(
+                o3.Irreps(node_feats_irreps) * self.n_scal, irreps_out,
+                cueq_config=cueq_config)
+            for p in self.linear_aug.parameters():
+                torch.nn.init.zeros_(p)
+        else:
+            self.linear_aug = None
 
-    def forward(self, node_feats: torch.Tensor, q_gate: torch.Tensor) -> torch.Tensor:
+    def set_scalar_standardisation(self, mean, std) -> None:
+        with torch.no_grad():
+            self.scal_mean.copy_(torch.as_tensor(list(mean), dtype=self.scal_mean.dtype))
+            self.scal_std.copy_(torch.clamp(torch.as_tensor(list(std), dtype=self.scal_std.dtype), min=1.0e-8))
+
+    def forward(self, node_feats: torch.Tensor, q_gate: torch.Tensor,
+                scal: Optional[torch.Tensor] = None) -> torch.Tensor:
         flat = self.linear(node_feats)
+        lin_aug = getattr(self, "linear_aug", None)
+        if lin_aug is not None:
+            if scal is None:
+                raise ValueError("Solvent3DChargeHead(charge_state_input=True) needs the per-atom scalars")
+            s = ((scal.to(node_feats.dtype) - self.scal_mean.to(node_feats.dtype))
+                 / self.scal_std.to(node_feats.dtype))
+            f_aug = torch.cat([s[:, k:k + 1] * node_feats for k in range(int(self.n_scal))], dim=-1)
+            flat = flat + lin_aug(f_aug)
         n = flat.shape[0]
         blocks = flat.new_zeros(n, self.n_out, 9)
         off = 0
@@ -227,7 +265,8 @@ class Solvent3DChargeHead(torch.nn.Module):
             off += self.n_out * w
         c = blocks.view(n, 2, len(self.sigmas), 9) * getattr(
             self, "out_scale", self.OUT_SCALE)
-        return torch.stack([c[:, 0], c[:, 1] * q_gate.view(-1, 1, 1)], dim=1)
+        ion = c[:, 1] * q_gate.view(-1, 1, 1) if getattr(self, "ion_gate", True) else c[:, 1]
+        return torch.stack([c[:, 0], ion], dim=1)
 
 
 # ---------------------------------------------------------------------------

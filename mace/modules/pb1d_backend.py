@@ -49,6 +49,47 @@ def fourier_upsample(profile: torch.Tensor, factor: int) -> torch.Tensor:
     return torch.fft.irfft(out * factor, n=nz * factor)
 
 
+def _s3d_allowed_weight(s_cav: torch.Tensor, grid, mask: dict) -> torch.Tensor:
+    """Allowed-region weight M(r) in [0, 1] from a MODEL cavity function (s_diel or s_ion):
+    Gaussian smoothing (sigma A, spectral) of the clamped cavity, then a C2 quintic smoothstep of
+    log10 between t0 (fully forbidden) and t1 (fully allowed). Differentiable in the cavity."""
+    sig = float(mask.get("sigma", 0.25)); t0 = float(mask.get("t0", 1.0e-4)); t1 = float(mask.get("t1", 1.0e-2))
+    s = torch.clamp(s_cav, 0.0, 1.0)
+    if sig > 0.0:
+        ker = torch.exp(-0.5 * (sig ** 2) * grid.gsq * (2.0 * math.pi) ** 2)
+        s = torch.clamp(grid.ifft_real(ker * grid.fft(s)), 0.0, 1.0)
+    x = (torch.log10(torch.clamp(s, min=1.0e-30)) - math.log10(t0)) / (math.log10(t1) - math.log10(t0))
+    x = torch.clamp(x, 0.0, 1.0)
+    return x * x * x * (x * (6.0 * x - 15.0) + 10.0)
+
+
+def _s3d_repair(delta: torch.Tensor, B_pl: torch.Tensor, M: torch.Tensor, min_layer: float, volume: float):
+    """Unified full-field repair (reviewer 2026-10-03). rho = B(z) + delta (delta per-plane zero-mean);
+        rho_new = M rho + (M / Mbar) [B(z) - mean_xy(M rho)]   on layers with Mbar > min_layer,
+        rho_new = M rho                                         on the other layers (no forced normalisation;
+                                                                 the dropped 1-D tail is reported, not hidden).
+    M = 0 -> complete charge zero; kept layers keep the plane mean B(z); the compensation lives in the allowed
+    region only. Returns delta_new = rho_new - B and detached diagnostics."""
+    rho = delta + B_pl[None, None, :]
+    Mrho = M * rho
+    Mbar = M.mean(dim=(0, 1)); mrho_bar = Mrho.mean(dim=(0, 1))
+    ok = Mbar > float(min_layer)
+    comp = torch.where(ok, (B_pl - mrho_bar) / torch.where(ok, Mbar, torch.ones_like(Mbar)), torch.zeros_like(Mbar))
+    rho_new = Mrho + M * comp[None, None, :]
+    with torch.no_grad():
+        nz = int(rho.shape[2]); dV_pl = float(volume) / nz          # one plane slab (A^3) per unit plane-mean density
+        okf = ok.to(rho.dtype); dropf = 1.0 - okf
+        lm_change = B_pl - rho_new.mean(dim=(0, 1))
+        zone = (M < 1.0e-3).to(rho.dtype); dV = float(volume) / rho.numel()
+        diag = dict(n_layers=int(ok.numel()), n_layers_dropped=int(dropf.sum()),
+                    dropped_charge_e=float((lm_change * dropf).sum() * dV_pl),
+                    max_layer_mean_change_dropped=float((lm_change * dropf).abs().max()),
+                    max_layer_mean_residual_kept=float((lm_change * okf).abs().max()),
+                    zone_abs_before_e=float((rho.abs() * zone).sum() * dV), zone_abs_after_e=float((rho_new.abs() * zone).sum() * dV),
+                    net_before_e=float(rho.sum() * dV), net_after_e=float(rho_new.sum() * dV))
+    return rho_new - B_pl[None, None, :], diag
+
+
 class PB1DBackend:
     def __init__(
         self,
@@ -326,6 +367,10 @@ class PB1DBackend:
         bl_energy: bool = False,
         vsolv_input: bool = False,
         vsolv_sigmas=None,
+        s3d_head=None,
+        s3d_q_atoms: Optional[torch.Tensor] = None,
+        s3d_repair: bool = False,
+        s3d_mask: Optional[dict] = None,
     ) -> Dict[str, torch.Tensor]:
 
         device = positions.device
@@ -507,6 +552,24 @@ class PB1DBackend:
 
         rho_ion_z = -(out["n_ion"] / volume)
         rho_bound_z = -(out["n_b"] / volume)
+        # 3-D solvent head INSIDE the solve (2026-10-03): its charge-state inputs
+        # need THIS solve's 1-D potential at the atoms (no second PB solve).
+        # The scalars enter as detached features (the same convention as the
+        # existing q gate); the coefficients keep their gradient path head ->
+        # node feats -> trunk.
+        if s3d_head is not None and node_feats is not None:
+            from .solvent3d import _interp1_periodic as _i1p
+            q_gate_t = (q_tot if q_tot is not None
+                        else torch.tensor(total_charge, dtype=dt, device=device)).to(dt).reshape(()).expand(pf_in.shape[0])
+            if getattr(s3d_head, "charge_state_input", False):
+                with torch.no_grad():
+                    phi_at = _i1p(out["phi"].detach().to(dt), pf_in[:, 2].detach().to(dt))
+                    qa = (s3d_q_atoms.detach().to(dt).reshape(-1) if s3d_q_atoms is not None
+                          else phi_at.new_zeros(phi_at.shape))
+                    scal = torch.stack([q_gate_t.detach(), phi_at, qa], dim=1)
+                s3d_coeffs = s3d_head(node_feats, q_gate_t, scal)
+            else:
+                s3d_coeffs = s3d_head(node_feats, q_gate_t)
         dz = length_z / nz_s
         area = volume / length_z
         z = solver.z
@@ -737,6 +800,28 @@ class PB1DBackend:
                 # MD-path gap, job 3420723).
                 delta_b = raw_b - r_b[None, None, :] * env_b
                 delta_i = raw_i - r_i[None, None, :] * env_i
+                if s3d_repair:
+                    # unified full-field repair (reviewer 2026-10-03): the
+                    # 1-D background is cancelled where the MODEL cavity
+                    # forbids charge and the plane mean is restored inside
+                    # the allowed region; energy side with the live cavity,
+                    # supervision side with the frozen stash (values equal).
+                    from .solvent3d import _interp1_periodic as _i1p
+                    _mask = s3d_mask or {}
+                    Bb_pl = _i1p(rho_bound_z.to(dt), z_pl / float(length_z))
+                    Bi_pl = _i1p(rho_ion_z.to(dt), z_pl / float(length_z))
+                    M_b = _s3d_allowed_weight(s_diel3e, grid, _mask)
+                    M_i = _s3d_allowed_weight(s_ion3e, grid, _mask)
+                    delta_b, rep_b = _s3d_repair(delta_b, Bb_pl, M_b, float(_mask.get("min_layer", 1.0e-3)), volume)
+                    delta_i, rep_i = _s3d_repair(delta_i, Bi_pl, M_i, float(_mask.get("min_layer", 1.0e-3)), volume)
+                    self._last_s3d_repair = {"b": rep_b, "i": rep_i}
+                    if env_bf is not None:
+                        M_bf = _s3d_allowed_weight(cavd[1], grid, _mask)
+                        M_if = _s3d_allowed_weight(torch.clamp(cavd[0], 0.0, 1.0), grid, _mask)
+                        d_sup_b, _ = _s3d_repair(d_sup_b, Bb_pl, M_bf, float(_mask.get("min_layer", 1.0e-3)), volume)
+                        d_sup_i, _ = _s3d_repair(d_sup_i, Bi_pl, M_if, float(_mask.get("min_layer", 1.0e-3)), volume)
+                    else:
+                        d_sup_b, d_sup_i = delta_b, delta_i
                 # under LIVE_POS the residual is live in the energy integrals
                 # too: e_self was fully detached and e_xsol's residual side
                 # with it (measured: solvent3d_energy_g 4.3-13.5 meV/A per-term
@@ -829,6 +914,8 @@ class PB1DBackend:
                     "e_xsol": float(e_xsol_raw.detach()) * dV,
                     "e_self": float(e_self_raw.detach()) * dV,
                 }
+                if s3d_repair and getattr(self, "_last_s3d_repair", None) is not None:
+                    s3d_obs["repair"] = self._last_s3d_repair
                 if os.environ.get("MACE_S3D_EXPORT_DELTA"):
                     s3d_obs["delta_b_grid"] = d_grid_b
                     s3d_obs["delta_i_grid"] = d_grid_i
@@ -894,6 +981,7 @@ class PB1DBackend:
             else None,
             "solver_exit": out.get("solver_exit"),
             "prior_solve": prior_s,
+            "s3d_coeffs": s3d_coeffs,
             "delta_p": delta_p,
             "solv3d": solv3d,
             "e_cav": e_cav_t,

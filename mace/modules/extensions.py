@@ -848,6 +848,15 @@ class PolarMACE(ScaleShiftMACE):
         solvent3d_head: bool = False,
         solvent3d_sigmas: str = "[0.5, 1.0, 2.0]",
         solvent3d_energy: bool = False,
+        solvent3d_charge_state_input: bool = False,
+        solvent3d_ion_gate: bool = True,
+        solvent3d_repair: bool = False,
+        solvent3d_mask_sigma: float = 0.25,
+        solvent3d_mask_t0: float = 1.0e-4,
+        solvent3d_mask_t1: float = 1.0e-2,
+        solvent3d_mask_min_layer: float = 1.0e-3,
+        solvent3d_scal_mean: Optional[str] = None,
+        solvent3d_scal_std: Optional[str] = None,
         solvent_baseline_coupling: bool = False,
         solvent_cavity_energy: bool = False,
         solvent_pb1d_vsolv_input: bool = False,
@@ -1260,7 +1269,18 @@ class PolarMACE(ScaleShiftMACE):
                 ),
                 sigmas=self.solvent3d_sigmas,
                 cueq_config=cueq_config,
+                charge_state_input=bool(solvent3d_charge_state_input),
+                ion_gate=bool(solvent3d_ion_gate),
             )
+            if solvent3d_scal_mean is not None and solvent3d_scal_std is not None:
+                self.solvent3d_head.set_scalar_standardisation(
+                    _ast.literal_eval(str(solvent3d_scal_mean)),
+                    _ast.literal_eval(str(solvent3d_scal_std)))
+        # unified full-field repair of the 3-D solvent charge (reviewer
+        # 2026-10-03): weights from the MODEL cavity only; parameters in config
+        self.solvent3d_repair = bool(solvent3d_repair)
+        self.solvent3d_mask = dict(sigma=float(solvent3d_mask_sigma), t0=float(solvent3d_mask_t0),
+                                   t1=float(solvent3d_mask_t1), min_layer=float(solvent3d_mask_min_layer))
         # stage-2 energy terms (value-carrying, lagged-SCF convention):
         # cavity-formation energy tau*A[s_diel3] and the residual-3D solvent
         # electrostatic coupling. Default off; pure additions to the total
@@ -1629,6 +1649,7 @@ class PolarMACE(ScaleShiftMACE):
         prev_data=None,
         write_cache=True,
         use_cache_rows=False,
+        node_charges=None,
     ):
         """Shared per-graph loop for the pb1d stages.
 
@@ -1802,12 +1823,11 @@ class PolarMACE(ScaleShiftMACE):
             # they carry the ONLY gradient path of the solvent3d loss
             # (head -> node feats -> trunk); ion channel gated by the
             # frame's total charge (exactly zero on neutral frames)
+            # the head is evaluated INSIDE solve_graph (2026-10-03): its
+            # charge-state inputs need this solve's 1-D potential at the atoms
             s3d_cg = None
-            if s3d_coeffs is not None and feats_g is not None:
-                q_gate = total_charge_g[g].detach().to(positions.dtype)
-                s3d_cg = self.solvent3d_head(
-                    feats_g, q_gate.expand(int(atom_mask.sum().item()))
-                )
+            s3d_head_g = self.solvent3d_head if (s3d_coeffs is not None and feats_g is not None) else None
+            s3d_qa_g = (node_charges[atom_mask].detach() if (s3d_head_g is not None and node_charges is not None) else None)
             try:
                 result = backend.solve_graph(
                     positions=pos_g,
@@ -1823,10 +1843,14 @@ class PolarMACE(ScaleShiftMACE):
                     q_tot=total_charge_g[g].detach(),
                     ckpt_closure=True,  # unckpt tested twice, OOMs both eval (retention) and train (PB step footprint) on 40 GB
                     probe_points=s3d_pts_g,
-                    s3d_coeffs=s3d_cg if s3d_e_on else None,
+                    s3d_coeffs=None,
                     s3d_sigmas=(
-                        self.solvent3d_sigmas if s3d_cg is not None else None
+                        self.solvent3d_sigmas if s3d_head_g is not None else None
                     ),
+                    s3d_head=s3d_head_g,
+                    s3d_q_atoms=s3d_qa_g,
+                    s3d_repair=bool(getattr(self, "solvent3d_repair", False)),
+                    s3d_mask=getattr(self, "solvent3d_mask", None),
                     s3d_energy=s3d_e_on,
                     cav_energy=cav_on,
                     bl_energy=bl_on,
@@ -1834,6 +1858,7 @@ class PolarMACE(ScaleShiftMACE):
                     vsolv_sigmas=list(self.field_feature_widths),
                 )
                 solved_ok = True
+                s3d_cg = result.get("s3d_coeffs")
             except RuntimeError as exc:
                 if os.environ.get("MACE_PB_DEBUG"):
                     print(f"PB1DDBG-ERROR sid={sid}: {exc}", flush=True)
@@ -2077,7 +2102,8 @@ class PolarMACE(ScaleShiftMACE):
                      cell: torch.Tensor, radial_blocks: torch.Tensor,
                      node_valence_electrons: torch.Tensor, num_graphs: int,
                      planar_center: torch.Tensor, node_feats_mixed: torch.Tensor,
-                     prev_data: Optional[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+                     prev_data: Optional[Dict[str, torch.Tensor]],
+                     node_charges: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """Scheme C stage 2: fresh solve with the FINAL (post-recursion)
         density + residual head. Observables carry gradients; the energy rows
         are detached; the cache is refreshed for the next encounter."""
@@ -2091,6 +2117,7 @@ class PolarMACE(ScaleShiftMACE):
             node_feats_mixed=node_feats_mixed, use_head=True,
             want_grad=self.training or torch.is_grad_enabled(),
             use_cache_rows=freeze, write_cache=not freeze,
+            node_charges=node_charges,
         )
         return out
 
@@ -2885,6 +2912,7 @@ class PolarMACE(ScaleShiftMACE):
                 planar_center=comp_center_init,
                 node_feats_mixed=node_feats_out,
                 prev_data=pb_solvent_data,
+                node_charges=charge_density_mul_ir[:, 0],
             )
         if self.learn_solvent_center_residual:
             solvent_center_residual = (

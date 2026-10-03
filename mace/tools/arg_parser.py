@@ -541,6 +541,30 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "profile + half self-energy; solvent state detached, lagged-SCF)",
     )
     parser.add_argument(
+        "--solvent3d_charge_state_input", type=str2bool, default=False,
+        help="pb1d solvent3d head: charge-state inputs (total charge, the solve's "
+        "1-D potential at the atoms, per-atom model charge) multiply the node "
+        "features and feed a second zero-initialised linear readout",
+    )
+    parser.add_argument(
+        "--solvent3d_ion_gate", type=str2bool, default=True,
+        help="pb1d solvent3d head: multiply the ion channel by the frame's net charge "
+        "(False: neutral frames can carry a local ion rearrangement)",
+    )
+    parser.add_argument(
+        "--solvent3d_repair", type=str2bool, default=False,
+        help="pb1d: unified full-field repair of the 3-D solvent charge: the 1-D "
+        "background is cancelled where the model cavity forbids charge and the "
+        "plane mean is restored inside the allowed region (same field for "
+        "supervision, energy and export)",
+    )
+    parser.add_argument("--solvent3d_mask_sigma", type=float, default=0.25, help="repair: Gaussian smoothing (A) of the cavity function before the threshold")
+    parser.add_argument("--solvent3d_mask_t0", type=float, default=1.0e-4, help="repair: smoothed cavity value below which the region is fully forbidden")
+    parser.add_argument("--solvent3d_mask_t1", type=float, default=1.0e-2, help="repair: smoothed cavity value above which the region is fully allowed (C2 quintic transition in log10)")
+    parser.add_argument("--solvent3d_mask_min_layer", type=float, default=1.0e-3, help="repair: plane-mean allowed weight below which a layer keeps M rho without compensation (reported)")
+    parser.add_argument("--solvent3d_scal_mean", type=str, default=None, help="charge-state scalar standardisation: training-set means [Q, phi_1D(z_a), q_a]")
+    parser.add_argument("--solvent3d_scal_std", type=str, default=None, help="charge-state scalar standardisation: training-set stds [Q, phi_1D(z_a), q_a]")
+    parser.add_argument(
         "--solvent_cavity_energy", type=str2bool, default=False,
         help="pb1d: add the cavity-formation energy tau*A to the total energy "
         "(A = int |grad s_diel3| dV from the live cavity; tau from the "
