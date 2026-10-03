@@ -4945,6 +4945,49 @@ single-state density (0.84-0.89 vs 0.58) but do on the charging response (0.67-0
 No training, no production-code change. Files: experiments1d/s3d_diag/{input_consistency,production3d_native,fullclosure_native,
 ion_A_check}.py + json, selfconsistent_native_p1_m40.json, sc_gpu_eps_m20b05.json; logs in exp_s3d_diag/logs.
 
+## 2026-10-03 close-out of the full closure on pair 1 (fullclosure_native.py @85fc1f9, CPU job 3485871, tol 1e-4, maxit 200; GPU bound-only timing job 3485760; code 85fc1f9) -- DFT-point check, complete potential, per-channel residuals
+
+Reviewer corrections accepted: (1) the earlier "total potential error 0.008/0.004 eV" was final_total = the periodic potential
+of (rho_b + rho_i) only, not the complete potential; "potentials all right" withdrawn; the comparison is the complete potential
+phi + c the ion function sees vs DFT PHI, no mean removal. (2) "sensitive, therefore not a defect" withdrawn: the ion formula is
+exact at PHI, the full-closure errors mean potential / assembly / convergence had not been checked; 3 of 4 earlier runs ended at
+maxit. (3) 14-15 s was not the cost at target accuracy; the preconditioner test changed history and damping together.
+(4) response gains do not substitute for the single-state degradation (pair 1: 0.600 -> 0.886, 0.762 -> 1.455 vs 0.850 -> 0.695).
+DFT-POINT CHECK (one evaluation of the full map at the DFT bound + ion charges; complete potential phi + c vs PHI, rms, NO mean removal):
+   assembly + sawtooth (FD inputs), charged / neutral identical to 4 digits: all points 0.0589 eV | ion region (s_ion > 0.5)
+      0.0040 | dielectric region (s_diel > 0.5) 0.0051 | plane mean 0.0009 | offset +0.0004 eV; next-step bound L1 0.338 (lat 0.397,
+      pa 0.029) / 0.579 (pa 0.171); next-step ion L1 0.378 (pa 0.031) / 3.258; map residuals bound 0.142 / 0.171, ion 0.353 / 3.32;
+      dipole +0.368 / -3.263 (= DFT total); shift -1.061 / -2.011 eV.
+   true solute potential PHI - L(rho_solv), no sawtooth (reference): phi + c = PHI exactly (all 0.0000); next bound 0.024 / 0.029
+      (= candidate A), next ion 0.000 / 0.000; map residuals 0.031 / 0.032 and 0.000.
+   -> the assembly + boundary treatment is the whole FD error: a 4-5 meV rms potential error in the solvent regions (the 0.059 eV
+      assembly error lives mostly inside the solute) already produces bound 0.34 / 0.58 and ion 0.38 / 3.3 in ONE step; the
+      converged fixed point (below) adds nothing. Dipole / reference / plane mean are right (0.9 / 0.4 meV).
+CONVERGED (residual 1e-4, per-channel residuals bound / ion):
+   FD charged: 99 it, 568 s CPU; bound L1 0.299 lat 0.351 (corr 0.991) pa 0.024 norm 1.008; ion L1 0.364 pa 0.007 norm 1.049;
+      phi + c vs PHI: all 0.0589, ion region 0.0039, dielectric 0.0050, plane mean 0.0009, offset +0.0003 eV; residuals 8e-5 / 2.5e-4.
+      Identical to the 80-iteration run (0.299 / 0.364) and stable from k = 70 (res 5e-3) to k = 99 (res 1e-4).
+   FD neutral: 98 it, 511 s; bound 0.514 lat 0.480 (corr 0.988) pa 0.144; ion 3.121 (norm 3.09); phi + c: all 0.0590, ion 0.0039,
+      diel 0.0051, pa 0.0025, offset +0.0012 eV; residuals 7e-5 / 7e-4.
+   FM charged (model inputs): 109 it, 611 s; bound 0.886 lat 1.091 (0.605) pa 0.216 norm 0.717; ion 0.402 pa 0.048; phi + c vs PHI:
+      all 0.4282, ion region 0.0041, dielectric 0.0379, plane mean 0.0628, offset -0.0052 eV; residuals 8e-5 / 2.8e-4.
+   FM neutral: 101 it, 559 s; bound 1.455 lat 1.403 (0.511) pa 1.166; ion 3.126; phi + c: all 0.4380, ion 0.0038, diel 0.0292,
+      pa 0.1798, offset -0.1083 eV; residuals 8e-5 / 2.5e-4.
+   Responses (pair 1): FD bound 0.064 lat 0.081 (corr 1.00) pa 0.007 phi 0.002, ion 0.016; FM bound 0.691 lat 0.912 (0.34) pa 0.185
+      phi 0.093, ion 0.079.
+   Reading: with the model inputs the ion-region potential is as good as the assembly's (4 meV) but the dielectric-region
+   (interface) potential is 7x worse (38 / 29 meV vs 5 meV) and the plane mean 60-180 meV off with a -5 / -108 meV offset -- that
+   is where the bound error 0.89 / 1.46 comes from; the solute potential error (0.43 eV over all points) sits inside the solute.
+GPU COST AT THE SAME RESIDUAL (job 3485760, A100 40 GB, bound-only, history 40 / damping 0.2, lean difference history, tol 1e-3):
+   converged in 53-55 iterations (same counts as the CPU reference), 0.2 s per field evaluation, 11-12 s per solve, peak
+   13.2-13.5 GiB (stacked history 40 had OOM-ed at > 38 GiB; stacked history 20 was 16.3 GiB). Finals identical to CPU
+   (S1 0.005 / 0.010, S3 0.883 / 1.492; responses 0.008 / 0.716). GPU full closure (3485762) still queued.
+Status: the full closure stays an offline reference. Remaining assembly error to fix on the input side if it is ever used with
+DFT-like inputs: the 4-5 meV solvent-region potential error of cv_assembly (= phi_base - L(net V)) relative to PHI - L(rho_solv).
+Model-side priority unchanged: solvent-facing interface electron density and the potential generated from the same density.
+No training, no production-code change. Files: experiments1d/s3d_diag/fullclosure_cpu_p1_tight.json, sc_gpu_plain_m40b02.json;
+fields exp_s3d_diag/fc_fields_p1_tight/ (float32 npy, for continuation).
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
