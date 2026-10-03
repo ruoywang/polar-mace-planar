@@ -4880,6 +4880,71 @@ Reading:
 Files: experiments1d/s3d_diag/selfconsistent_native.py, job_scnative.sh, selfconsistent_native.json (pair 1, slow settings),
 selfconsistent_native_p52_152.json, selfconsistent_tune_m40b02.json; slices exp_s3d_diag/sc_slices*/; logs scnative.o3485049/70/197.
 
+## 2026-10-03 reviewer round (input consistency / unified convergence / solver cost / full closure) -- same-frame table (jobs 3485349, 3485362, 3485358, 3485758+3485763, 3485854, 3485855; code 4245a3e..2dfacd8; all rc 0; GPU history-40 runs 3485760/3485762 still queued)
+
+Reviewer corrections accepted: 0.43 / 0.84 are "what this solver gives with the current inputs fixed", not ceilings and not
+additive; the ~1 % was a bound-channel check with DFT ions fixed; 0.11 A (L1 0.4) is not an acceptable grid; the diverging
+update was the unstabilised Picard, no claim that ~55 iterations are necessary; the 1-D-vs-3-D L1 0.89 contains the whole
+lateral part (plane-average-only: pa 0.256 charged, 0.39-0.78 neutral; production full 3-D below).
+
+1. INPUT CONSISTENCY (input_consistency.py, 6 frames, model grid + native grid)
+   Clamp: the unclamped model density integrates to NELECT exactly (661.000 / 661.072 / 661.078; 660.000 x3); the clamp adds
+   0.29-0.43 e (33.5-35.4 % of grid points negative, minimum -0.02..-0.033 e/A^3); the DFT net label through the same assembly
+   clips 0.011-0.013 e. WHERE: 83-92 % of the clipped electrons lie in the vacuum behind the slab (z 3-6 A; atoms 6.5-16.5 A;
+   solvent box SOL_Z0 = 8 A), where the cavity functions are zero by construction; 10-32 % fall in the DFT interface class but
+   only 2-9 % inside the slab z-range. The model cavity deficit (solute volume larger than DFT by 52-63 A^3; reverse 1.9-2.6)
+   sits entirely on the solvent side, z 9-18 A (-13, -14, -37 A^3 per 3 A bin). -> the clamp is not the cavity error; the
+   cavity error is the network density at the solvent-facing interface. Using the clamped density as Poisson source instead
+   would move the solute potential by 0.25-0.39 eV (plane mean, line removed) + 0.07-0.10 eV lateral: the inconsistency is
+   real, but the unclamped side (correct electron count) is the physical one.
+   Ramp / dipole: production sawtooth slope +0.02119 eV/A per e*A; the measured <cv_assembly - phi_sol^DFT> slope implies a
+   dipole equal to the DFT TOTAL (solute + solvent) dipole in 6/6 frames (0.359/0.368, 0.446/0.455, 0.815/0.831, -3.208/-3.263,
+   -3.109/-3.163, -3.436/-3.496 e*A); assembly - saw(c_unit p_tot) reproduces the DFT plane mean to rms 0.0008-0.0011 eV
+   (the 0.09-0.13 eV neutral "line-removed residual" was the sawtooth shape). Convention: the solver carries dipoles in the
+   electron-energy sign (val_ion_dipole_z = -p_phys, |difference| < 0.003 e*A), i.e. PHI = periodic assembly - saw(c_unit p_phys).
+   Network share: lateral solute potential rms error 0.37-0.43 eV (assembly 0.059 eV); plane mean after the sawtooth
+   0.043-0.088 eV (assembly 0.001); solute dipole error +0.14..+0.43 e*A charged, +0.13..+0.50 neutral.
+2. UNIFIED CONVERGENCE (pair 1 redone, history 40 / damping 0.2, residual 1e-3 in 53-55 it): S1 0.005 / 0.010, S2 0.470 / 0.839,
+   S3 0.883 / 1.492, S3b 0.887 / 1.469; responses 0.008 / 0.557 / 0.716 / 0.678 (table below uses these).
+3. SOLVER COST (this script's timing). CPU 64 threads: bound-only 53-55 it x 2.7-3.3 s = 214-245 s per solve; full closure
+   (bound + ion + shift + dipole) 80 it x 4.5-4.9 s = 430-460 s, residual 1.2e-3..2.5e-3 at 80 (3 of 4 just above 1e-3).
+   GPU A100 40 GB (job 3485358, history 20, damping 0.5, dielectric Jacobi preconditioner): 0.16 s per field evaluation,
+   14-15 s per 70-iteration solve, peak 16.1-16.4 GiB; the preconditioner does NOT accelerate (residual 5e-3 at 70 vs 1e-3 at
+   55 for the plain setting). History 40 with stacked copies: OOM at > 38 GiB (3485357, 3485360), as the reviewer warned;
+   Anderson rewritten with difference vectors + incremental Gram matrix (830c68a), GPU reruns 3485760 / 3485762 queued.
+4. FULL CLOSURE (fullclosure_native.py, pair 1, CPU): bound AND ion charge from one total potential, production ion model
+   pointwise, neutrality by the potential reference (bracketed bisection; Newton stalls because the saturated ion response has
+   zero derivative), production sawtooth on the total dipole inside the fixed point; start = production 1-D (B, I).
+   FD (DFT inputs through the production assembly): bound c L1 0.299 lat 0.351 (corr 0.99) pa 0.024 norm 1.008 phi 0.002 |
+      n 0.515 (corr 0.99) pa 0.144 phi 0.002 | response 0.068 (lat corr 1.00) phi 0.002; ion c 0.364 pa 0.009, n 3.12 (norm 3.09),
+      response 0.022; <phi> vs <PHI> 0.016 / 0.007 eV (mean removed), total potential error 0.008 / 0.004 eV; dipole +0.325 /
+      -3.249 (DFT +0.368 / -3.263); q_ion +1.0000 / 0.0000 exact.
+   FM (model inputs: production cv, model cavities, solver dipole): bound c 0.886 (lat 1.092, corr 0.60) pa 0.216 phi 0.091 |
+      n 1.455 pa 1.166 phi 0.142 | response 0.695 (corr 0.34) phi 0.094; ion c 0.403, n 3.13, response 0.082; <phi> vs <PHI>
+      0.063 / 0.140 eV; dipole +0.488 / -3.451.
+   ION CONTROL (ion_A_check.py, 6 frames): the production ion model evaluated at the DFT potential itself reproduces RHOION
+      to L1 0.000 (charged) / 0.003-0.004 (neutral) with zero reference shift; on the w_b-smoothed potential it fails (0.10 /
+      0.75-0.88) -> VASPsol uses the raw potential; with the model cavity 0.03-0.10. The ion-region potential scale is
+      +-0.010 eV (charged) and +-0.001 eV (neutral) with ZBETA = 38.9 eV^-1: the ion density is a linear amplifier of meV-level
+      potential differences, which is why FD's 0.008 eV total-potential error shows as ion L1 0.36 / 3.1 while the response
+      (0.022) and all potentials stay right. Not a model defect; a sensitivity to report.
+SAME-FRAME TABLE (bound charge vs native RHOB; c / n = mean of 3 charged / 3 neutral frames, resp = pair response; FD / FM pair 1 only)
+                                                   c L1  lat (corr) pa    norm phi   | n L1  | resp L1 lat (corr) phi
+   production full 3-D B(z)+d(r)                  0.584 0.630 (0.87) 0.256 0.81 0.118 | 0.783 | 0.846 1.001 (0.08) 0.116   [ion c 0.253, resp 0.198]
+   consistent, DFT solute pot + DFT cavity (S1)   0.006 0.008 (1.00) 0.003 1.00 0.001 | 0.011 | 0.010 0.017 (1.00) 0.002
+   consistent, DFT solute pot + model cavity (S2) 0.428 0.552 (0.74) 0.124 0.89 0.034 | 0.778 | 0.489 0.692 (0.53) 0.074
+   consistent, model solute pot + model cav (S3)  0.840 1.043 (0.64) 0.224 0.72 0.141 | 1.455 | 0.665 0.819 (0.41) 0.592
+   full closure, DFT assembly inputs (FD)          0.299 0.351 (0.99) 0.024 1.01 0.002 | 0.515 | 0.068 0.085 (1.00) 0.002   [ion c 0.364, resp 0.022]
+   full closure, model inputs (FM)                 0.886 1.092 (0.60) 0.216 0.72 0.091 | 1.455 | 0.695 0.918 (0.34) 0.094   [ion c 0.403, resp 0.082]
+   cost: CPU bound-only 214-245 s / solve, full closure 430-460 s; GPU bound-only 14-15 s per 70 it, 16 GiB (history 20).
+Reading: (i) the input-assembly errors are now separated: electron count = clamp (vacuum side, no cavity effect), plane-mean
+ramp = dipole convention (exact to 1 meV once applied with the solver sign), lateral solute potential and interface density =
+network; (ii) with model inputs the physics-consistent constructions do not beat the production's learned output on the
+single-state density (0.84-0.89 vs 0.58) but do on the charging response (0.67-0.70 vs 0.85; ion response 0.08 vs 0.20);
+(iii) with DFT inputs the full closure gets potentials and the response right and exposes the ion channel's meV sensitivity.
+No training, no production-code change. Files: experiments1d/s3d_diag/{input_consistency,production3d_native,fullclosure_native,
+ion_A_check}.py + json, selfconsistent_native_p1_m40.json, sc_gpu_eps_m20b05.json; logs in exp_s3d_diag/logs.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
