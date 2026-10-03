@@ -206,17 +206,46 @@ class FullClosure:
         return -ion_density_values(phi_c, self.s_i, params, self.V) / self.V
 
     def shift(self, phi):
-        """c with int rho_i[phi + c] dV = -Q (Newton with the analytic derivative, bracket-safe)."""
-        c = torch.tensor(self.c_last, device=dev); target = -self.Q
-        for _ in range(30):
-            g = float(self.rho_ion(phi + c).sum() * self.dV) - target
-            dg = float((-ion_density_derivative(phi + c, self.s_i, params, self.V) / self.V).sum() * self.dV)
+        """c with int rho_i[phi + c] dV = -Q. The ion density saturates (|ZBETA phi| > 100 -> derivative 0), so Newton can stall far
+        from the root: bracket first (expanding around the previous c), then bisection to 1e-4 eV, then up to 3 Newton polishes."""
+        target = -self.Q
+        gfun = lambda c: float(self.rho_ion(phi + c).sum() * self.dV) - target
+        c0 = self.c_last; g0 = gfun(c0); self.n_shift_eval = 1
+        if abs(g0) < 1e-9 * max(1.0, abs(target)):
+            return torch.tensor(c0, device=dev)
+        step = 0.1; lo = hi = c0; glo = ghi = g0
+        while glo * ghi > 0.0 and step < 1.0e3:                       # expand the bracket in the descent direction
+            if g0 > 0.0:                                              # too much ion charge -> rho_i decreases with c? sign found numerically
+                lo = c0 - step; glo = gfun(lo); hi = c0 + step; ghi = gfun(hi)
+            else:
+                lo = c0 - step; glo = gfun(lo); hi = c0 + step; ghi = gfun(hi)
+            self.n_shift_eval += 2; step *= 2.0
+            if glo * g0 < 0.0:
+                hi, ghi = c0, g0
+            elif ghi * g0 < 0.0:
+                lo, glo = c0, g0
+        if glo * ghi > 0.0:
+            raise RuntimeError(f"neutrality shift: no bracket found (g(lo) {glo:.3e}, g(hi) {ghi:.3e})")
+        for _ in range(60):                                           # bisection
+            mid = 0.5 * (lo + hi); gm = gfun(mid); self.n_shift_eval += 1
+            if glo * gm <= 0.0:
+                hi, ghi = mid, gm
+            else:
+                lo, glo = mid, gm
+            if hi - lo < 1e-4 or abs(gm) < 1e-9 * max(1.0, abs(target)):
+                break
+        c = 0.5 * (lo + hi)
+        for _ in range(3):                                            # Newton polish where the derivative is alive
+            ct = torch.tensor(c, device=dev)
+            g = gfun(c); dg = float((-ion_density_derivative(phi + ct, self.s_i, params, self.V) / self.V).sum() * self.dV); self.n_shift_eval += 1
             if abs(g) < 1e-9 * max(1.0, abs(target)) or dg == 0.0:
                 break
-            step = -g / dg
-            c = c + torch.clamp(torch.tensor(step, device=dev), -2.0, 2.0)
+            cn = c - g / dg
+            if not (lo - 1e-3 <= cn <= hi + 1e-3):
+                break
+            c = cn
         self.c_last = float(c)
-        return c
+        return torch.tensor(c, device=dev)
 
     def potential(self, rho_b, rho_i):
         rho = rho_b + rho_i
@@ -236,7 +265,7 @@ class FullClosure:
         ex, ey, ez, em = self.gd.grad_from_recip(-torch.conj(self.w_b) * self.gd.fft(phi))
         a = response_a3(em, self.s_d, params, tp); del em
         rho_b_new = self.gd.ifft_real(self.w_b * self.gd.div_real_vector(a * ex, a * ey, a * ez))
-        return rho_b_new, rho_i_new, dict(dipole=d, shift=float(c), q_ion=float(rho_i_new.sum() * self.dV))
+        return rho_b_new, rho_i_new, dict(dipole=d, shift=float(c), q_ion=float(rho_i_new.sum() * self.dV), n_shift_eval=int(getattr(self, "n_shift_eval", 0)))
 
 
 def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label=""):
