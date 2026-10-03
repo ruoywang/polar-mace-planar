@@ -109,9 +109,10 @@ def label_points(sid, n=50000, seed=0):
     return torch.as_tensor(frac, device=dev)
 
 
+STAGE = os.environ.get("KIT_STAGE", "all")
 # ------------------------------------------------------------------ (1)-(3) field checks
 frames = [s for k in PAIRS for s in (k, k + 600)] + big
-for sid in frames:
+for sid in (frames if STAGE in ("all", "fields") else []):
     atoms = ATOMS[sid]; rec = {}
     for tag, new in (("old", False), ("new", True)):
         configure(new)
@@ -160,7 +161,7 @@ for sid in frames:
 # ------------------------------------------------------------------ (4) forces: difference protocol + full gap
 sid_f = PAIRS[0]; atoms = ATOMS[sid_f]; nat = len(atoms); test_atoms = [0, nat // 2, nat - 1]; syms = atoms.get_chemical_symbols()
 fres = {}
-for tag, new in (("off", False), ("on", True)):
+for tag, new in ((("off", False), ("on", True)) if STAGE in ("all", "forces") else ()):
     configure(new)
     out, res, kw, b = forward(atoms, force=True); e0 = float(out["energy"].detach()); f0 = out["forces"].detach().cpu().numpy()
     fd = {}
@@ -169,12 +170,13 @@ for tag, new in (("off", False), ("on", True)):
         ep = float(forward(ap)[0]["energy"]); em = float(forward(am)[0]["energy"]); fd[ia] = -(ep - em) / (2 * H)
     fres[tag] = (e0, f0, fd)
 rows = []
-for ia in test_atoms:
+for ia in (test_atoms if fres else []):
     dfa = fres["on"][1][ia, 2] - fres["off"][1][ia, 2]; dff = fres["on"][2][ia] - fres["off"][2][ia]
     rows.append(dict(atom=ia, sym=syms[ia], dF_autograd=float(dfa), dF_fd=float(dff), gap=float(dfa - dff), F_on=float(fres["on"][1][ia, 2]), FD_on=float(fres["on"][2][ia]), full_gap_on=float(fres["on"][1][ia, 2] - fres["on"][2][ia]), full_gap_off=float(fres["off"][1][ia, 2] - fres["off"][2][ia])))
-RES["forces"] = dict(sid=sid_f, h=H, dE_new=float(fres["on"][0] - fres["off"][0]), rows=rows)
-print(f"[{time.time() - T0:5.0f}s] forces sid {sid_f}: dE(new path) {RES['forces']['dE_new']:+.5f} eV | " + " | ".join(f"atom {r['atom']} {r['sym']}: dF_auto {r['dF_autograd']:+.5f} dF_fd {r['dF_fd']:+.5f} gap {r['gap']:+.1e}; full gap on {r['full_gap_on']:+.1e} off {r['full_gap_off']:+.1e}" for r in rows), flush=True)
-json.dump(RES, open(OUT, "w"), indent=1, default=float)
+if fres:
+    RES["forces"] = dict(sid=sid_f, h=H, dE_new=float(fres["on"][0] - fres["off"][0]), rows=rows)
+    print(f"[{time.time() - T0:5.0f}s] forces sid {sid_f}: dE(new path) {RES['forces']['dE_new']:+.5f} eV | " + " | ".join(f"atom {r['atom']} {r['sym']}: dF_auto {r['dF_autograd']:+.5f} dF_fd {r['dF_fd']:+.5f} gap {r['gap']:+.1e}; full gap on {r['full_gap_on']:+.1e} off {r['full_gap_off']:+.1e}" for r in rows), flush=True)
+    json.dump(RES, open(OUT, "w"), indent=1, default=float)
 
 # ------------------------------------------------------------------ (5) parameter gradient of a force loss through the head (new path on)
 configure(True)
@@ -187,9 +189,14 @@ g = torch.Generator(device="cpu").manual_seed(7)
 with torch.no_grad():
     if new_head.linear_aug is not None:
         new_head.linear_aug.weight.copy_(0.05 * torch.randn(new_head.linear_aug.weight.shape, generator=g).to(dev))
-b = batch_of(atoms)
-out = model(b.to_dict(), training=True, compute_force=True, compute_stress=False)
-LF = (out["forces"] ** 2).sum() / nat
+def force_loss(create_graph):
+    """L_F = sum F^2 / n_atoms with F = -dE/dR computed explicitly (positions made differentiable here; create_graph keeps the
+    parameter dependence of F so that grad_theta L_F exists)."""
+    bd = batch_of(atoms).to_dict(); bd["positions"] = bd["positions"].detach().clone().requires_grad_(True)
+    out = model(bd, training=False, compute_force=False, compute_stress=False)
+    F = -torch.autograd.grad(out["energy"].sum(), bd["positions"], create_graph=create_graph)[0]
+    return (F ** 2).sum() / nat
+LF = force_loss(True)
 grads = torch.autograd.grad(LF, params, allow_unused=True)
 v = [torch.randn(p.shape, generator=g).to(dev) for p in params]
 for vi in v:
@@ -197,9 +204,11 @@ for vi in v:
 ad = sum(float((gi * vi).sum()) for gi, vi in zip(grads, v) if gi is not None)
 with torch.no_grad():
     for p, vi in zip(params, v): p.add_(EPS * vi)
-    out_p = model(b.to_dict(), training=False, compute_force=True, compute_stress=False); LFp = float((out_p["forces"] ** 2).sum() / nat)
+LFp = float(force_loss(False).detach())
+with torch.no_grad():
     for p, vi in zip(params, v): p.add_(-2 * EPS * vi)
-    out_m = model(b.to_dict(), training=False, compute_force=True, compute_stress=False); LFm = float((out_m["forces"] ** 2).sum() / nat)
+LFm = float(force_loss(False).detach())
+with torch.no_grad():
     for p, s0 in zip(params, saved): p.copy_(s0)
 fdv = (LFp - LFm) / (2 * EPS)
 RES["param_grad"] = dict(sid=sid_f, eps=EPS, LF=float(LF), v_dot_grad_AD=ad, FD=fdv, rel_gap=float((ad - fdv) / max(abs(fdv), 1e-30)), params=[tuple(p.shape) for p in params],
