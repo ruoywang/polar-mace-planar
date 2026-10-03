@@ -5054,7 +5054,7 @@ Scope (fixed by the reviewer): baseline prod500_vsolv_fix; keep the 1-D PB, the 
 compensation inside the allowed region. No polarization representation, no finer grid, no 3-D self-consistent solve.
 CODE CHANGES
  - solvent3d.py Solvent3DChargeHead: charge_state_input (per-atom scalars s = standardised [Q_total, phi_1D(z_a) of THIS solve,
-   q_a model per-atom charge] multiply the node features -> cat[s1 f, s2 f, s3 f] -> a second e3nn Linear readout (9216 weights,
+   q_a model per-atom charge] multiply the node features -> cat[s1 f, s2 f, s3 f] -> a second e3nn Linear readout (6912 weights,
    zero-initialised; the original 2304-weight readout stays); buffers scal_mean / scal_std from the training-set statistics;
    ion_gate=False removes the global net-charge multiplication of the ion channel. Old pickled models keep their behaviour.
  - pb1d_backend.py solve_graph: the head is evaluated INSIDE the solve, after the 1-D profiles (phi_at = interp of out["phi"]
@@ -5084,7 +5084,12 @@ PRE-FLIGHT (preflight_repair.py: baseline weights transplanted into the new head
    intended, and the retrained model absorbs it.
  - forces (difference protocol, new path on - off, h = 0.01 A, sid 1 atoms Ni/C/H): dF_autograd - dF_FD = -2.5e-5 / +6e-7 / -5e-6 eV/A
    (new-term forces 0.651 / 0.286 / 0.098 eV/A); full-model autograd-vs-FD gap unchanged (6.0e-4 vs 6.3e-4, -3.2e-5, 3.1e-4).
- - force-loss parameter gradient (job 3486509): pending at submission (job 3486509, GPU dev queue, scheduler estimate 19:30); production submitted with checks 1-4 passed, to be cancelled before it starts if this check fails
+ - force-loss parameter gradient (job 3486509, 55 s, rc 0; preflight_paramgrad.json): sid 1, force loss LF = 2.3467 (sum F^2 / nat, positions
+   differentiable, create_graph), random unit direction v over the head's two readouts (2304 + 6912 weights), eps 1e-3:
+   v.grad_AD = +3.313850e-03, central FD +3.313858e-03, rel gap -2.58e-06; |grad| original readout 0.1453, augmented readout 0.1498
+   -> the new branch receives a force-loss gradient of the same size as the old readout (not zero, not detached). This check used
+   the interim 16-pair scalar statistics (mean [-0.536, -10.97, -0.0026], std [0.546, 10.05, 0.096]); the production uses the
+   480-frame statistics above. Checks 1-5 all passed; the production job stays.
  - 3-GPU DDP smoke (smoke_chargeinput_repair, 2 epochs, warm-up 0, job 3486242, rc 0): step time mean 1.76 / 1.67 s (max 5.3 / 1.9 s),
    CUDA peak 27.50 / 27.61 GiB, host RSS 35.5 GiB; baseline production PB epochs: 1.60-1.69 s, 26.30-26.35 GiB. The smoke's 1-D solver
    iteration counts (mean 9.9-10.1, cap hit 61-77 / 213) are a from-scratch / warm-up-0 effect (baseline epoch 20: mean 7.7, 0 / 213);

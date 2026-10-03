@@ -1,0 +1,40 @@
+{
+ "meta": {
+  "model": "/scratch/08384/tg876840/tmp/c-MACEsol/3-residual_3D/prod500_vsolv_fix/models/prod500_vsolv_fix.model",
+  "mask": {
+   "sigma": 0.25,
+   "t0": 0.0001,
+   "t1": 0.01,
+   "min_layer": 0.001
+  },
+  "scal_source": "16 training pairs (arms run)",
+  "pairs": [
+   1,
+   52
+  ],
+  "big": [
+   201
+  ],
+  "code": "6c17c9d RUNS: prod500_chargeinput_repair production submitted (job 3486593, gpu-a100 48 h): code changes, pre-flight results, DDP step time and memory, config and job snapshots"
+ },
+ "frames": {},
+ "forces": {},
+ "param_grad": {
+  "sid": 1,
+  "eps": 0.001,
+  "LF": 2.346744921592234,
+  "v_dot_grad_AD": 0.0033138497384086647,
+  "FD": 0.0033138582724578924,
+  "rel_gap": -2.5752607764302527e-06,
+  "params": [
+   [
+    2304
+   ],
+   [
+    6912
+   ]
+  ],
+  "grad_norm_linear": 0.1452524807515869,
+  "grad_norm_aug": 0.1497692197959994
+ }
+}
