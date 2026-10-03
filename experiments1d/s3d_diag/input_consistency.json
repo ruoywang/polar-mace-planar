@@ -1,0 +1,650 @@
+[
+ {
+  "sid": 1,
+  "pair": 1,
+  "q": -1.0,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": 661.0,
+   "total_charge": -1.0,
+   "nelect_source": "INCAR",
+   "model_raw": 660.99991298725,
+   "model_clamped": 661.3336847452623,
+   "model_clipped": 0.3337717580123335,
+   "model_neg_points_frac": 0.33824366666666666,
+   "model_neg_min": -0.02885497141476686,
+   "dft_raw": 660.9975595327777,
+   "dft_clamped": 661.0084989012097,
+   "dft_clipped": 0.01093936843203765,
+   "net_model_e": -1.0000000000000004,
+   "net_dft_e": -0.9976465455277796,
+   "neutral_e": 659.99991298725
+  },
+  "clipped_location": {
+   "dft_interior": 0.8654482856629753,
+   "dft_interface": 0.13455171433702456,
+   "dft_solvent": 0.0,
+   "model_interior": 0.8654482856629753,
+   "model_interface": 0.13455171433702456,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.032356271355564015
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 2.5331021074835993,
+   "model_solute_dft_solvent_A3": 62.88924063703102,
+   "model_solvent_A3": 4400.504981120509,
+   "dft_solvent_A3": 4460.861119650056,
+   "s_diel_L1": 0.016466642672228114,
+   "s_diel_vol_diff_A3": -64.80776414594249,
+   "s_ion_vol_diff_A3": -19.14428569834237
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.4375315434366083,
+   "lateral_rms": 0.08036400934766441,
+   "pa_slope_eV_per_A": -0.020628246873123326,
+   "pa_rms_lineremoved": 0.33640601114357416,
+   "cv_prod_lateral_rms": 4.553099983516315
+  },
+  "dipole": {
+   "dft_solute": 6.165071092951326,
+   "dft_bound": -6.6125369161920995,
+   "dft_ion": 0.8152132172612134,
+   "model_solute": 6.370778658974839,
+   "solver_val_ion_dipole_z": -6.368221268610625,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": -5.797323698930886,
+   "dft_total": 0.3677473940204399
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": 0.007604039108139439,
+   "measured_slope_model": 0.00896747022858526,
+   "lineremoved_assembly": 0.010696178231267495,
+   "lineremoved_model": 0.054519092567149825,
+   "implied_dipole_assembly": 0.3588147363524248,
+   "implied_dipole_model": 0.42315148831544314,
+   "pa_rms_dft_solute": 3.471066968627414
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0007917192267969092,
+    "slope_left": -5.1460299500879506e-05,
+    "rms_lineremoved": 0.00042419772797335186
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 1.5775534720748006,
+    "slope_left": -0.12073595423393722,
+    "rms_lineremoved": 0.16966805986667266
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 1.6762370150762982,
+    "slope_left": 0.12828853304257576,
+    "rms_lineremoved": 0.1802857834873337
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.06485521582949919,
+    "slope_left": -0.0029703005844986395,
+    "rms_lineremoved": 0.0521284642682872
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.0550867895335117,
+    "slope_left": 0.001311970820944955,
+    "rms_lineremoved": 0.052384078337857895
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.05893216882774935,
+   "model": 0.43137763467283446
+  }
+ },
+ {
+  "sid": 601,
+  "pair": 1,
+  "q": 0.0,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": 660.0,
+   "total_charge": 0.0,
+   "nelect_source": "neutral: no NELECT line, target = round(DFT raw integral)",
+   "model_raw": 659.99991298725,
+   "model_clamped": 660.4295458014095,
+   "model_clipped": 0.42963281415957266,
+   "model_neg_points_frac": 0.35434466666666664,
+   "model_neg_min": -0.026587379927519552,
+   "dft_raw": 659.9975988369731,
+   "dft_clamped": 660.0086175480396,
+   "dft_clipped": 0.011018711066626188,
+   "net_model_e": 6.752088665962219e-15,
+   "net_dft_e": 0.002314150276931934,
+   "neutral_e": 659.99991298725
+  },
+  "clipped_location": {
+   "dft_interior": 0.7390335717680828,
+   "dft_interface": 0.260966428231917,
+   "dft_solvent": 0.0,
+   "model_interior": 0.7390335717680827,
+   "model_interface": 0.260966428231917,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.07441567261161326
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 2.6241799360672795,
+   "model_solute_dft_solvent_A3": 62.59039151199082,
+   "model_solvent_A3": 4407.799745953633,
+   "dft_solvent_A3": 4467.7659575295565,
+   "s_diel_L1": 0.016414054639747055,
+   "s_diel_vol_diff_A3": -64.4750525998928,
+   "s_ion_vol_diff_A3": -22.62899609184168
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.47361616874122814,
+   "lateral_rms": 0.08873286640668346,
+   "pa_slope_eV_per_A": -0.025711805919138523,
+   "pa_rms_lineremoved": 0.32385163371167885,
+   "cv_prod_lateral_rms": 4.558555556232346
+  },
+  "dipole": {
+   "dft_solute": -3.6510939655174948,
+   "dft_bound": 0.3804431325787162,
+   "dft_ion": 0.00765684933249518,
+   "model_solute": -3.407553820928923,
+   "solver_val_ion_dipole_z": 3.4101111851472865,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": 0.38809998191121137,
+   "dft_total": -3.2629939836062833
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": -0.06797942738987314,
+   "measured_slope_model": -0.06731344816462927,
+   "lineremoved_assembly": 0.09552998376989764,
+   "lineremoved_model": 0.10178242594042788,
+   "implied_dipole_assembly": -3.2077715500143436,
+   "implied_dipole_model": -3.1763457305618523,
+   "pa_rms_dft_solute": 4.147306207617635
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0008063816825997692,
+    "slope_left": -5.277742632946743e-05,
+    "rms_lineremoved": 0.00042450850996724246
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 0.10487527136259683,
+    "slope_left": 0.00802640744332965,
+    "rms_lineremoved": 0.011289298194753005
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 0.9937928189608348,
+    "slope_left": -0.07605861225953224,
+    "rms_lineremoved": 0.10688352377152585
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.07279348288317664,
+    "slope_left": -0.00445664087828705,
+    "rms_lineremoved": 0.04412767239170801
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.044858433775718624,
+    "slope_left": 0.0006132017989144657,
+    "rms_lineremoved": 0.044145515732934404
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.05893216882821681,
+   "model": 0.40478775329316485
+  }
+ },
+ {
+  "sid": 52,
+  "pair": 52,
+  "q": -1.0719000000000278,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": 661.071886,
+   "total_charge": -1.0719000000000278,
+   "nelect_source": "INCAR",
+   "model_raw": 661.0718125732943,
+   "model_clamped": 661.359668674619,
+   "model_clipped": 0.28785610132462536,
+   "model_neg_points_frac": 0.33800233333333335,
+   "model_neg_min": -0.020106497425448795,
+   "dft_raw": 661.0717622173474,
+   "dft_clamped": 661.084338847811,
+   "dft_clipped": 0.012576630463588569,
+   "net_model_e": -1.0719000000000278,
+   "net_dft_e": -1.0718496440530985,
+   "neutral_e": 659.9999125732943
+  },
+  "clipped_location": {
+   "dft_interior": 0.8294059451069375,
+   "dft_interface": 0.17059405489306234,
+   "dft_solvent": 0.0,
+   "model_interior": 0.8294059451069378,
+   "model_interface": 0.17059405489306234,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.020329286524357032
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 2.4904093753349996,
+   "model_solute_dft_solvent_A3": 53.66476431079019,
+   "model_solvent_A3": 4414.576505636687,
+   "dft_solvent_A3": 4465.750860572142,
+   "s_diel_L1": 0.01528542915205221,
+   "s_diel_vol_diff_A3": -59.864805665672705,
+   "s_ion_vol_diff_A3": -23.164877224454848
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.35722276226583294,
+   "lateral_rms": 0.06521131408362152,
+   "pa_slope_eV_per_A": -0.017369376305819723,
+   "pa_rms_lineremoved": 0.26915623987455456,
+   "cv_prod_lateral_rms": 4.5144654910339606
+  },
+  "dipole": {
+   "dft_solute": 6.709745943530724,
+   "dft_bound": -7.070265032389397,
+   "dft_ion": 0.8157477324867664,
+   "model_solute": 6.8526841259728855,
+   "solver_val_ion_dipole_z": -6.850755180236376,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": -6.254517299902631,
+   "dft_total": 0.455228643628093
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": 0.009445697315539714,
+   "measured_slope_model": 0.010271838064146506,
+   "lineremoved_assembly": 0.01333326053879933,
+   "lineremoved_model": 0.04888909824708788,
+   "implied_dipole_assembly": 0.4457177749536159,
+   "implied_dipole_model": 0.4847011981956187,
+   "pa_rms_dft_solute": 3.5272318141800802
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0011143697459163127,
+    "slope_left": -3.0923507073301474e-05,
+    "rms_lineremoved": 0.0010394475195758504
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 1.7016409933274037,
+    "slope_left": -0.13023294332565377,
+    "rms_lineremoved": 0.18299992722628508
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 1.824659809312898,
+    "slope_left": 0.13964771713412027,
+    "rms_lineremoved": 0.19626769020634632
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.054039691737771976,
+    "slope_left": -0.0021803665119011413,
+    "rms_lineremoved": 0.04602232402065897
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.04726623708396991,
+    "slope_left": 0.0007952172415335006,
+    "rms_lineremoved": 0.04612358485195173
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.059010710570972076,
+   "model": 0.38862096802185836
+  }
+ },
+ {
+  "sid": 652,
+  "pair": 52,
+  "q": 0.0,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": 660.0,
+   "total_charge": 0.0,
+   "nelect_source": "neutral: no NELECT line, target = round(DFT raw integral)",
+   "model_raw": 659.9999125732942,
+   "model_clamped": 660.3831289622968,
+   "model_clipped": 0.38321638900258687,
+   "model_neg_points_frac": 0.35222766666666666,
+   "model_neg_min": -0.021264846591882804,
+   "dft_raw": 659.9998177382657,
+   "dft_clamped": 660.0125257365253,
+   "dft_clipped": 0.012707998259492431,
+   "net_model_e": 1.4183266709248225e-14,
+   "net_dft_e": 9.483502847976828e-05,
+   "neutral_e": 659.9999125732943
+  },
+  "clipped_location": {
+   "dft_interior": 0.6788491279055819,
+   "dft_interface": 0.32115087209441795,
+   "dft_solvent": 0.0,
+   "model_interior": 0.6788371036157521,
+   "model_interface": 0.3211628963842478,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.08521624034910266
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 2.2968689895946794,
+   "model_solute_dft_solvent_A3": 54.399079303746106,
+   "model_solvent_A3": 4420.89502999468,
+   "dft_solvent_A3": 4472.997240308831,
+   "s_diel_L1": 0.015381536760457303,
+   "s_diel_vol_diff_A3": -60.67788914449675,
+   "s_ion_vol_diff_A3": -27.03803812055722
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.3883818187507381,
+   "lateral_rms": 0.0683741726939651,
+   "pa_slope_eV_per_A": -0.022327403518777093,
+   "pa_rms_lineremoved": 0.24908288660571656,
+   "cv_prod_lateral_rms": 4.520439581158209
+  },
+  "dipole": {
+   "dft_solute": -3.4837500041242784,
+   "dft_bound": 0.3009833762236896,
+   "dft_ion": 0.019632481514092213,
+   "model_solute": -3.3498057353273665,
+   "solver_val_ion_dipole_z": 3.3517346188156694,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": 0.3206158577377818,
+   "dft_total": -3.1631341463864966
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": -0.06588021874354501,
+   "measured_slope_model": -0.06481109131343944,
+   "lineremoved_assembly": 0.09256824487602691,
+   "lineremoved_model": 0.09763348037136378,
+   "implied_dipole_assembly": -3.108715379172889,
+   "implied_dipole_model": -3.0582660493489744,
+   "pa_rms_dft_solute": 4.15297143965683
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0011213692856700877,
+    "slope_left": -3.237868352075877e-05,
+    "rms_lineremoved": 0.0010394978602776045
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 0.08679319455053289,
+    "slope_left": 0.0066419704727244165,
+    "rms_lineremoved": 0.009410202646118405
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 0.9480071538358608,
+    "slope_left": -0.0725545678997902,
+    "rms_lineremoved": 0.10194713707687747
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.046476019878877506,
+    "slope_left": -0.001751606214197195,
+    "rms_lineremoved": 0.040525010970304656
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.042864599876797006,
+    "slope_left": 0.001036748746584868,
+    "rms_lineremoved": 0.040693906844539045
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.059010710572959986,
+   "model": 0.3670094050739713
+  }
+ },
+ {
+  "sid": 152,
+  "pair": 152,
+  "q": -1.0780999999999494,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": 661.078073,
+   "total_charge": -1.0780999999999494,
+   "nelect_source": "INCAR",
+   "model_raw": 661.0780116850444,
+   "model_clamped": 661.438842723042,
+   "model_clipped": 0.36083103799751604,
+   "model_neg_points_frac": 0.33502966666666667,
+   "model_neg_min": -0.03340071551926022,
+   "dft_raw": 661.0805111607779,
+   "dft_clamped": 661.0922054605394,
+   "dft_clipped": 0.01169429976156596,
+   "net_model_e": -1.0780999999999423,
+   "net_dft_e": -1.08059947573332,
+   "neutral_e": 659.9999116850445
+  },
+  "clipped_location": {
+   "dft_interior": 0.8988739512104507,
+   "dft_interface": 0.10112604878954944,
+   "dft_solvent": 0.0,
+   "model_interior": 0.8992034253648277,
+   "model_interface": 0.10079657463517229,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.0560009160626182
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 2.3651773610324396,
+   "model_solute_dft_solvent_A3": 51.66674444623571,
+   "model_solvent_A3": 4427.529480570573,
+   "dft_solvent_A3": 4476.831047655776,
+   "s_diel_L1": 0.014371787508612843,
+   "s_diel_vol_diff_A3": -56.431674869636865,
+   "s_ion_vol_diff_A3": -4.730610140117859
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.49743537261228227,
+   "lateral_rms": 0.09414770989862288,
+   "pa_slope_eV_per_A": -0.023123183631616483,
+   "pa_rms_lineremoved": 0.38516442928564154,
+   "cv_prod_lateral_rms": 4.546199685113136
+  },
+  "dipole": {
+   "dft_solute": 6.739502138024104,
+   "dft_bound": -6.686886800225373,
+   "dft_ion": 0.778540253402447,
+   "model_solute": 7.1660939813501265,
+   "solver_val_ion_dipole_z": -7.164001558763289,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": -5.908346546822926,
+   "dft_total": 0.8311555912011777
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": 0.017266242151074508,
+   "measured_slope_model": 0.016633694511815324,
+   "lineremoved_assembly": 0.024278508934995648,
+   "lineremoved_model": 0.08568507343254597,
+   "implied_dipole_assembly": 0.8147488508578716,
+   "implied_dipole_model": 0.7849005805921145,
+   "pa_rms_dft_solute": 3.475241198838119
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0008365383328940994,
+    "slope_left": -3.6154112116653675e-05,
+    "rms_lineremoved": 0.0006922577515528045
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 1.6075517002904072,
+    "slope_left": -0.12303184143661362,
+    "rms_lineremoved": 0.17289287938012898
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 1.8326835051186388,
+    "slope_left": 0.1402619294755714,
+    "rms_lineremoved": 0.19711510425244577
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.14888238474294693,
+    "slope_left": -0.009549182366569616,
+    "rms_lineremoved": 0.08233006367561116
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.08210628839635889,
+    "slope_left": -0.0006687017513758161,
+    "rms_lineremoved": 0.08164547937951598
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.0590724770172273,
+   "model": 0.4164913621639799
+  }
+ },
+ {
+  "sid": 752,
+  "pair": 152,
+  "q": 0.0,
+  "split": "train",
+  "gto_calls": 5,
+  "gto_match_maxdev": 0.0,
+  "gto_sigmas": [
+   0.25,
+   0.5,
+   1.0
+  ],
+  "electrons": {
+   "nelect": null,
+   "total_charge": 0.0,
+   "nelect_source": "neutral: no NELECT line, target = round(DFT raw integral)",
+   "model_raw": 659.9999116850445,
+   "model_clamped": 660.4294668034727,
+   "model_clipped": 0.42955511842820443,
+   "model_neg_points_frac": 0.3496593333333333,
+   "model_neg_min": -0.028668483099545727,
+   "dft_raw": 660.0025742731333,
+   "dft_clamped": 660.0143886074083,
+   "dft_clipped": 0.01181433427498142,
+   "net_model_e": 0.0,
+   "net_dft_e": -0.0026625880888509175,
+   "neutral_e": 659.9999116850445
+  },
+  "clipped_location": {
+   "dft_interior": 0.8243114594993619,
+   "dft_interface": 0.17568854050063784,
+   "dft_solvent": 0.0,
+   "model_interior": 0.8246698287348956,
+   "model_interface": 0.1753301712651043,
+   "model_solvent": 0.0,
+   "in_slab_zrange": 0.09070621524525846
+  },
+  "cavity": {
+   "model_solvent_dft_solute_A3": 1.8927111252545996,
+   "model_solute_dft_solvent_A3": 51.515896792643986,
+   "model_solvent_A3": 4434.602243196524,
+   "dft_solvent_A3": 4484.225428863913,
+   "s_diel_L1": 0.014189547209513887,
+   "s_diel_vol_diff_A3": -56.66514697463166,
+   "s_ion_vol_diff_A3": -6.963109131592827
+  },
+  "poisson_source": {
+   "clamped_minus_unclamped_rms": 0.5360389503152451,
+   "lateral_rms": 0.09950024999087784,
+   "pa_slope_eV_per_A": -0.027099865858255225,
+   "pa_rms_lineremoved": 0.39180144576409776,
+   "cv_prod_lateral_rms": 4.556805885264598
+  },
+  "dipole": {
+   "dft_solute": -4.2413092427081285,
+   "dft_bound": 0.7156913823742059,
+   "dft_ion": 0.029159912600278576,
+   "model_solute": -3.7387294793995247,
+   "solver_val_ion_dipole_z": 3.740821850661007,
+   "solver_c_unit": -0.00047093563816613627,
+   "c_unit": -0.00047093563816613627,
+   "center_z": 22.5,
+   "indmin": 1,
+   "dft_solvent": 0.7448512949744845,
+   "dft_total": -3.496457947733644
+  },
+  "ramp": {
+   "slope_per_unit_dipole": 0.02119210371747613,
+   "measured_slope_assembly": -0.07282472128198761,
+   "measured_slope_model": -0.07386828530834813,
+   "lineremoved_assembly": 0.1023380064654554,
+   "lineremoved_model": 0.13341640721493936,
+   "implied_dipole_assembly": -3.4364083081535926,
+   "implied_dipole_model": -3.485651367751302,
+   "pa_rms_dft_solute": 4.289096631102163
+  },
+  "ramp_after_sawtooth": {
+   "assembly-saw(dft_total)": {
+    "rms_meanremoved": 0.0008502796058465429,
+    "slope_left": -3.798728210928911e-05,
+    "rms_lineremoved": 0.0006924337237740831
+   },
+   "assembly-saw(dft_solute)": {
+    "rms_meanremoved": 0.2021060556176567,
+    "slope_left": 0.015467788530785646,
+    "rms_lineremoved": 0.02175230722628219
+   },
+   "assembly-saw(dft_solvent)": {
+    "rms_meanremoved": 1.1541389155831605,
+    "slope_left": -0.08833049709488246,
+    "rms_lineremoved": 0.1241277849701857
+   },
+   "model-saw(model_solute+dft_solvent)": {
+    "rms_meanremoved": 0.1740151396522372,
+    "slope_left": -0.011543893510919875,
+    "rms_lineremoved": 0.08828071403129992
+   },
+   "model-saw(dft_total)": {
+    "rms_meanremoved": 0.08840245976951239,
+    "slope_left": -0.0010815513084699326,
+    "rms_lineremoved": 0.08727886241719536
+   }
+  },
+  "lateral_rms_err": {
+   "assembly": 0.059072477016965955,
+   "model": 0.4240164536796479
+  }
+ }
+]
