@@ -5034,7 +5034,17 @@ Reading:
     (norm-balanced, KIT_PA_WEIGHT=1), 400 iterations (job 3486066).
  4. Not done: native-grid check of the polarization representation (the fitted psi can be evaluated on the native grid
     with the saved parameters), force / gradient / step-time / memory of the new path, the 10-epoch A/B.
-No training, no production-code change. Files: experiments1d/s3d_diag/s3d_head_arms.py, job_arms_gpu.sh, arms_A/, arms_BC/
+No training, no production-code change. C2 (job 3486066, 21 min; polarization psi head, FULL target + norm-balanced plane-average rows, 400 iterations; residual
+0.505 -> 0.492): validation medians charged eps3d 0.791 lat 0.707 pa 0.575 zone 0.000 | neutral 0.783 | response lat 0.876
+corr +0.589 eps3d 0.967 | phi total c 0.748 n 0.119 resp 0.817 | phi bound c 0.841 resp 0.889.  The plane-average rows moved
+the plane average only 0.620 -> 0.575 and the potentials 0.77 -> 0.75 eV while the lateral part worsened (0.652 -> 0.707) and the
+response correlation fell (0.627 -> 0.589): with equal weight on the planar target the fit still cannot produce the planar bound
+layer. Reading: the limitation is the representation's planar capability (P = grad psi on the atom-centred GTO basis, sigmas
+0.5/1/2 A, with the production cavity), not the objective weighting. As implemented, the polarization arm delivers the
+forbidden zone (0) and the lateral response direction (corr 0.59-0.63, 20/20) but not the plane average, hence not the
+potential; it does not pass. Open options (not run): a general vector P_theta (reviewer's form) or interface-centred basis
+functions for psi; both change the representation again and need the reviewer's call.
+Files: experiments1d/s3d_diag/s3d_head_arms.py, job_arms_gpu.sh, arms_A/, arms_BC/, arms_C2/
 (results.json, params_*.npy).
 
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
