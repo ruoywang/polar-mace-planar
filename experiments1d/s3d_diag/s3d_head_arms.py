@@ -10,7 +10,7 @@ autograd), on a fixed set of training pairs; the fixed 20 validation pairs are t
     C   POLARIZATION representation for the bound channel: psi(r) = sum_atoms GTO basis . c_psi, P = grad psi,
         rho_b = -w_b * div( S_diel(r) P ),  S_diel = the production cavity (clamped), w_b = the closure's Gaussian (sigma_b);
         c_psi from a zero-initialised equivariant linear readout of the same augmented features; NO 1-D background (the plane
-        average comes from the 3-D field itself); ions = arm B's ion channel.  P = grad psi is chosen so that the field is
+        average comes from the 3-D field itself); ions = the production ion channel (so the arms are independent jobs).  P = grad psi is chosen so that the field is
         equivariant with the existing scalar basis and matches the VASPsol relation P = -chi grad phi (psi plays chi phi).
 Fit objectives: A/B bound and ion = lateral target (the production's design; the plane average is not theirs to change);
 C bound = the FULL DFT bound charge at the same points. Metrics on the full DFT grid for every arm and frame: bound / ion /
@@ -52,10 +52,10 @@ ints = lambda k, d: [int(s) for s in os.environ.get(k, d).replace("+", " ").spli
 ARMS = os.environ.get("KIT_ARMS", "A+B+C").replace("+", " ").split()
 STAGES = set(os.environ.get("KIT_STAGES", "fit+eval").replace(",", "+").split("+"))
 VAL_PAIRS = ints("KIT_VAL_PAIRS", "28 30 43 60 61 62 69 79 83 94 128 134 148 153 159 177 180 185 186 189")
-N_HEAD = int(os.environ.get("KIT_N_HEAD_PAIRS", "20"))
+N_HEAD = int(os.environ.get("KIT_N_HEAD_PAIRS", "16"))
 NFIT = int(os.environ.get("KIT_NFIT", "300000")); NHOLD = int(os.environ.get("KIT_NHOLD", "100000"))
-ITER = int(os.environ.get("KIT_ITER", "400")); TOL = float(os.environ.get("KIT_TOL", "1e-8")); RIDGE = float(os.environ.get("KIT_RIDGE", "1e-2"))
-NDIAG = int(os.environ.get("KIT_NDIAG", "3")); NPROBE = int(os.environ.get("KIT_NPROBE", "32"))
+ITER = int(os.environ.get("KIT_ITER", "250")); TOL = float(os.environ.get("KIT_TOL", "1e-8")); RIDGE = float(os.environ.get("KIT_RIDGE", "1e-2"))
+NDIAG = int(os.environ.get("KIT_NDIAG", "3")); NPROBE = int(os.environ.get("KIT_NPROBE", "32")); EVAL_V0 = os.environ.get("KIT_EVAL_V0", "1") == "1"
 torch.set_default_dtype(torch.float64)
 dev = torch.device(os.environ.get("KIT_DEVICE", "cuda:0"))
 if dev.type == "cpu":
@@ -442,18 +442,18 @@ if "fit" in STAGES:
         xb, _ = lsqr_fit([(s, "b", "lat") for s in hsids], lambda x, s, ch: dfield(CTX[s], ch, coeffs_A(x, CTX[s])[:, 0]), x0_head, f"A bound (production head refit), {len(hsids)} frames")
         xi, _ = lsqr_fit([(s, "i", "lat") for s in charged], lambda x, s, ch: dfield(CTX[s], ch, coeffs_A(x, CTX[s])[:, 1]), x0_head, f"A ion (gated), {len(charged)} frames")
         X["A"] = dict(head=x0_head + (xb - x0_head) + (xi - x0_head)); np.save(OUT / "params_A.npy", X["A"]["head"])
-    if "B" in ARMS or "C" in ARMS:
+    if "B" in ARMS:
         x0B = np.concatenate([x0_head, x0_aug])
         xb, _ = lsqr_fit([(s, "b", "lat") for s in hsids], lambda x, s, ch: dfield(CTX[s], ch, coeffs_B(x, CTX[s])[:, 0]), x0B, f"B bound (head + charge-state augmented head), {len(hsids)} frames")
         xi, _ = lsqr_fit([(s, "i", "lat") for s in charged], lambda x, s, ch: dfield(CTX[s], ch, coeffs_B(x, CTX[s])[:, 1]), x0B, f"B ion (gated, augmented), {len(charged)} frames")
         X["B"] = dict(full=x0B + (xb - x0B) + (xi - x0B)); np.save(OUT / "params_B.npy", X["B"]["full"])
     if "C" in ARMS:
         xp, _ = lsqr_fit([(s, "b", "full") for s in hsids], lambda x, s, ch: polfield(CTX[s], coeffs_psi(x, CTX[s])), x0_psi, f"C bound (polarization psi head, FULL target), {len(hsids)} frames")
-        X["C"] = dict(psi=xp, ion=X["B"]["full"]); np.save(OUT / "params_C_psi.npy", xp)
+        X["C"] = dict(psi=xp); np.save(OUT / "params_C_psi.npy", xp)
 else:
     if "A" in ARMS: X["A"] = dict(head=np.load(OUT / "params_A.npy"))
-    if "B" in ARMS or "C" in ARMS: X["B"] = dict(full=np.load(OUT / "params_B.npy"))
-    if "C" in ARMS: X["C"] = dict(psi=np.load(OUT / "params_C_psi.npy"), ion=X["B"]["full"])
+    if "B" in ARMS: X["B"] = dict(full=np.load(OUT / "params_B.npy"))
+    if "C" in ARMS: X["C"] = dict(psi=np.load(OUT / "params_C_psi.npy"))
 save()
 
 
@@ -466,17 +466,17 @@ def fields_for(arm, sid, dft_cavity=False):
         if arm == "A":
             c = coeffs_A(torch.as_tensor(X["A"]["head"], device=dev), ctx)
             return {"b": (ctx["B"]["b"], dfield(ctx, "b", c[:, 0], env["b"])), "i": (ctx["B"]["i"], dfield(ctx, "i", c[:, 1], env["i"]))}
-        cB = coeffs_B(torch.as_tensor(X["B"]["full"], device=dev), ctx)
         if arm == "B":
+            cB = coeffs_B(torch.as_tensor(X["B"]["full"], device=dev), ctx)
             return {"b": (ctx["B"]["b"], dfield(ctx, "b", cB[:, 0], env["b"])), "i": (ctx["B"]["i"], dfield(ctx, "i", cB[:, 1], env["i"]))}
         if arm == "C":
-            return {"b": (None, polfield(ctx, coeffs_psi(torch.as_tensor(X["C"]["psi"], device=dev), ctx), S)), "i": (ctx["B"]["i"], dfield(ctx, "i", cB[:, 1], env["i"]))}
+            return {"b": (None, polfield(ctx, coeffs_psi(torch.as_tensor(X["C"]["psi"], device=dev), ctx), S)), "i": (ctx["B"]["i"], dfield(ctx, "i", ctx["c0"][:, 1], env["i"]))}
     raise ValueError(arm)
 
 
 # ------------------------------------------------------------------ evaluation: training pairs, validation pairs, DFT-cavity diagnostic
 if "eval" in STAGES:
-    arms_eval = ["V0"] + [a for a in ARMS if a in X]
+    arms_eval = (["V0"] if EVAL_V0 else []) + [a for a in ARMS if a in X]
     for group, pairs in (("train", HEAD_PAIRS), ("val", VAL_PAIRS)):
         for k in pairs:
             F = {}
