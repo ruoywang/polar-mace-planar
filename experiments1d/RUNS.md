@@ -5047,6 +5047,55 @@ functions for psi; both change the representation again and need the reviewer's 
 Files: experiments1d/s3d_diag/s3d_head_arms.py, job_arms_gpu.sh, arms_A/, arms_BC/, arms_C2/
 (results.json, params_*.npy).
 
+## 2026-10-03 PRODUCTION prod500_chargeinput_repair: charge-state inputs to the 3-D solvent head + unified full-field repair (reviewer minimal plan 2026-10-03; code d2a5a3e..d6647fa; pre-flight jobs 3486208 / 3486241 / 3486242 / 3486509; run dir 3-residual_3D/prod500_chargeinput_repair)
+
+Scope (fixed by the reviewer): baseline prod500_vsolv_fix; keep the 1-D PB, the direct-charge GTO head and the 0.15 A grid; only
+(a) charge-state inputs, (b) deterministic cancellation of the 1-D background in the forbidden zone, (c) per-layer conservation
+compensation inside the allowed region. No polarization representation, no finer grid, no 3-D self-consistent solve.
+CODE CHANGES
+ - solvent3d.py Solvent3DChargeHead: charge_state_input (per-atom scalars s = standardised [Q_total, phi_1D(z_a) of THIS solve,
+   q_a model per-atom charge] multiply the node features -> cat[s1 f, s2 f, s3 f] -> a second e3nn Linear readout (9216 weights,
+   zero-initialised; the original 2304-weight readout stays); buffers scal_mean / scal_std from the training-set statistics;
+   ion_gate=False removes the global net-charge multiplication of the ion channel. Old pickled models keep their behaviour.
+ - pb1d_backend.py solve_graph: the head is evaluated INSIDE the solve, after the 1-D profiles (phi_at = interp of out["phi"]
+   at the atoms; no second PB solve); the scalars enter as detached features (same convention as the q gate), the coefficients
+   keep the gradient path head -> node feats -> trunk. Unified repair _s3d_repair on both channels:
+       rho_new = M rho + (M/Mbar)[B(z) - mean_xy(M rho)]   (layers with Mbar > min_layer),   rho_new = M rho   (other layers; reported)
+   with rho = B(z) + delta, M = _s3d_allowed_weight(model cavity): Gaussian smoothing sigma 0.25 A, quintic C2 smoothstep of log10
+   between t0 = 1e-4 and t1 = 1e-2; bound uses s_diel, ions use s_ion; weights from the MODEL cavity only. Energy side with the live
+   cavity, supervision side with the frozen stash (values equal); delta_new = rho_new - B feeds the loss (base_b + interp d_sup),
+   the energy integrals (e_xsol, e_self) and the export (d_sup); diagnostics s3d_obs["repair"] (dropped layers, dropped 1-D
+   charge, kept-layer residual, zone mass before/after, net charge). Parameters in config (solvent3d_repair, _mask_sigma/_t0/_t1/
+   _min_layer, _charge_state_input, _ion_gate, _scal_mean/_scal_std); CLI wiring in arg_parser / model_script_utils.
+ - standardisation (s3d_scal_stats.py, job 3486208, baseline model, 480 solvated training frames / 120480 atoms):
+   mean [-0.795029, -9.220073, -0.002902], std [0.50287, 9.419123, 0.102076]  (Q, phi_1D(z_a) eV, q_a e).
+PRE-FLIGHT (preflight_repair.py: baseline weights transplanted into the new head, augmented block zero, repair on; job 3486241)
+ frames 1/601, 52/652 (NiN44, 207 atoms) and 201 (NiN88, 339 atoms), old -> new:
+ - forbidden-zone bound mass (M < 1e-3): 0.165 / 0.077 / 0.172 / 0.049 / 0.256 e -> 2.4e-6 / 1.3e-6 / 2.5e-6 / 9.5e-7 / 3.1e-6 e
+   (of 3.06 / 2.00 / 3.25 / 2.13 / 3.41 e total |rho_b^DFT|); ion zone 4.7e-3 .. 8.8e-3 -> <= 2.2e-7 e.
+ - kept layers: max |mean_xy(rho_new) - B(z)| = 0.0 (exact); dropped layers (Mbar <= 1e-3): bound 99 / 94 / 111 / 95 / 125 of 300,
+   ions 154 / 154 / 154 / 154 / 204; 1-D charge in them: bound -4.8e-4 / -3.0e-5 / +2.3e-4 / -4.7e-5 / +4.1e-4 e, ions <= 1.9e-6 e
+   -> the 1-D tails are compatible; net bound charge changes by the same <= 4.8e-4 e; net ion charge exact (+1.0000 / 0 / +1.0719 / 0 / +1.0000).
+ - consistency: loss-facing field (base_b(z_p) + interp3 d_sup) vs energy-side field (B + delta) at 5e4 label points: max abs
+   1.2e-4 .. 1.7e-4 e/A^3, IDENTICAL to 12 digits with and without the repair (= the pre-existing 600-plane vs 300-plane
+   interpolation of B); the exported field is the same object.
+ - energy: e_s3d moves with the baseline coefficients (sid 1: -0.276 -> -1.191 eV; 601: -0.239 -> +0.177; 201: -0.231 -> -1.683)
+   because each layer's 1-D charge now sits in the allowed region only (a half-solute layer doubles its solvent-side density);
+   intended, and the retrained model absorbs it.
+ - forces (difference protocol, new path on - off, h = 0.01 A, sid 1 atoms Ni/C/H): dF_autograd - dF_FD = -2.5e-5 / +6e-7 / -5e-6 eV/A
+   (new-term forces 0.651 / 0.286 / 0.098 eV/A); full-model autograd-vs-FD gap unchanged (6.0e-4 vs 6.3e-4, -3.2e-5, 3.1e-4).
+ - force-loss parameter gradient (job 3486509): pending at submission (job 3486509, GPU dev queue, scheduler estimate 19:30); production submitted with checks 1-4 passed, to be cancelled before it starts if this check fails
+ - 3-GPU DDP smoke (smoke_chargeinput_repair, 2 epochs, warm-up 0, job 3486242, rc 0): step time mean 1.76 / 1.67 s (max 5.3 / 1.9 s),
+   CUDA peak 27.50 / 27.61 GiB, host RSS 35.5 GiB; baseline production PB epochs: 1.60-1.69 s, 26.30-26.35 GiB. The smoke's 1-D solver
+   iteration counts (mean 9.9-10.1, cap hit 61-77 / 213) are a from-scratch / warm-up-0 effect (baseline epoch 20: mean 7.7, 0 / 213);
+   the production keeps warm-up 20. All loss terms and the post-training error tables ran.
+PRODUCTION: config = prod500_vsolv_fix + the flags above (seed 123, split, lr, weights, warm-up 20, EMA unchanged); new branch
+init = zeros (both the augmented readout and, as before, the original readout); training from scratch, epochs 0-499; segmented job
+script as the baseline (lock, budget plan, resume from checkpoints/segments). Job: 3486593 (gpu-a100, 48 h, WALL=172800, submitted 2026-10-03 16:27 CDT from login2; continuation segments from the login node as in the baseline)
+Evaluation plan (item 6): eval_ckpt_s3d.py on the 20 validation pairs at epochs 50 / 100 / 200 / 500 (bound / ion / total 3-D,
+lateral, plane average; response; forbidden-zone charge with the model mask and the DFT-cavity mask, absolute e and ratio to
+int |rho_DFT|; DFT near-zero excess; xz slices) plus the run's own energy / force / potential / density tables.
+
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 
 Run 3430114, gpu-a100-dev, 2 h wall, `timeout 6900`, started 03:06:14. Config
