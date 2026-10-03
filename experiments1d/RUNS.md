@@ -5100,6 +5100,15 @@ script as the baseline (lock, budget plan, resume from checkpoints/segments). Jo
 Evaluation plan (item 6): eval_ckpt_s3d.py on the 20 validation pairs at epochs 50 / 100 / 200 / 500 (bound / ion / total 3-D,
 lateral, plane average; response; forbidden-zone charge with the model mask and the DFT-cavity mask, absolute e and ratio to
 int |rho_DFT|; DFT near-zero excess; xz slices) plus the run's own energy / force / potential / density tables.
+ - tool validated on the 2-epoch smoke model (job 3486534, A100, pairs 28 / 128, rc 0, 117 s = 66 s first frame incl. load + 12-14 s per
+   further frame -> 20 pairs fit one dev job; eval_smoke_s3d.json, slices eval_slices_smoke/). The smoke numbers are NOT a quality
+   statement (2 epochs, warm-up 0). Two forbidden-zone quantities are reported and must not be mixed: (i) exact model-grid mass from
+   the repair diagnostics (0.15 A grid, 300 planes): bound before / after repair 0.82 / 1.4e-5 (sid 28), 0.33 / 5.2e-6 (628),
+   0.72 / 1.1e-5 (128), 0.38 / 5.6e-6 e (728); (ii) the same mass in the loss-facing reconstruction on the native DFT grid
+   (base(z, 600 planes) + trilinear d_sup(300 planes)): 0.0216 / 0.0123 / 0.0211 / 0.0124 e = 0.61-0.67 % of int |rho_b^DFT|
+   (3.52 / 1.96 / 3.15 / 1.89 e); the difference is the interpolation residue of the reconstruction where B(z) varies steeply
+   across half-solute layers (same origin as the 1.2e-4 .. 1.7e-4 e/A^3 loss-vs-energy field gap of the pre-flight). With the
+   DFT-cavity mask the zone holds 0.0290 / 0.0179 / 0.0304 / 0.0248 e (DFT itself 0.0000; zone volume fraction 0.35 for both masks).
 
 ## gate_le: does the NATIVE local_electron_energy channel work? (2026-09-11)
 

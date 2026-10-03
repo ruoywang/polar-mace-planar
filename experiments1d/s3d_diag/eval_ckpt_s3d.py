@@ -197,13 +197,18 @@ for kpair in PAIRS:
                      bound_near0_dft_e=float(np.abs(Db[near0_b]).sum() * dV), near0_frac_b=float(near0_b.mean()), zone_frac_model_b=float(zone_mb.mean()), zone_frac_dftcav_b=float(zone_db.mean()))
         zones.update(bound_zone_model_ratio=zones["bound_zone_model_e"] / absDb, bound_zone_dftcav_ratio=zones["bound_zone_dftcav_e"] / absDb, bound_near0_excess_ratio=zones["bound_near0_excess_e"] / absDb,
                      ion_zone_model_ratio=zones["ion_zone_model_e"] / max(absDi, 1e-30), ion_near0_excess_ratio=zones["ion_near0_excess_e"] / max(absDi, 1e-30))
+        # exact forbidden-zone mass on the MODEL grid (0.15 A, 300 planes) from the repair diagnostics, before / after the repair;
+        # the native-grid numbers above are the loss-facing reconstruction base(z, 600 planes) + trilinear d_sup(300 planes) and
+        # carry the interpolation residue of that reconstruction (B varies steeply across half-solute layers)
+        zones.update(bound_zone_modelgrid_before_e=float(rep["b"]["zone_abs_before_e"]) if rep else float("nan"), bound_zone_modelgrid_after_e=float(rep["b"]["zone_abs_after_e"]) if rep else float("nan"),
+                     ion_zone_modelgrid_before_e=float(rep["i"]["zone_abs_before_e"]) if rep else float("nan"), ion_zone_modelgrid_after_e=float(rep["i"]["zone_abs_after_e"]) if rep else float("nan"))
         RES["frames"][str(sid)] = dict(n_atoms=len(ATOMS[sid]), q=float(ATOMS[sid].info["total_charge"]), bound=fb, ion=fi, total=ft, zones=zones, repair=rep, seconds=time.time() - t1)
         keep[sid] = dict(b=Mb, i=Mi, Db=Db, Di=Di)
         if kpair in SLICE_PAIRS:
             iy = shape[1] // 2
             np.savez_compressed(f"{SL}/sid{sid}_xz.npz", b_model=Mb[:, iy, :], b_dft=Db[:, iy, :], i_model=Mi[:, iy, :], i_dft=Di[:, iy, :], zone_model=zone_mb[:, iy, :], zone_dftcav=zone_db[:, iy, :], lat=lat)
         print(f"[{time.time() - T0:5.0f}s] sid {sid} (q {RES['frames'][str(sid)]['q']:+.2f}): bound eps3d {fb['eps_3d']:.3f} lat {fb['eps_lat']:.3f} ({fb['lat_corr']:+.2f}) pa {fb['eps_pa']:.3f} phi {fb['phi_rms_err']:.3f} | ion eps3d {fi['eps_3d']:.3f} pa {fi['eps_pa']:.3f} | total phi {ft['phi_rms_err']:.3f} | "
-              f"zone(model) b {zones['bound_zone_model_e']:.4f} e ({zones['bound_zone_model_ratio']:.4f} of {absDb:.3f}) zone(DFT cav) b {zones['bound_zone_dftcav_e']:.4f} ({zones['bound_zone_dftcav_ratio']:.4f}; DFT itself {zones['bound_dft_in_dftcav_zone_e']:.4f}) | near-zero excess b {zones['bound_near0_excess_e']:.4f} ({zones['bound_near0_excess_ratio']:.4f}; DFT {zones['bound_near0_dft_e']:.4f}) i {zones['ion_near0_excess_e']:.4f} | repair {rep}", flush=True)
+              f"zone(model, native-grid reconstruction) b {zones['bound_zone_model_e']:.4f} e ({zones['bound_zone_model_ratio']:.4f} of {absDb:.3f}; model-grid exact before/after repair {zones['bound_zone_modelgrid_before_e']:.4f}/{zones['bound_zone_modelgrid_after_e']:.1e}) zone(DFT cav) b {zones['bound_zone_dftcav_e']:.4f} ({zones['bound_zone_dftcav_ratio']:.4f}; DFT itself {zones['bound_dft_in_dftcav_zone_e']:.4f}) | near-zero excess b {zones['bound_near0_excess_e']:.4f} ({zones['bound_near0_excess_ratio']:.4f}; DFT {zones['bound_near0_dft_e']:.4f}) i {zones['ion_near0_excess_e']:.4f} | repair {rep}", flush=True)
     dV = abs(np.linalg.det(lat)) / keep[kpair]["Db"].size
     rb, _ = metrics(keep[kpair]["b"] - keep[kpair + 600]["b"], keep[kpair]["Db"] - keep[kpair + 600]["Db"], lat, dV)
     ri, _ = metrics(keep[kpair]["i"] - keep[kpair + 600]["i"], keep[kpair]["Di"] - keep[kpair + 600]["Di"], lat, dV)
@@ -225,7 +230,8 @@ RES["summary"] = dict(
     neutral_bound_eps3d=med(["bound", "eps_3d"], fn), neutral_bound_lat=med(["bound", "eps_lat"], fn),
     resp_bound_eps3d=med(["bound", "eps_3d"], pr), resp_bound_lat=med(["bound", "eps_lat"], pr), resp_bound_corr=med(["bound", "lat_corr"], pr), resp_ion_eps3d=med(["ion", "eps_3d"], pr),
     phi_total_charged=med(["total", "phi_rms_err"], fc), phi_total_neutral=med(["total", "phi_rms_err"], fn), phi_total_resp=med(["total", "phi_rms_err"], pr), phi_bound_charged=med(["bound", "phi_rms_err"], fc),
-    zone_model_b_e=med(["zones", "bound_zone_model_e"], fc), zone_model_b_ratio=med(["zones", "bound_zone_model_ratio"], fc), zone_dftcav_b_e=med(["zones", "bound_zone_dftcav_e"], fc), zone_dftcav_b_ratio=med(["zones", "bound_zone_dftcav_ratio"], fc),
+    zone_model_b_e=med(["zones", "bound_zone_model_e"], fc), zone_model_b_ratio=med(["zones", "bound_zone_model_ratio"], fc),
+    zone_modelgrid_b_before_e=med(["zones", "bound_zone_modelgrid_before_e"], fc), zone_modelgrid_b_after_e=med(["zones", "bound_zone_modelgrid_after_e"], fc), zone_dftcav_b_e=med(["zones", "bound_zone_dftcav_e"], fc), zone_dftcav_b_ratio=med(["zones", "bound_zone_dftcav_ratio"], fc),
     near0_excess_b_e=med(["zones", "bound_near0_excess_e"], fc), near0_excess_b_ratio=med(["zones", "bound_near0_excess_ratio"], fc), near0_excess_i_e=med(["zones", "ion_near0_excess_e"], fc))
 json.dump(RES, open(OUT, "w"), indent=1, default=float)
 print(f"[{time.time() - T0:5.0f}s] SUMMARY (medians, {len(PAIRS)} pairs): " + ", ".join(f"{k} {v:.4f}" for k, v in RES["summary"].items()), flush=True)
