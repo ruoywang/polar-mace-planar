@@ -46,6 +46,9 @@ PAIRS = [int(s) for s in os.environ.get("KIT_PAIRS", "1 52 152").replace("+", " 
 RUNS = os.environ.get("KIT_RUNS", "FD+FM").replace("+", " ").split()
 MAXIT = int(os.environ.get("KIT_MAXIT", "70")); M_HIST = int(os.environ.get("KIT_M", "20")); BETA = float(os.environ.get("KIT_BETA", "0.5"))
 TOL = float(os.environ.get("KIT_TOL", "1e-3")); PRECOND = os.environ.get("KIT_PRECOND", "eps")
+CHECK_DFT = os.environ.get("KIT_CHECK_DFT", "1") == "1"            # one evaluation of the full map at the DFT charges (assembly / boundary check)
+SAVE_FIELDS = os.environ.get("KIT_SAVE_FIELDS", "1") == "1"        # final rho_b, rho_i as float32 .npy for continuation
+INIT_FROM = os.environ.get("KIT_INIT_FROM", "")                    # directory with sid{sid}_{run}_b.npy / _i.npy to continue from
 DFT = os.environ.get("KIT_DFT", "/scratch/08384/tg876840/tmp/2-NiN_single")
 devname = os.environ.get("KIT_DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_dtype(torch.float64)
@@ -196,8 +199,9 @@ def quick(Mt, Dt):
 class FullClosure:
     """G(rho_b, rho_i) -> (rho_b', rho_i', aux) with neutrality shift and dipole sawtooth."""
 
-    def __init__(self, gd, cv, s_diel, s_ion, p_sol, q_total, V, lz, c_unit, center_z, indmin, w_b):
+    def __init__(self, gd, cv, s_diel, s_ion, p_sol, q_total, V, lz, c_unit, center_z, indmin, w_b, use_saw=True):
         self.gd, self.cv, self.s_d, self.s_i, self.p_sol, self.Q, self.V, self.lz = gd, cv, s_diel, s_ion, p_sol, q_total, V, lz
+        self.use_saw = use_saw; self.last_phi_c = None
         self.c_unit, self.center_z, self.indmin, self.w_b = c_unit, center_z, indmin, w_b
         self.nz = int(cv.shape[2]); self.z = torch.arange(self.nz, device=dev, dtype=torch.float64) * (lz / self.nz)
         self.dV = V / float(cv.numel()); self.c_last = 0.0
@@ -255,12 +259,15 @@ class FullClosure:
         # PHI = periodic assembly - saw(c_unit p_tot_phys)
         d = self.p_sol + float((rho * self.V * self.z[None, None, :]).mean() - (rho * self.V).mean() * self.center_z)
         saw = cdipol_potential_1d(self.nz, self.lz, torch.tensor(-self.c_unit * max(-20.0, min(20.0, d)), device=dev), self.indmin, dev)
-        phi = self.cv + self.gd.ifft_real(self.gd.l0_inv_op(self.gd.fft(-self.V * rho))) + saw[None, None, :]
+        phi = self.cv + self.gd.ifft_real(self.gd.l0_inv_op(self.gd.fft(-self.V * rho)))
+        if self.use_saw:
+            phi = phi + saw[None, None, :]
         return phi, d
 
     def __call__(self, rho_b, rho_i):
         phi, d = self.potential(rho_b, rho_i)
         c = self.shift(phi)
+        self.last_phi_c = phi + c                      # the complete potential the ion function sees (solute + solvent + dipole + reference)
         rho_i_new = self.rho_ion(phi + c)
         ex, ey, ez, em = self.gd.grad_from_recip(-torch.conj(self.w_b) * self.gd.fft(phi))
         a = response_a3(em, self.s_d, params, tp); del em
@@ -268,7 +275,14 @@ class FullClosure:
         return rho_b_new, rho_i_new, dict(dipole=d, shift=float(c), q_ion=float(rho_i_new.sum() * self.dV), n_shift_eval=int(getattr(self, "n_shift_eval", 0)))
 
 
-def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label=""):
+def pot_err(phi_c, PHI, m_ion, m_diel):
+    """complete potential vs DFT PHI, NO mean removal: rms over all points, ion region, dielectric region; plane-mean rms; mean offset."""
+    e = phi_c - PHI; pm = e.mean((0, 1))
+    return dict(rms_all=float(e.pow(2).mean().sqrt()), rms_ion_region=float(e[m_ion].pow(2).mean().sqrt()), rms_diel_region=float(e[m_diel].pow(2).mean().sqrt()),
+                rms_pa=float(pm.pow(2).mean().sqrt()), mean_offset=float(e.mean()), rms_pa_meanremoved=float((pm - pm.mean()).pow(2).mean().sqrt()))
+
+
+def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label="", PHI=None, m_ion=None, m_diel=None):
     nb = xb0.numel()
     x = torch.cat([xb0.reshape(-1), xi0.reshape(-1)]); shape = xb0.shape
     hist = []; status = "maxit"; gb = gi = None; aux = {}
@@ -278,10 +292,16 @@ def anderson2(G, xb0, xi0, Db, Di, m, beta, maxit, tol, Pb=None, label=""):
         if dev.type == "cuda": torch.cuda.synchronize()
         tG = time.time() - t
         g = torch.cat([gb.reshape(-1), gi.reshape(-1)]); f = g - x; res = float(f.norm() / g.norm())
+        res_b = float((gb.reshape(-1) - x[:nb]).norm() / gb.norm()); res_i = float((gi.reshape(-1) - x[nb:]).norm() / gi.norm())
         qb = quick(gb, Db); qi = quick(gi, Di)
-        hist.append(dict(k=k, res_rel=res, t_G=tG, b_L1=qb["L1"], b_lat=qb["eps_lat"], b_pa=qb["eps_pa"], b_norm=qb["norm_ratio"], i_L1=qi["L1"], i_pa=qi["eps_pa"], i_norm=qi["norm_ratio"], **aux))
+        rec_k = dict(k=k, res_rel=res, res_b=res_b, res_i=res_i, t_G=tG, b_L1=qb["L1"], b_lat=qb["eps_lat"], b_pa=qb["eps_pa"], b_norm=qb["norm_ratio"], i_L1=qi["L1"], i_pa=qi["eps_pa"], i_norm=qi["norm_ratio"], **aux)
+        if (k % 5 == 0 or res < tol or k == maxit - 1) and PHI is not None:
+            rec_k["pot"] = pot_err(G.last_phi_c, PHI, m_ion, m_diel)
+        hist.append(rec_k)
         if k % 5 == 0 or res < tol or k == maxit - 1:
-            print(f"      [{label}] k {k:2d} res {res:.2e} | bound L1 {qb['L1']:.3f} lat {qb['eps_lat']:.3f} pa {qb['eps_pa']:.3f} norm {qb['norm_ratio']:.3f} | ion L1 {qi['L1']:.3f} pa {qi['eps_pa']:.3f} norm {qi['norm_ratio']:.3f} | dip {aux['dipole']:+.3f} shift {aux['shift']:+.4f} q_ion {aux['q_ion']:+.4f} ({tG:.1f} s/G)", flush=True)
+            pe = rec_k.get("pot", {})
+            print(f"      [{label}] k {k:3d} res {res:.2e} (b {res_b:.1e} i {res_i:.1e}) | bound L1 {qb['L1']:.3f} lat {qb['eps_lat']:.3f} pa {qb['eps_pa']:.3f} norm {qb['norm_ratio']:.3f} | ion L1 {qi['L1']:.3f} pa {qi['eps_pa']:.3f} norm {qi['norm_ratio']:.3f} | dip {aux['dipole']:+.3f} shift {aux['shift']:+.4f} q_ion {aux['q_ion']:+.4f}"
+                  + (f" | phi+c vs PHI: all {pe['rms_all']:.4f} ion-region {pe['rms_ion_region']:.4f} diel {pe['rms_diel_region']:.4f} pa {pe['rms_pa']:.4f} offset {pe['mean_offset']:+.4f} eV" if pe else "") + f" ({tG:.1f} s/G)", flush=True)
         if not np.isfinite(res) or res > 1e4:
             status = "diverged"; break
         if res < tol:
@@ -334,7 +354,7 @@ for kpair in PAIRS:
             rho_b_ref = -(rb_raw / V); rho_i_ref = -(ri_raw / V); del rb_raw, ri_raw
             Db = zyx(rho_b_ref); Di = zyx(rho_i_ref); pDb = poisson_np(Db, lat); pDi = poisson_np(Di, lat); keep[sid]["ref_b"] = Db; keep[sid]["ref_i"] = Di
             fr["check"]["q_ion_dft"] = float(rho_i_ref.sum() * dV); fr["check"]["q_bound_dft"] = float(rho_b_ref.sum() * dV)
-            pm_PHI = phi3.mean((0, 1)).cpu().numpy(); del phi3
+            pm_PHI = phi3.mean((0, 1)).cpu().numpy(); PHI = phi3; del phi3
             zt = torch.arange(nz, device=dev, dtype=torch.float64) * (lz / nz)
             # DFT inputs through the production assembly
             net_nat = torch.as_tensor(np.asarray(np.load(ENT_N[sid]["path"], mmap_mode="r"), dtype=np.float64), device=dev).permute(2, 1, 0).contiguous()
@@ -355,6 +375,22 @@ for kpair in PAIRS:
             fr["init"] = dict(bound=quick(x_b, rho_b_ref), ion=quick(x_i, rho_i_ref), q_ion_1d=float(x_i.sum() * dV))
             print(f"[{time.time() - T0:5.0f}s] sid {sid} (q {q_total:+.3f}) read {fr['check']['read_s']:.0f} s | DFT q_ion {fr['check']['q_ion_dft']:+.4f} q_bound {fr['check']['q_bound_dft']:+.4f}; 1-D init q_ion {fr['init']['q_ion_1d']:+.4f}, bound L1 {fr['init']['bound']['L1']:.3f} pa {fr['init']['bound']['eps_pa']:.3f}, ion L1 {fr['init']['ion']['L1']:.3f} pa {fr['init']['ion']['eps_pa']:.3f} | "
                   f"p_sol DFT label {p_sol_D:+.3f} model(solver) {p_sol_M:+.3f} e*A; c_unit {c_unit:.5f} (solver {fr['inputs']['solver_c_unit']:.5f}); cv lateral diff {fr['inputs']['cv_model_minus_dft_lateral_rms']:.4f} eV; s_diel L1 diff {fr['inputs']['s_diel_L1_model_vs_dft']:.4f} s_ion {fr['inputs']['s_ion_L1_model_vs_dft']:.4f}", flush=True)
+            m_ion = s_i_D > 0.5; m_diel = s_d_D > 0.5
+            fr["check"]["ion_region_frac"] = float(m_ion.double().mean()); fr["check"]["diel_region_frac"] = float(m_diel.double().mean())
+            if CHECK_DFT:
+                # ONE evaluation of the full map at the DFT charges: does the assembly + boundary treatment reproduce PHI and keep the charges?
+                fr["dft_point"] = {}
+                phi_true = PHI - gd.ifft_real(gd.l0_inv_op(gd.fft(-V * (rho_b_ref + rho_i_ref))))      # true solute potential (PHI already carries the dipole correction)
+                for nm, (cv_, saw_) in {"assembly+saw(FD inputs)": (cv_D, True), "true solute potential, no saw (reference)": (phi_true, False)}.items():
+                    G0 = FullClosure(gd, cv_, s_d_D, s_i_D, p_sol_D, q_total, V, lz, c_unit, center_z, indmin, w_b, use_saw=saw_)
+                    gb0, gi0, aux0 = G0(rho_b_ref, rho_i_ref)
+                    pe = pot_err(G0.last_phi_c, PHI, m_ion, m_diel)
+                    fr["dft_point"][nm] = dict(potential=pe, next_bound=quick(gb0, rho_b_ref), next_ion=quick(gi0, rho_i_ref),
+                                               map_res_b=float((gb0 - rho_b_ref).norm() / rho_b_ref.norm()), map_res_i=float((gi0 - rho_i_ref).norm() / rho_i_ref.norm()), **aux0)
+                    print(f"         DFT-point check [{nm}]: phi+c vs PHI rms all {pe['rms_all']:.4f} ion-region {pe['rms_ion_region']:.4f} diel {pe['rms_diel_region']:.4f} pa {pe['rms_pa']:.4f} offset {pe['mean_offset']:+.4f} eV | "
+                          f"next bound L1 {fr['dft_point'][nm]['next_bound']['L1']:.3f} lat {fr['dft_point'][nm]['next_bound']['eps_lat']:.3f} pa {fr['dft_point'][nm]['next_bound']['eps_pa']:.3f} | next ion L1 {fr['dft_point'][nm]['next_ion']['L1']:.3f} pa {fr['dft_point'][nm]['next_ion']['eps_pa']:.3f} | map residual b {fr['dft_point'][nm]['map_res_b']:.3f} i {fr['dft_point'][nm]['map_res_i']:.3f} | dipole {aux0['dipole']:+.3f} shift {aux0['shift']:+.4f}", flush=True)
+                    del G0, gb0, gi0
+                del phi_true
             specs = {"FD": (cv_D, s_d_D, s_i_D, p_sol_D), "FM": (cv_M, s_d_M, s_i_M, p_sol_M)}
             for name in RUNS:
                 if name not in specs:
@@ -362,23 +398,31 @@ for kpair in PAIRS:
                 cv, s_d, s_i, p_sol = specs[name]
                 G = FullClosure(gd, cv, s_d, s_i, p_sol, q_total, V, lz, c_unit, center_z, indmin, w_b)
                 Pb = None if PRECOND == "none" else 1.0 / (1.0 + EDEPS * RESP0 * s_d)
+                xb0, xi0 = x_b, x_i; init_src = "production 1-D"
+                if INIT_FROM:
+                    fb_ = f"{INIT_FROM}/sid{sid}_{name}_b.npy"; fi_ = f"{INIT_FROM}/sid{sid}_{name}_i.npy"
+                    if os.path.exists(fb_) and os.path.exists(fi_):
+                        xb0 = torch.as_tensor(np.load(fb_).astype(np.float64), device=dev); xi0 = torch.as_tensor(np.load(fi_).astype(np.float64), device=dev); init_src = INIT_FROM
                 if dev.type == "cuda": torch.cuda.reset_peak_memory_stats(dev); torch.cuda.synchronize()
                 t = time.time()
-                gb, gi, hist, status, aux = anderson2(G, x_b, x_i, rho_b_ref, rho_i_ref, M_HIST, BETA, MAXIT, TOL, Pb=Pb, label=f"{sid} {name}")
+                gb, gi, hist, status, aux = anderson2(G, xb0, xi0, rho_b_ref, rho_i_ref, M_HIST, BETA, MAXIT, TOL, Pb=Pb, label=f"{sid} {name}", PHI=PHI, m_ion=m_ion, m_diel=m_diel)
                 if dev.type == "cuda": torch.cuda.synchronize()
                 peak = float(torch.cuda.max_memory_allocated(dev)) / 2 ** 30 if dev.type == "cuda" else None
-                phi_fin, d_fin = G.potential(gb, gi); c_fin = G.shift(phi_fin); pm_phi = (phi_fin + c_fin).mean((0, 1)).cpu().numpy(); del phi_fin
+                phi_fin, d_fin = G.potential(gb, gi); c_fin = G.shift(phi_fin); pm_phi = (phi_fin + c_fin).mean((0, 1)).cpu().numpy()
+                pot_final = pot_err(phi_fin + c_fin, PHI, m_ion, m_diel); del phi_fin
                 dpm = pm_phi - pm_PHI; sl, lr = line_fit(dpm, zt.cpu().numpy())
                 Mb = zyx(gb); Mi = zyx(gi); fb, _ = metrics(Mb, Db, lat, dV, pDb); fi, _ = metrics(Mi, Di, lat, dV, pDi); ft, _ = metrics(Mb + Mi, Db + Di, lat, dV)
                 fr["runs"][name] = dict(status=status, iterations=len(hist), wall_s=time.time() - t, t_G_mean=float(np.mean([h["t_G"] for h in hist])), peak_gpu_gib=peak,
                                         final_bound=fb, final_ion=fi, final_total=ft, dipole=d_fin, shift=float(c_fin), q_ion=aux["q_ion"],
                                         phi_pa_vs_PHI=dict(rms_meanremoved=float(np.sqrt(((dpm - dpm.mean()) ** 2).mean())), slope=sl, rms_lineremoved=lr, PHI_pa_rms=float(np.sqrt(((pm_PHI - pm_PHI.mean()) ** 2).mean()))),
-                                        history=hist)
+                                        potential_vs_PHI=pot_final, init=init_src, final_res_b=hist[-1]["res_b"], final_res_i=hist[-1]["res_i"], history=hist)
+                if SAVE_FIELDS:
+                    np.save(f"{SLICES}/sid{sid}_{name}_b.npy", gb.cpu().numpy().astype(np.float32)); np.save(f"{SLICES}/sid{sid}_{name}_i.npy", gi.cpu().numpy().astype(np.float32))
                 keep[sid][name + "_b"] = Mb; keep[sid][name + "_i"] = Mi
                 np.savez_compressed(f"{SLICES}/sid{sid}_{name}.npz", pa_b=Mb.mean(axis=(1, 2)), pa_b_ref=Db.mean(axis=(1, 2)), pa_i=Mi.mean(axis=(1, 2)), pa_i_ref=Di.mean(axis=(1, 2)),
                                     xz_b=Mb[:, shape[1] // 2, :], xz_b_ref=Db[:, shape[1] // 2, :], xz_i=Mi[:, shape[1] // 2, :], xz_i_ref=Di[:, shape[1] // 2, :], pm_phi=pm_phi, pm_PHI=pm_PHI, lz=lz)
                 print(f"[{time.time() - T0:5.0f}s] sid {sid} {name}: {status} after {len(hist)} it ({time.time() - t:.0f} s; {('%.2f GiB' % peak) if peak else 'cpu'}) | bound L1 {fb['L1']:.3f} lat {fb['eps_lat']:.3f} ({fb['lat_corr']:+.3f}) pa {fb['eps_pa']:.3f} norm {fb['norm_ratio']:.3f} phi {fb['phi_rms_err']:.3f} | "
-                      f"ion L1 {fi['L1']:.3f} pa {fi['eps_pa']:.3f} norm {fi['norm_ratio']:.3f} q {aux['q_ion']:+.4f} | total L1 {ft['L1']:.3f} phi {ft['phi_rms_err']:.3f} | <phi> vs <PHI>: rms {fr['runs'][name]['phi_pa_vs_PHI']['rms_meanremoved']:.4f} eV slope {sl:+.5f} line-removed {lr:.4f} | dipole {d_fin:+.3f} shift {float(c_fin):+.4f}", flush=True)
+                      f"ion L1 {fi['L1']:.3f} pa {fi['eps_pa']:.3f} norm {fi['norm_ratio']:.3f} q {aux['q_ion']:+.4f} | solvent-only periodic potential err {ft['phi_rms_err']:.3f} | COMPLETE phi+c vs PHI: all {pot_final['rms_all']:.4f} ion-region {pot_final['rms_ion_region']:.4f} diel {pot_final['rms_diel_region']:.4f} pa {pot_final['rms_pa']:.4f} offset {pot_final['mean_offset']:+.4f} eV | res b {hist[-1]['res_b']:.1e} i {hist[-1]['res_i']:.1e} | dipole {d_fin:+.3f} shift {float(c_fin):+.4f} | init {init_src}", flush=True)
                 del G, Pb, gb, gi
             del cv_D, cv_M, s_d_D, s_d_M, s_i_D, s_i_M, x_b, x_i, rho_b_ref, rho_i_ref, ne_d
         rec["frames"][str(sid)] = fr
