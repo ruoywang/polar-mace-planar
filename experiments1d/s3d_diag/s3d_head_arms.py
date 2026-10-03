@@ -56,6 +56,7 @@ N_HEAD = int(os.environ.get("KIT_N_HEAD_PAIRS", "16"))
 NFIT = int(os.environ.get("KIT_NFIT", "300000")); NHOLD = int(os.environ.get("KIT_NHOLD", "100000"))
 ITER = int(os.environ.get("KIT_ITER", "250")); TOL = float(os.environ.get("KIT_TOL", "1e-8")); RIDGE = float(os.environ.get("KIT_RIDGE", "1e-2"))
 NDIAG = int(os.environ.get("KIT_NDIAG", "3")); NPROBE = int(os.environ.get("KIT_NPROBE", "32")); EVAL_V0 = os.environ.get("KIT_EVAL_V0", "1") == "1"
+PA_WEIGHT = float(os.environ.get("KIT_PA_WEIGHT", "0"))   # arm C: add plane-average rows (model planes) weighted so that their target norm equals the point block's times this factor
 torch.set_default_dtype(torch.float64)
 dev = torch.device(os.environ.get("KIT_DEVICE", "cuda:0"))
 if dev.type == "cpu":
@@ -282,6 +283,10 @@ def prep_labels(sid):
         full = lab[ch].reshape(-1); latp = (lab[ch] - lab[ch].mean(axis=(1, 2))[:, None, None]).reshape(-1)
         L["lat_t"][ch] = (torch.as_tensor(latp[lin[:NFIT]], device=dev), torch.as_tensor(latp[lin[NFIT:]], device=dev))
         L["full_t"][ch] = (torch.as_tensor(full[lin[:NFIT]], device=dev), torch.as_tensor(full[lin[NFIT:]], device=dev))
+    nzm = CTX[sid]["mshape"][2]
+    for ch in ("b", "i"):
+        pa_dft = lab[ch].mean(axis=(1, 2)); zs = np.arange(nz) * 1.0 / nz; zm = np.arange(nzm) * 1.0 / nzm
+        L.setdefault("pa_t", {})[ch] = torch.as_tensor(np.interp(zm, np.concatenate([zs, [1.0]]), np.concatenate([pa_dft, [pa_dft[0]]])), device=dev)
     LABEL[sid] = L
     return L
 
@@ -374,11 +379,17 @@ def lsqr_fit(blocks, field_of, x0, label, ridge_rel=RIDGE, tol=TOL, iters=ITER, 
     fit points are compared with the target of that kind."""
     x0_t = torch.as_tensor(x0, device=dev)
 
+    def pa_w(sid, ch):
+        L = LABEL[sid]; return PA_WEIGHT * float(L["full_t"][ch][0].norm() / torch.clamp(L["pa_t"][ch].norm(), min=1e-300))
+
     def F_block(x, sid, ch, kind):
-        return _interp3_periodic(field_of(x, sid, ch), LABEL[sid]["fr_f"])
+        f = field_of(x, sid, ch)
+        if kind == "pa":
+            return f.mean(dim=(0, 1)) * pa_w(sid, ch)
+        return _interp3_periodic(f, LABEL[sid]["fr_f"])
     with torch.no_grad():
         F0 = [F_block(x0_t, *b) for b in blocks]
-    tg = [(LABEL[b[0]]["lat_t"] if b[2] == "lat" else LABEL[b[0]]["full_t"])[b[1]][0] for b in blocks]
+    tg = [(LABEL[b[0]]["pa_t"][b[1]] * pa_w(b[0], b[1])) if b[2] == "pa" else (LABEL[b[0]]["lat_t"] if b[2] == "lat" else LABEL[b[0]]["full_t"])[b[1]][0] for b in blocks]
     r0 = torch.cat([t - f for t, f in zip(tg, F0)]); sizes = [int(t.numel()) for t in tg]; ncall = {"mv": 0, "rmv": 0}
 
     def mv(v):
@@ -448,7 +459,8 @@ if "fit" in STAGES:
         xi, _ = lsqr_fit([(s, "i", "lat") for s in charged], lambda x, s, ch: dfield(CTX[s], ch, coeffs_B(x, CTX[s])[:, 1]), x0B, f"B ion (gated, augmented), {len(charged)} frames")
         X["B"] = dict(full=x0B + (xb - x0B) + (xi - x0B)); np.save(OUT / "params_B.npy", X["B"]["full"])
     if "C" in ARMS:
-        xp, _ = lsqr_fit([(s, "b", "full") for s in hsids], lambda x, s, ch: polfield(CTX[s], coeffs_psi(x, CTX[s])), x0_psi, f"C bound (polarization psi head, FULL target), {len(hsids)} frames")
+        blocksC = [(s, "b", "full") for s in hsids] + ([(s, "b", "pa") for s in hsids] if PA_WEIGHT > 0 else [])
+        xp, _ = lsqr_fit(blocksC, lambda x, s, ch: polfield(CTX[s], coeffs_psi(x, CTX[s])), x0_psi, f"C bound (polarization psi head, FULL target{' + plane-average rows w=%g' % PA_WEIGHT if PA_WEIGHT > 0 else ''}), {len(hsids)} frames")
         X["C"] = dict(psi=xp); np.save(OUT / "params_C_psi.npy", xp)
 else:
     if "A" in ARMS: X["A"] = dict(head=np.load(OUT / "params_A.npy"))
