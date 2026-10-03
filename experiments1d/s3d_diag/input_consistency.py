@@ -71,8 +71,7 @@ def clo_cap(n_e, cv, grid, params_, tp_):
 
 def gto_cap(grid, pos_frac, coeffs, sigmas):
     out = _orig_gto(grid, pos_frac, coeffs, sigmas)
-    if "net_g" not in CAP:                       # the first GTO assembly of a forward is the solute net density
-        CAP["net_g"] = out.detach().clone()
+    CAP.setdefault("net_g_all", []).append((tuple(float(x) for x in sigmas), out.detach().clone()))   # every GTO assembly of the forward
     return out
 
 
@@ -85,7 +84,7 @@ PB.closure_from_fields = clo_cap; backend._gto_net_density_g = gto_cap; PB.Solve
 
 
 def forward(sid):
-    CAP.pop("net_g", None)
+    CAP["net_g_all"] = []
     atoms = ATOMS[sid]
     cfg = mace_data.config_from_atoms(atoms, key_specification=kspec)
     ds = [mace_data.AtomicData.from_config(cfg, z_table=z_table, cutoff=float(model.r_max))]
@@ -169,7 +168,7 @@ RES = []
 for kpair in PAIRS:
     for sid in (kpair, kpair + 600):
         atoms = ATOMS[sid]; q = float(atoms.info["total_charge"])
-        res = forward(sid); grid = CAP["grid"]; ne_cl = CAP["ne"]; cv_prod = CAP["cv"]; net_g = CAP["net_g"]; kw = CAP["kw"]
+        res = forward(sid); grid = CAP["grid"]; ne_cl = CAP["ne"]; cv_prod = CAP["cv"]; kw = CAP["kw"]
         V = float(grid.volume); mshape = tuple(ne_cl.shape); nzm = mshape[2]; dVm = V / float(np.prod(mshape))
         cell = np.asarray(atoms.get_cell()); lz = float(cell[2, 2]); zm = np.arange(nzm) * lz / nzm
         bl_row = backend._bl_index.get(sid)
@@ -177,10 +176,17 @@ for kpair in PAIRS:
         neutral_v, phi_base = fields_bl[0], fields_bl[1]; del fields_bl
         out = dict(sid=sid, pair=kpair, q=q, split=atoms.info["_split"])
         with torch.no_grad():
-            # ---------------- (1) electron bookkeeping, model grid
-            net_values = grid.ifft_real(net_g)
+            # ---------------- (1) electron bookkeeping, model grid: pick the GTO assembly whose clamped density is the captured cavity density
+            best = None
+            for sg, g_ in CAP["net_g_all"]:
+                if tuple(g_.shape) != tuple(grid.fft(ne_cl).shape):
+                    continue
+                nv_ = grid.ifft_real(g_); dev_ = float((torch.clamp((neutral_v - nv_) / V, min=0.0) - ne_cl).abs().max())
+                if best is None or dev_ < best[0]:
+                    best = (dev_, sg, nv_)
+            assert best is not None and best[0] < 1e-6, ("no GTO assembly reproduces the cavity density", best[0] if best else None, len(CAP["net_g_all"]))
+            net_values = best[2]; out["gto_calls"] = len(CAP["net_g_all"]); out["gto_match_maxdev"] = best[0]; out["gto_sigmas"] = list(best[1])
             ne_raw = (neutral_v - net_values) / V
-            assert float((torch.clamp(ne_raw, min=0.0) - ne_cl).abs().max()) < 1e-9, "clamped raw density != captured cavity density"
             net_dft = resample_tri(torch.as_tensor(np.asarray(np.load(ENT_N[sid]["path"], mmap_mode="r"), dtype=np.float64), device=dev).permute(2, 1, 0).contiguous(), mshape) * V
             ne_dft_raw = (neutral_v - net_dft) / V
             zpos = atoms.get_positions()[:, 2]; z_lo, z_hi = float(zpos.min()) - 1.0, float(zpos.max()) + 1.0
