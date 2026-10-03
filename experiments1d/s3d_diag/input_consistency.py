@@ -128,9 +128,11 @@ def read_grid_fast(path):
 
 
 def nelect(sid):
+    """NELECT from the INCAR (charged frames); neutral frames have no NELECT line -> None (the valence count is then the
+    rounded CHGCAR integral, recorded separately)."""
     txt = open(f"{dft_dir(sid)}/INCAR").read()
     m = re.search(r"NELECT\s*=\s*([0-9.]+)", txt)
-    return float(m.group(1))
+    return float(m.group(1)) if m else None
 
 
 def resample_tri(F3, shape):
@@ -195,7 +197,7 @@ for kpair in PAIRS:
             s_i_m, s_d_m, _ = tp.create_cavity_torch(ne_cl, grid, params); s_d_m = torch.clamp(s_d_m, 0.0, 1.0)
             clipped = torch.clamp(-ne_raw, min=0.0)                      # removed negative density (e/A^3, positive)
             clipped_dft = torch.clamp(-ne_dft_raw, min=0.0)
-            e = dict(nelect=nelect(sid), total_charge=q,
+            e = dict(nelect=nelect(sid), total_charge=q, nelect_source="INCAR" if nelect(sid) is not None else "neutral: no NELECT line, target = round(DFT raw integral)",
                      model_raw=float(ne_raw.sum() * dVm), model_clamped=float(ne_cl.sum() * dVm), model_clipped=float(clipped.sum() * dVm),
                      model_neg_points_frac=float((ne_raw < 0).double().mean()), model_neg_min=float(ne_raw.min()),
                      dft_raw=float(ne_dft_raw.sum() * dVm), dft_clamped=float(torch.clamp(ne_dft_raw, min=0.0).sum() * dVm), dft_clipped=float(clipped_dft.sum() * dVm),
@@ -263,7 +265,8 @@ for kpair in PAIRS:
                                 sdiel_diff_A3_per_plane=prof_sdiff, z_native=zn, pm_phi_sol_dft=pm_sol, pm_cv_assembly=pm_asm, pm_cv_model=pm_mod, saw_unit=saw1)
             del phi_sol_dft, cv_asm, cv_mod, rho_b, rho_i, net_nat
         RES.append(out); json.dump(RES, open(OUT, "w"), indent=1)
-        print(f"[{time.time() - T0:5.0f}s] sid {sid} (q {q:+.3f}) NELECT {e['nelect']:.1f} | model raw {e['model_raw']:.3f} clamped {e['model_clamped']:.3f} clipped {e['model_clipped']:.3f} (neg points {e['model_neg_points_frac']*100:.2f} %, min {e['model_neg_min']:.2e}) | "
+        if e["nelect"] is None: e["nelect"] = float(round(e["dft_raw"]))
+        print(f"[{time.time() - T0:5.0f}s] sid {sid} (q {q:+.3f}) NELECT {e['nelect']:.1f} ({e['nelect_source'][:5]}) | model raw {e['model_raw']:.3f} clamped {e['model_clamped']:.3f} clipped {e['model_clipped']:.3f} (neg points {e['model_neg_points_frac']*100:.2f} %, min {e['model_neg_min']:.2e}) | "
               f"DFT raw {e['dft_raw']:.3f} clamped {e['dft_clamped']:.3f} clipped {e['dft_clipped']:.4f} | clipped location (DFT cavity) interior {loc['dft_interior']:.2f} interface {loc['dft_interface']:.2f} solvent {loc['dft_solvent']:.2f}; in slab z-range {loc['in_slab_zrange']:.2f}", flush=True)
         print(f"         cavity: model-solvent/DFT-solute {conf['model_solvent_dft_solute_A3']:.1f} A^3, model-solute/DFT-solvent {conf['model_solute_dft_solvent_A3']:.1f} A^3, s_diel vol diff {conf['s_diel_vol_diff_A3']:+.1f}, s_ion vol diff {conf['s_ion_vol_diff_A3']:+.1f} | "
               f"Poisson source clamped-unclamped: rms {out['poisson_source']['clamped_minus_unclamped_rms']:.4f} eV, lateral {out['poisson_source']['lateral_rms']:.4f}, pa slope {out['poisson_source']['pa_slope_eV_per_A']:+.5f}, line-removed {out['poisson_source']['pa_rms_lineremoved']:.4f}", flush=True)
