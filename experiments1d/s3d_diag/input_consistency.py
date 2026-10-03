@@ -252,12 +252,13 @@ for kpair in PAIRS:
             ramp = dict(slope_per_unit_dipole=slope_per_dip, measured_slope_assembly=sl_asm, measured_slope_model=sl_mod, lineremoved_assembly=lr_asm, lineremoved_model=lr_mod,
                         implied_dipole_assembly=sl_asm / slope_per_dip, implied_dipole_model=sl_mod / slope_per_dip, pa_rms_dft_solute=float(np.sqrt(((pm_sol - pm_sol.mean()) ** 2).mean())))
             after = {}
+            # the production applies cdipol(c_unit d) with d in the solver's electron-energy sign (= -p_phys): PHI = assembly - saw(c_unit p_phys)
             for nm, pv in (("dft_total", p["dft_total"]), ("dft_solute", p["dft_solute"]), ("dft_solvent", p["dft_solvent"])):
                 saw = cdipol_potential_1d(nz, lz, torch.tensor(c_unit * pv, device=dev), indmin, dev).cpu().numpy()
-                r = pm_asm + saw - pm_sol; after[f"assembly+saw({nm})"] = dict(rms_meanremoved=float(np.sqrt(((r - r.mean()) ** 2).mean())), slope_left=line_fit(r, zn)[0])
+                r = pm_asm - saw - pm_sol; after[f"assembly-saw({nm})"] = dict(rms_meanremoved=float(np.sqrt(((r - r.mean()) ** 2).mean())), slope_left=line_fit(r, zn)[0], rms_lineremoved=line_fit(r, zn)[1])
             for nm, pv in (("model_solute+dft_solvent", p["model_solute"] + p["dft_solvent"]), ("dft_total", p["dft_total"])):
                 saw = cdipol_potential_1d(nz, lz, torch.tensor(c_unit * pv, device=dev), indmin, dev).cpu().numpy()
-                r = pm_mod + saw - pm_sol; after[f"model+saw({nm})"] = dict(rms_meanremoved=float(np.sqrt(((r - r.mean()) ** 2).mean())), slope_left=line_fit(r, zn)[0])
+                r = pm_mod - saw - pm_sol; after[f"model-saw({nm})"] = dict(rms_meanremoved=float(np.sqrt(((r - r.mean()) ** 2).mean())), slope_left=line_fit(r, zn)[0], rms_lineremoved=line_fit(r, zn)[1])
             lat_asm = float((cv_asm - cv_asm.mean((0, 1))[None, None, :] - (phi_sol_dft - phi_sol_dft.mean((0, 1))[None, None, :])).pow(2).mean().sqrt())
             lat_mod = float((cv_mod - cv_mod.mean((0, 1))[None, None, :] - (phi_sol_dft - phi_sol_dft.mean((0, 1))[None, None, :])).pow(2).mean().sqrt())
             out["dipole"] = p; out["ramp"] = ramp; out["ramp_after_sawtooth"] = after; out["lateral_rms_err"] = dict(assembly=lat_asm, model=lat_mod)
@@ -272,5 +273,5 @@ for kpair in PAIRS:
               f"Poisson source clamped-unclamped: rms {out['poisson_source']['clamped_minus_unclamped_rms']:.4f} eV, lateral {out['poisson_source']['lateral_rms']:.4f}, pa slope {out['poisson_source']['pa_slope_eV_per_A']:+.5f}, line-removed {out['poisson_source']['pa_rms_lineremoved']:.4f}", flush=True)
         print(f"         dipoles (e*A): DFT solute {p['dft_solute']:+.3f} bound {p['dft_bound']:+.3f} ion {p['dft_ion']:+.3f} total {p['dft_total']:+.3f} | model solute {p['model_solute']:+.3f} (solver val_dip {p['solver_val_ion_dipole_z']}) | slope/dipole {slope_per_dip:+.5f} eV/A per e*A | "
               f"measured slope assembly {sl_asm:+.5f} (implied dip {ramp['implied_dipole_assembly']:+.3f}) model {sl_mod:+.5f} (implied {ramp['implied_dipole_model']:+.3f}); line-removed asm {lr_asm:.4f} model {lr_mod:.4f}", flush=True)
-        print("         after sawtooth: " + " | ".join(f"{k}: rms {v['rms_meanremoved']:.4f} slope left {v['slope_left']:+.5f}" for k, v in after.items()) + f" | lateral rms err assembly {lat_asm:.4f} model {lat_mod:.4f}", flush=True)
+        print("         after sawtooth: " + " | ".join(f"{k}: rms {v['rms_meanremoved']:.4f} slope left {v['slope_left']:+.5f} (line-removed {v['rms_lineremoved']:.4f})" for k, v in after.items()) + f" | lateral rms err assembly {lat_asm:.4f} model {lat_mod:.4f}", flush=True)
 print(f"[{time.time() - T0:5.0f}s] done", flush=True)

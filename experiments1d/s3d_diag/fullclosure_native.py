@@ -11,7 +11,7 @@ c_unit, center_z, indmin exactly as pb1d_backend builds them (here for the nativ
 Runs:  FD  DFT inputs through the production assembly: cv = phi_base - L(net_label V), cavities from CHGCAR, p_sol from the net
            label  (tests the boundary / dipole / ion treatment itself against RHOB, RHOION and PHI)
        FM  model inputs: production cv (Fourier-upsampled), cavities from the production electron density (trilinear), p_sol =
-           the solver's val_ion_dipole_z
+           -(the solver's val_ion_dipole_z)  (solver sign -> physics sign)
 Both start from the production 1-D solutions B(z), I(z) laterally uniform. Anderson on the stacked (rho_b, rho_i) with the
 dielectric Jacobi preconditioner on the bound block (KIT_PRECOND=eps) or none.
 Metrics (native grid): rho_b vs RHOB, rho_i vs RHOION, sum vs RHOB + RHOION; <phi> vs <PHI> (mean-removed rms, slope);
@@ -220,8 +220,12 @@ class FullClosure:
 
     def potential(self, rho_b, rho_i):
         rho = rho_b + rho_i
+        # physics-sign total dipole (solute + solvent) about center_z; the 1-D solver carries dipoles in the electron-energy sign
+        # (val_ion_dipole_z = -p_phys, n = -rho V), so its sawtooth cdipol(c_unit d_solver) equals cdipol(-c_unit d_phys):
+        # input_consistency.py measured <cv_assembly - phi_sol^DFT> slope = +0.0212 eV/A per e*A x (DFT total dipole), i.e.
+        # PHI = periodic assembly - saw(c_unit p_tot_phys)
         d = self.p_sol + float((rho * self.V * self.z[None, None, :]).mean() - (rho * self.V).mean() * self.center_z)
-        saw = cdipol_potential_1d(self.nz, self.lz, torch.tensor(self.c_unit * max(-20.0, min(20.0, d)), device=dev), self.indmin, dev)
+        saw = cdipol_potential_1d(self.nz, self.lz, torch.tensor(-self.c_unit * max(-20.0, min(20.0, d)), device=dev), self.indmin, dev)
         phi = self.cv + self.gd.ifft_real(self.gd.l0_inv_op(self.gd.fft(-self.V * rho))) + saw[None, None, :]
         return phi, d
 
@@ -311,7 +315,7 @@ for kpair in PAIRS:
             # model inputs
             cv_M = resample_fourier(cv_ml, shape)
             s_i_M, s_d_M, _ = tp.create_cavity_torch(resample_tri(ne_ml, shape), gd, params); s_d_M = torch.clamp(s_d_M, 0.0, 1.0); s_i_M = torch.clamp(s_i_M, 0.0, 1.0)
-            p_sol_M = float(kw["val_ion_dipole_z"])
+            p_sol_M = -float(kw["val_ion_dipole_z"])          # solver sign -> physics sign
             fr["inputs"] = dict(p_sol_dft_label=p_sol_D, p_sol_model_solver=p_sol_M, solver_c_unit=float(kw["c_unit"]), solver_center_z=float(kw["center_z"]),
                                 cv_model_minus_dft_lateral_rms=float(((cv_M - cv_M.mean((0, 1))[None, None, :]) - (cv_D - cv_D.mean((0, 1))[None, None, :])).pow(2).mean().sqrt()),
                                 s_diel_L1_model_vs_dft=float((s_d_M - s_d_D).abs().sum() / s_d_D.sum()), s_ion_L1_model_vs_dft=float((s_i_M - s_i_D).abs().sum() / s_i_D.sum()))
